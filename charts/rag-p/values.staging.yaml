@@ -1,0 +1,78 @@
+# Staging overrides for Hetzner k3s (2x CX22)
+global:
+  imageRegistry: "ghcr.io/lekot"
+  storageClass: "local-path"
+
+api:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  ingress:
+    enabled: true
+    className: traefik
+    host: api.staging.rag-p.io
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+
+web:
+  replicas: 2
+  ingress:
+    enabled: true
+    className: traefik
+    host: staging.rag-p.io
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+  env:
+    NEXT_PUBLIC_API_URL: "https://api.staging.rag-p.io"
+
+worker:
+  replicas: 2
+
+postgres:
+  cnpg:
+    instances: 2
+    storage:
+      size: 20Gi
+
+redis:
+  auth:
+    enabled: true
+    existingSecret: "redis-secret"
+  replica:
+    replicaCount: 1
+
+langfuse:
+  ingress:
+    enabled: true
+    className: traefik
+    host: langfuse.staging.rag-p.io
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+
+minio:
+  auth:
+    existingSecret: "minio-secret"
+
+litellm:
+  env:
+    LITELLM_MASTER_KEY: ""
+
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+
+networkPolicy:
+  enabled: true
+
+observability:
+  enabled: false

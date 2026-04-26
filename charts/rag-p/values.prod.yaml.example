@@ -1,0 +1,83 @@
+# Production values template for Hetzner k3s (3x CX32)
+# TODO: Replace all "changeme" and empty strings with real secrets via external-secrets or sealed-secrets
+global:
+  imageRegistry: "ghcr.io/lekot"
+  storageClass: "local-path"
+
+api:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+  ingress:
+    enabled: true
+    className: traefik
+    host: api.rag-p.io  # TODO: set real domain
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+
+web:
+  replicas: 2
+  ingress:
+    enabled: true
+    className: traefik
+    host: rag-p.io  # TODO: set real domain
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+  env:
+    NEXT_PUBLIC_API_URL: "https://api.rag-p.io"  # TODO: set real domain
+
+worker:
+  replicas: 3
+
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      size: 100Gi
+
+redis:
+  auth:
+    enabled: true
+    existingSecret: "redis-secret"  # TODO: create via external-secrets
+  replica:
+    replicaCount: 2
+
+langfuse:
+  ingress:
+    enabled: true
+    className: traefik
+    host: langfuse.rag-p.io  # TODO: set real domain
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+
+minio:
+  auth:
+    existingSecret: "minio-secret"  # TODO: create via external-secrets
+
+litellm:
+  env:
+    LITELLM_MASTER_KEY: ""  # TODO: set via external-secrets
+
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+
+networkPolicy:
+  enabled: true
+
+observability:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+  loki:
+    enabled: true

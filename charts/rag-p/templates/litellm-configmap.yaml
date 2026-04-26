@@ -1,0 +1,19 @@
+{{- if .Values.litellm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rag-p.fullname" . }}-litellm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "litellm") | nindent 4 }}
+data:
+  config.yaml: |
+    model_list:
+    {{- if .Values.litellm.config.model_list }}
+    {{- range .Values.litellm.config.model_list }}
+      - {{ toYaml . | nindent 8 | trim }}
+    {{- end }}
+    {{- else }}
+    []
+    {{- end }}
+{{- end }}

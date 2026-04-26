@@ -1,0 +1,15 @@
+{{- if .Values.langfuse.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rag-p.fullname" . }}-langfuse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "langfuse") | nindent 4 }}
+data:
+  TELEMETRY_ENABLED: {{ .Values.langfuse.env.TELEMETRY_ENABLED | quote }}
+  NEXT_PUBLIC_SIGN_UP_DISABLED: {{ .Values.langfuse.env.NEXT_PUBLIC_SIGN_UP_DISABLED | quote }}
+  {{- if .Values.postgres.enabled }}
+  DATABASE_URL: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "rag-p.fullname" . }}-postgres-rw:5432/{{ .Values.postgres.cnpg.databaseName }}"
+  {{- end }}
+{{- end }}

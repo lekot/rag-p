@@ -1,0 +1,24 @@
+apiVersion: v2
+name: rag-p
+description: RAG Platform - Pipeline-as-a-Service for documents
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: redis
+    version: "19.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: minio
+    version: "14.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: minio.enabled
+  - name: kube-prometheus-stack
+    version: "58.x.x"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: observability.prometheus.enabled
+  - name: loki-stack
+    version: "2.x.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: observability.loki.enabled

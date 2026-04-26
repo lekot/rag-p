@@ -1,0 +1,67 @@
+{{- if .Values.permify.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rag-p.fullname" . }}-permify
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "permify") | nindent 4 }}
+spec:
+  replicas: {{ .Values.permify.replicas }}
+  selector:
+    matchLabels:
+      {{- include "rag-p.componentSelectorLabels" (dict "root" . "component" "permify") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rag-p.componentLabels" (dict "root" . "component" "permify") | nindent 8 }}
+    spec:
+      containers:
+        - name: permify
+          image: {{ printf "%s:%s" .Values.permify.image.repository .Values.permify.image.tag }}
+          imagePullPolicy: {{ .Values.permify.image.pullPolicy }}
+          args:
+            - serve
+          ports:
+            - name: http
+              containerPort: {{ .Values.permify.service.port }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.permify.service.grpcPort }}
+              protocol: TCP
+          env:
+            {{- if .Values.postgres.enabled }}
+            - name: PERMIFY_DATABASE_URI
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "rag-p.fullname" . }}-postgres-rw:5432/{{ .Values.postgres.cnpg.databaseName }}?sslmode=disable"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.cnpg.secretName }}
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.cnpg.secretName }}
+                  key: password
+            {{- end }}
+            {{- range $key, $value := .Values.permify.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.permify.resources | nindent 12 }}
+{{- end }}

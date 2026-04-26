@@ -1,0 +1,215 @@
+# Global settings
+global:
+  imageRegistry: "ghcr.io/lekot"
+  storageClass: ""
+
+# API service (FastAPI)
+api:
+  image:
+    repository: rag-p-api
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  service:
+    port: 8000
+  ingress:
+    enabled: true
+    className: traefik
+    host: api.rag-p.local
+    tls: false
+    annotations: {}
+  env:
+    LOG_LEVEL: info
+    DATABASE_URL: ""
+    REDIS_URL: ""
+    MINIO_ENDPOINT: ""
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+
+# Web frontend (Next.js)
+web:
+  image:
+    repository: rag-p-web
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    port: 3000
+  ingress:
+    enabled: true
+    className: traefik
+    host: rag-p.local
+    tls: false
+    annotations: {}
+  env:
+    NEXT_PUBLIC_API_URL: "http://api.rag-p.local"
+
+# Background worker (same image as api)
+worker:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  env: {}
+
+# PostgreSQL via CloudNativePG operator (cluster-wide operator required)
+postgres:
+  enabled: true
+  cnpg:
+    instances: 1
+    storage:
+      size: 10Gi
+      storageClass: ""
+    extensions:
+      - vector
+      - pg_trgm
+    databaseName: ragp
+    ownerName: ragp
+    secretName: postgres-app-secret
+
+# Redis via Bitnami chart
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: ""
+    password: "changeme"
+  master:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  replica:
+    replicaCount: 0
+
+# Langfuse LLM observability
+langfuse:
+  enabled: true
+  host: langfuse.rag-p.local
+  image:
+    repository: ghcr.io/langfuse/langfuse
+    tag: "2"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    className: traefik
+    tls: false
+    annotations: {}
+  env:
+    NEXTAUTH_SECRET: "changeme-in-prod"
+    SALT: "changeme-in-prod"
+    TELEMETRY_ENABLED: "false"
+    NEXT_PUBLIC_SIGN_UP_DISABLED: "false"
+
+# Permify authorization service (cluster-wide operator; ClusterIP only)
+permify:
+  enabled: true
+  internal: true
+  image:
+    repository: ghcr.io/permify/permify
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    port: 3476
+    grpcPort: 3478
+  env: {}
+
+# MinIO object storage via Bitnami chart
+minio:
+  enabled: true
+  auth:
+    rootUser: minio
+    rootPassword: "changeme"
+  defaultBuckets: "documents,processed"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# LiteLLM proxy (optional)
+litellm:
+  enabled: true
+  image:
+    repository: ghcr.io/berriai/litellm
+    tag: "main-stable"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    port: 4000
+  config:
+    model_list: []
+  env:
+    LITELLM_MASTER_KEY: "changeme"
+
+# External Secrets Operator integration (cluster-wide operator required)
+externalSecrets:
+  enabled: false
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+
+# NetworkPolicy (default deny + per-service allow)
+networkPolicy:
+  enabled: false
+
+# Observability stack (prod only)
+observability:
+  enabled: false
+  prometheus:
+    enabled: false
+  grafana:
+    enabled: false
+  loki:
+    enabled: false

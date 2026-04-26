@@ -1,0 +1,34 @@
+{{- if and .Values.langfuse.enabled .Values.langfuse.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rag-p.fullname" . }}-langfuse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "langfuse") | nindent 4 }}
+  {{- with .Values.langfuse.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.langfuse.ingress.className }}
+  ingressClassName: {{ .Values.langfuse.ingress.className }}
+  {{- end }}
+  {{- if .Values.langfuse.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.langfuse.host }}
+      secretName: {{ include "rag-p.fullname" . }}-langfuse-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.langfuse.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rag-p.fullname" . }}-langfuse
+                port:
+                  number: 3000
+{{- end }}

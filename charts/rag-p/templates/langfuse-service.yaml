@@ -1,0 +1,18 @@
+{{- if .Values.langfuse.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rag-p.fullname" . }}-langfuse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "langfuse") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "rag-p.componentSelectorLabels" (dict "root" . "component" "langfuse") | nindent 4 }}
+{{- end }}

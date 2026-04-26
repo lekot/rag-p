@@ -1,0 +1,64 @@
+load('ext://helm_resource', 'helm_resource', 'helm_repo')
+
+# Build API image with live_update
+docker_build(
+    'rag-p-api',
+    './apps/api',
+    live_update=[
+        sync('./apps/api/src', '/app/src'),
+        run('pip install -r requirements.txt', trigger=['./apps/api/requirements.txt']),
+        restart_container(),
+    ],
+)
+
+# Build Web image with live_update
+docker_build(
+    'rag-p-web',
+    './apps/web',
+    live_update=[
+        sync('./apps/web/src', '/app/src'),
+        sync('./apps/web/public', '/app/public'),
+    ],
+)
+
+# Ensure Helm dependencies are up to date before deploying
+local_resource(
+    'helm-deps',
+    cmd='helm dep update charts/rag-p',
+    deps=['charts/rag-p/Chart.yaml'],
+    labels=['infra'],
+)
+
+# Deploy the chart
+helm_resource(
+    'rag-p',
+    './charts/rag-p',
+    flags=[
+        '-f', 'charts/rag-p/values.dev.yaml',
+        '--namespace', 'rag-p',
+        '--create-namespace',
+    ],
+    resource_deps=['helm-deps'],
+    labels=['platform'],
+)
+
+# Port forwards
+k8s_resource(
+    'rag-p-api',
+    new_name='api',
+    port_forwards=[
+        port_forward(8000, 8000, name='api-http'),
+    ],
+    labels=['api'],
+    resource_deps=['rag-p'],
+)
+
+k8s_resource(
+    'rag-p-web',
+    new_name='web',
+    port_forwards=[
+        port_forward(3000, 3000, name='web-http'),
+    ],
+    labels=['web'],
+    resource_deps=['rag-p'],
+)

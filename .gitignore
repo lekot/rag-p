@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+.pnpm-store/
+*.tsbuildinfo
+.vercel/
+out/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Helm / k8s
+charts/*/charts/
+charts/*/Chart.lock
+*.tgz
+
+# Tilt
+tilt_modules/
+
+# Logs
+*.log
+logs/
+
+# Local infra state
+.kube/
+kubeconfig
+kind-config.local.yaml
+
+# Misc
+*.swp
+*.bak
+*~

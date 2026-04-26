@@ -1,0 +1,125 @@
+# Dev overrides for kind cluster
+global:
+  imageRegistry: ""
+  storageClass: "standard"
+
+api:
+  image:
+    repository: rag-p-api
+    pullPolicy: Always
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    className: nginx
+    host: api.localhost
+    tls: false
+  autoscaling:
+    enabled: false
+
+web:
+  image:
+    repository: rag-p-web
+    pullPolicy: Always
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    className: nginx
+    host: localhost
+    tls: false
+  env:
+    NEXT_PUBLIC_API_URL: "http://api.localhost"
+
+worker:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+postgres:
+  cnpg:
+    instances: 1
+    storage:
+      size: 2Gi
+
+redis:
+  auth:
+    enabled: false
+  replica:
+    replicaCount: 0
+
+langfuse:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    className: nginx
+    host: langfuse.localhost
+    tls: false
+
+permify:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+minio:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+litellm:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+externalSecrets:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+observability:
+  enabled: false
+  prometheus:
+    enabled: false
+  grafana:
+    enabled: false
+  loki:
+    enabled: false

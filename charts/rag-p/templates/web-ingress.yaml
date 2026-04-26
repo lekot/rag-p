@@ -1,0 +1,34 @@
+{{- if .Values.web.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rag-p.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "web") | nindent 4 }}
+  {{- with .Values.web.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.web.ingress.className }}
+  ingressClassName: {{ .Values.web.ingress.className }}
+  {{- end }}
+  {{- if .Values.web.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.web.ingress.host }}
+      secretName: {{ include "rag-p.fullname" . }}-web-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.web.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rag-p.fullname" . }}-web
+                port:
+                  number: {{ .Values.web.service.port }}
+{{- end }}

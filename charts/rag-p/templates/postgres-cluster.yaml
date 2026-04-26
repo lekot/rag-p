@@ -1,0 +1,32 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "rag-p.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.cnpg.instances }}
+
+  postgresql:
+    shared_preload_libraries:
+      - vectors.so
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.cnpg.databaseName }}
+      owner: {{ .Values.postgres.cnpg.ownerName }}
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+  storage:
+    size: {{ .Values.postgres.cnpg.storage.size }}
+    {{- if or .Values.postgres.cnpg.storage.storageClass .Values.global.storageClass }}
+    storageClass: {{ .Values.postgres.cnpg.storage.storageClass | default .Values.global.storageClass }}
+    {{- end }}
+{{- end }}
