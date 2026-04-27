@@ -31,6 +31,8 @@ const ACCEPTED_EXTENSIONS = [
   ".rst",
   ".org",
   ".log",
+  ".pdf",
+  ".docx",
 ];
 
 interface UploadDocumentDialogProps {
@@ -117,8 +119,8 @@ export function UploadDocumentDialog({
 
   const orgId =
     typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_ORG_ID ?? "org_dev_mock")
-      : "org_dev_mock";
+      ? (process.env.NEXT_PUBLIC_ORG_ID ?? "00000000-0000-0000-0000-000000000001")
+      : "00000000-0000-0000-0000-000000000001";
 
   const handleSubmit = async () => {
     if (!file) {
@@ -196,7 +198,7 @@ export function UploadDocumentDialog({
 
           {/* Drag-and-drop area */}
           <div>
-            <Label>File (.txt, .md, .json, .csv, .yaml, .xml, .html, …, max 10 MB)</Label>
+            <Label>File (.txt, .md, .json, .csv, .yaml, .xml, .html, .pdf, .docx, …, max 10 MB)</Label>
             <div
               data-testid="drop-zone"
               className={`mt-1 border-2 border-dashed rounded-md p-6 text-center cursor-pointer transition-colors ${

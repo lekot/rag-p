@@ -10,6 +10,6 @@ export function createContext(req: NextRequest): Context {
   const organization_id =
     req.headers.get("x-organization-id") ??
     process.env.NEXT_PUBLIC_ORG_ID ??
-    "org_dev_mock";
+    "00000000-0000-0000-0000-000000000001";
   return { organization_id };
 }
