@@ -125,6 +125,7 @@ class Dataset(Base):
 
     organization: Mapped["Organization"] = relationship(back_populates="datasets")
     items: Mapped[list["DatasetItem"]] = relationship(back_populates="dataset")
+    golden_items: Mapped[list["DatasetGoldenItem"]] = relationship(back_populates="dataset")
 
 
 class DatasetItem(Base):
@@ -209,6 +210,21 @@ class Experiment(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     leaderboard_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DatasetGoldenItem(Base):
+    __tablename__ = "dataset_golden_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    dataset_id: Mapped[str] = mapped_column(String(36), ForeignKey("datasets.id"), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    source_chunk_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    dataset: Mapped["Dataset"] = relationship(back_populates="golden_items")
 
 
 class ApiKey(Base):

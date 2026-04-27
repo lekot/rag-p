@@ -23,9 +23,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
-import type { Chunk, SearchChunk } from "@/server/routers/datasets";
+import type { Chunk, GoldenItem, SearchChunk } from "@/server/routers/datasets";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   ready: "default",
@@ -310,6 +317,145 @@ function AskSection({ datasetId }: { datasetId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Golden Q&A section
+// ---------------------------------------------------------------------------
+
+function GoldenQASection({ datasetId }: { datasetId: string }) {
+  const [open, setOpen] = useState(false);
+  const [sampleSize, setSampleSize] = useState(10);
+  const [expanded, setExpanded] = useState(false);
+
+  const utils = trpc.useUtils();
+
+  const { data: goldenItems, isLoading: goldenLoading } =
+    trpc.datasets.golden.list.useQuery({ datasetId });
+
+  const generateMutation = trpc.datasets.generateGolden.useMutation({
+    onSuccess: () => {
+      setOpen(false);
+      void utils.datasets.golden.list.invalidate({ datasetId });
+    },
+  });
+
+  const count = goldenItems?.length ?? 0;
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generate Golden Q&amp;A</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Sample size (5–50 chunks)
+              </label>
+              <Input
+                type="number"
+                min={5}
+                max={50}
+                value={sampleSize}
+                onChange={(e) =>
+                  setSampleSize(
+                    Math.max(5, Math.min(50, parseInt(e.target.value, 10) || 10))
+                  )
+                }
+                className="w-24"
+              />
+              <p className="text-xs text-muted-foreground">
+                DeepSeek will generate one Q&amp;A pair per sampled chunk.
+              </p>
+            </div>
+            {generateMutation.isError && (
+              <p className="text-sm text-destructive">
+                {generateMutation.error.message}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                generateMutation.mutate({ datasetId, sample_size: sampleSize })
+              }
+              disabled={generateMutation.isPending}
+            >
+              {generateMutation.isPending ? "Generating…" : "Generate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <button
+              className="text-left"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <CardTitle>
+                Golden Q&amp;A{" "}
+                {!goldenLoading && (
+                  <span className="text-muted-foreground font-normal text-base">
+                    ({count} items)
+                  </span>
+                )}
+              </CardTitle>
+            </button>
+            <Button size="sm" onClick={() => setOpen(true)}>
+              Generate Golden Q&amp;A
+            </Button>
+          </div>
+        </CardHeader>
+        {expanded && (
+          <CardContent>
+            {goldenLoading && (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            )}
+            {!goldenLoading && count === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No golden Q&amp;A yet. Click &ldquo;Generate&rdquo; to create pairs from your chunks.
+              </p>
+            )}
+            {!goldenLoading && count > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Question</TableHead>
+                    <TableHead>Answer</TableHead>
+                    <TableHead>Linked chunk</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {goldenItems?.map((item: GoldenItem) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="text-sm max-w-[280px]">
+                        {item.question}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[280px]">
+                        {item.answer}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {item.source_chunk_id
+                          ? item.source_chunk_id.slice(0, 8) + "…"
+                          : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        )}
+      </Card>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Document table
 // ---------------------------------------------------------------------------
 
@@ -415,6 +561,8 @@ export default function DatasetDetailPage() {
       <SearchSection datasetId={params.id} />
 
       <AskSection datasetId={params.id} />
+
+      <GoldenQASection datasetId={params.id} />
 
       <Card>
         <CardHeader>

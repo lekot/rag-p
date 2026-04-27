@@ -60,6 +60,21 @@ const AskResultSchema = z.object({
 
 export type AskResult = z.infer<typeof AskResultSchema>;
 
+const GoldenItemSchema = z.object({
+  id: z.string(),
+  question: z.string(),
+  answer: z.string(),
+  source_chunk_id: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+
+export type GoldenItem = z.infer<typeof GoldenItemSchema>;
+
+const GenerateGoldenResultSchema = z.object({
+  items: z.array(GoldenItemSchema),
+  count: z.number(),
+});
+
 const DocumentDetailSchema = z.object({
   id: z.string(),
   source_uri: z.string(),
@@ -162,6 +177,32 @@ export const datasetsRouter = router({
       .query(async ({ input }) => {
         return apiClient.get<DocumentDetail>(
           `/api/v1/datasets/${input.datasetId}/documents/${input.docId}`
+        );
+      }),
+  }),
+
+  generateGolden: protectedProcedure
+    .input(
+      z.object({
+        datasetId: z.string(),
+        sample_size: z.number().int().min(1).max(50).default(10),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.post<z.infer<typeof GenerateGoldenResultSchema>>(
+        `/api/v1/datasets/${input.datasetId}/golden`,
+        { sample_size: input.sample_size },
+        { "x-organization-id": ctx.organization_id }
+      );
+    }),
+
+  golden: router({
+    list: protectedProcedure
+      .input(z.object({ datasetId: z.string() }))
+      .query(async ({ input, ctx }) => {
+        return apiClient.get<GoldenItem[]>(
+          `/api/v1/datasets/${input.datasetId}/golden`,
+          { "x-organization-id": ctx.organization_id }
         );
       }),
   }),

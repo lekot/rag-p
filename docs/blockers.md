@@ -23,12 +23,11 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] Self-test метрика — прокси без golden Q&A
+## ~~[BLOCKED-NIGHT-RUN] Self-test метрика — прокси без golden Q&A~~ RESOLVED (Phase 5)
 
-- **Where**: `apps/api/src/ragp_api/services/experiment_runner.py::_self_test_metric`
-- **Why blocked**: Настоящая оценка RAG-качества требует либо golden Q&A от пользователя, либо LLM-as-judge (исключён по заданию — стоимость), либо DeepSeek-генерации (Phase 5 — не реализована).
-- **Workaround applied**: Hit-rate heuristic: берём до 5 чанков из датасета, запрашиваем их текст в retriever, проверяем попадание в top-3. `composite_score = hit_rate`.
-- **Decision needed**: Реализовать Phase 5 (DeepSeek golden Q&A генерация) для реальных метрик. Комбо без retriever получает нейтральный score 0.5.
+- **Where**: `apps/api/src/ragp_api/services/experiment_runner.py`
+- **Resolved**: Phase 5 реализована. `POST /datasets/{id}/golden` генерирует golden Q&A через DeepSeek по чанкам. Когда golden items есть — experiment runner использует `retrieval_hit` + `answer_similarity` вместо self-test heuristic.
+- **Fallback**: Self-test hit-rate остаётся как запасной вариант когда golden items отсутствуют.
 
 ---
 

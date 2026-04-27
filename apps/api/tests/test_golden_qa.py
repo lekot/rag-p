@@ -1,0 +1,320 @@
+"""Tests for golden Q&A generation, storage, and experiment evaluation."""
+
+import io
+import json
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
+from ragp_api.services.golden_qa_generator import generate_golden_qa
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_PATCH_ACOMPLETION = "ragp_api.services.golden_qa_generator.litellm.acompletion"
+
+
+async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "GoldenDS") -> str:
+    resp = await client.post(
+        "/api/v1/datasets",
+        json={"name": name, "organization_id": organization_id},
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+async def _upload_document(
+    client: AsyncClient,
+    dataset_id: str,
+    organization_id: str,
+    content: str = "Chunk text alpha. " * 40,
+) -> str:
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("doc.txt", io.BytesIO(content.encode()), "text/plain")},
+        data={"chunker_name": "recursive-character", "chunker_params": "{}"},
+    )
+    assert resp.status_code == 201
+    return resp.json()["document_id"]
+
+
+def _mock_litellm_response(
+    question: str = "What is this?", answer: str = "It is alpha."
+) -> MagicMock:
+    """Build a mock litellm response that returns a valid JSON Q&A."""
+    content = json.dumps({"question": question, "answer": answer})
+    msg = MagicMock()
+    msg.content = content
+    choice = MagicMock()
+    choice.message = msg
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Service unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_golden_qa_creates_items(db_session: AsyncSession, organization_id: str):
+    """generate_golden_qa returns Q&A pairs for each sampled chunk (mocked LLM)."""
+    # Seed dataset, document, 3 chunks directly in DB
+    ds_id = str(uuid.uuid4())
+    from ragp_api.db.models import Dataset
+
+    ds = Dataset(id=ds_id, organization_id=organization_id, name="test-gs", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        dataset_id=ds_id,
+        source_uri="upload://test.txt",
+        status="parsed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    chunks = [
+        Chunk(
+            id=str(uuid.uuid4()),
+            document_id=doc.id,
+            organization_id=organization_id,
+            text=f"Chunk number {i}. " * 20,
+        )
+        for i in range(3)
+    ]
+    db_session.add_all(chunks)
+    await db_session.commit()
+
+    mock_resp = _mock_litellm_response()
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+        pairs = await generate_golden_qa(
+            dataset_id=ds_id,
+            organization_id=organization_id,
+            db=db_session,
+            sample_size=3,
+        )
+
+    assert len(pairs) == 3
+    for pair in pairs:
+        assert "question" in pair
+        assert "answer" in pair
+        assert "source_chunk_id" in pair
+        assert pair["question"] == "What is this?"
+        assert pair["answer"] == "It is alpha."
+
+
+@pytest.mark.asyncio
+async def test_generate_golden_qa_handles_invalid_json(
+    db_session: AsyncSession, organization_id: str
+):
+    """When LLM returns invalid JSON, the chunk is skipped and no exception raised."""
+    from ragp_api.db.models import Dataset
+
+    ds_id = str(uuid.uuid4())
+    ds = Dataset(id=ds_id, organization_id=organization_id, name="test-invalid", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        dataset_id=ds_id,
+        source_uri="upload://bad.txt",
+        status="parsed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    chunk = Chunk(
+        id=str(uuid.uuid4()),
+        document_id=doc.id,
+        organization_id=organization_id,
+        text="Some text here. " * 20,
+    )
+    db_session.add(chunk)
+    await db_session.commit()
+
+    bad_msg = MagicMock()
+    bad_msg.content = "NOT VALID JSON AT ALL"
+    bad_choice = MagicMock()
+    bad_choice.message = bad_msg
+    bad_resp = MagicMock()
+    bad_resp.choices = [bad_choice]
+
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=bad_resp)):
+        pairs = await generate_golden_qa(
+            dataset_id=ds_id,
+            organization_id=organization_id,
+            db=db_session,
+            sample_size=5,
+        )
+
+    # Chunk was skipped — empty result, no exception
+    assert pairs == []
+
+
+# ---------------------------------------------------------------------------
+# HTTP endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_golden_returns_items(client: AsyncClient, organization_id: str):
+    """POST /datasets/{id}/golden then GET returns the saved items."""
+    dataset_id = await _create_dataset(client, organization_id)
+    await _upload_document(client, dataset_id, organization_id)
+
+    mock_resp = _mock_litellm_response("What is alpha?", "Alpha is text.")
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+        post_resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 5},
+        )
+
+    assert post_resp.status_code == 201
+    post_data = post_resp.json()
+    assert "items" in post_data
+    assert "count" in post_data
+    assert post_data["count"] >= 0  # might be 0 if upload produced no chunks
+    # If items were created, validate shape
+    for item in post_data["items"]:
+        assert "id" in item
+        assert "question" in item
+        assert "answer" in item
+        assert "source_chunk_id" in item
+        assert "created_at" in item
+
+    # GET should return same items
+    get_resp = await client.get(
+        f"/api/v1/datasets/{dataset_id}/golden",
+        headers={"X-Organization-Id": organization_id},
+    )
+    assert get_resp.status_code == 200
+    get_data = get_resp.json()
+    assert len(get_data) == post_data["count"]
+
+
+@pytest.mark.asyncio
+async def test_golden_post_enforces_ownership(client: AsyncClient, organization_id: str):
+    """POST golden for a dataset that belongs to another org returns 404."""
+    dataset_id = await _create_dataset(client, organization_id)
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/golden",
+        headers={"X-Organization-Id": "wrong-org"},
+        json={"sample_size": 5},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_golden_sample_size_capped_at_50(client: AsyncClient, organization_id: str):
+    """sample_size > 50 is silently capped to 50 (no error)."""
+    dataset_id = await _create_dataset(client, organization_id)
+
+    mock_resp = _mock_litellm_response()
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 9999},
+        )
+    # Should not 422 — just caps to 50 and returns (0 items since no documents)
+    assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Experiment runner — golden path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_experiment_uses_golden_when_present(db_session: AsyncSession, organization_id: str):
+    """When golden items exist, experiment runner returns retrieval_hit metric."""
+    from ragp_api.db.models import Dataset, Experiment
+    from ragp_api.services.experiment_runner import run_experiment_inline
+
+    ds_id = str(uuid.uuid4())
+    ds = Dataset(id=ds_id, organization_id=organization_id, name="golden-exp-ds", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        dataset_id=ds_id,
+        source_uri="upload://exp.txt",
+        status="parsed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    chunk_id = str(uuid.uuid4())
+    chunk = Chunk(
+        id=chunk_id,
+        document_id=doc.id,
+        organization_id=organization_id,
+        text="The capital of France is Paris.",
+    )
+    db_session.add(chunk)
+
+    golden = DatasetGoldenItem(
+        id=str(uuid.uuid4()),
+        dataset_id=ds_id,
+        question="What is the capital of France?",
+        answer="Paris",
+        source_chunk_id=chunk_id,
+    )
+    db_session.add(golden)
+    await db_session.flush()
+
+    experiment = Experiment(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        name="golden-test-exp",
+        dataset_id=ds_id,
+        plugin_grid_json={
+            "retrievers": [
+                {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}
+            ]
+        },
+        status="pending",
+    )
+    db_session.add(experiment)
+    await db_session.commit()
+
+    # Mock retriever to return the chunk so hit_rate = 1.0
+    mock_retriever_instance = MagicMock()
+    retrieved = [
+        {
+            "id": chunk_id,
+            "text": "Paris",
+            "score": 0.9,
+            "metadata": {},
+            "document_id": doc.id,
+            "document_name": "exp.txt",
+        }
+    ]
+    mock_retriever_instance.retrieve = AsyncMock(return_value=retrieved)
+    mock_retriever_cls = MagicMock(return_value=mock_retriever_instance)
+
+    with patch("ragp_api.plugins.registry.get_plugin", return_value=mock_retriever_cls):
+        await run_experiment_inline(experiment, db_session)
+
+    assert experiment.status == "completed"
+    assert experiment.leaderboard_json is not None
+    assert len(experiment.leaderboard_json) == 1
+
+    entry = experiment.leaderboard_json[0]
+    metrics = entry["metrics"]
+    # With golden path, metric key is retrieval_hit (not hit_rate)
+    assert "retrieval_hit" in metrics
+    # Hit should be 1.0 since mock returned chunk_id
+    assert metrics["retrieval_hit"] == 1.0
+    assert metrics["composite_score"] == 1.0

@@ -10,11 +10,19 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, Dataset, Document, Pipeline, PipelineVersion
+from ragp_api.db.models import (
+    Chunk,
+    Dataset,
+    DatasetGoldenItem,
+    Document,
+    Pipeline,
+    PipelineVersion,
+)
 from ragp_api.deps import get_db, get_organization_id
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.file_parsers import parse_to_text
+from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -136,6 +144,95 @@ async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) 
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
     return {"status": "accepted", "dataset_id": dataset_id, "message": "RAGAS generation queued"}
+
+
+# ---------------------------------------------------------------------------
+# Golden Q&A generation & listing
+# ---------------------------------------------------------------------------
+
+
+class GenerateGoldenIn(BaseModel):
+    sample_size: int = 10
+
+
+class GoldenItemOut(BaseModel):
+    id: str
+    question: str
+    answer: str
+    source_chunk_id: str | None
+    created_at: str
+
+
+class GenerateGoldenOut(BaseModel):
+    items: list[GoldenItemOut]
+    count: int
+
+
+@router.post("/{dataset_id}/golden", status_code=201, response_model=GenerateGoldenOut)
+async def generate_golden(
+    dataset_id: str,
+    body: GenerateGoldenIn,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> GenerateGoldenOut:
+    """Generate golden Q&A pairs for a dataset using DeepSeek."""
+    ds_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    if ds_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    sample_size = max(1, min(body.sample_size, 50))
+    pairs = await generate_golden_qa(
+        dataset_id=dataset_id,
+        organization_id=organization_id,
+        db=db,
+        sample_size=sample_size,
+    )
+    db_items = await save_golden_items(dataset_id=dataset_id, pairs=pairs, db=db)
+
+    out_items = [
+        GoldenItemOut(
+            id=item.id,
+            question=item.question,
+            answer=item.answer,
+            source_chunk_id=item.source_chunk_id,
+            created_at=item.created_at.isoformat(),
+        )
+        for item in db_items
+    ]
+    return GenerateGoldenOut(items=out_items, count=len(out_items))
+
+
+@router.get("/{dataset_id}/golden", response_model=list[GoldenItemOut])
+async def list_golden(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> list[GoldenItemOut]:
+    """List all golden Q&A items for a dataset."""
+    ds_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    if ds_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    items_result = await db.execute(
+        select(DatasetGoldenItem)
+        .where(DatasetGoldenItem.dataset_id == dataset_id)
+        .order_by(DatasetGoldenItem.created_at)
+    )
+    items = items_result.scalars().all()
+    return [
+        GoldenItemOut(
+            id=item.id,
+            question=item.question,
+            answer=item.answer,
+            source_chunk_id=item.source_chunk_id,
+            created_at=item.created_at.isoformat(),
+        )
+        for item in items
+    ]
 
 
 # ---------------------------------------------------------------------------

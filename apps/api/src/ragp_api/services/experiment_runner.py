@@ -2,12 +2,13 @@
 
 import itertools
 import logging
+import math
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, Document, Experiment
+from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Experiment
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,125 @@ async def _load_dataset_chunks(
         }
         for c in chunks
     ]
+
+
+async def _load_golden_items(
+    db: AsyncSession,
+    dataset_id: str,
+) -> list[DatasetGoldenItem]:
+    """Load all golden Q&A items for a dataset."""
+    result = await db.execute(
+        select(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
+    )
+    return list(result.scalars().all())
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+async def _golden_metrics(
+    nodes: list[dict[str, Any]],
+    golden_items: list[DatasetGoldenItem],
+    organization_id: str,
+    dataset_id: str,
+    db: AsyncSession,
+) -> dict[str, float]:
+    """
+    Evaluate a pipeline combo against golden Q&A pairs.
+
+    Metrics (no LLM-as-judge):
+    - retrieval_hit: 1.0 if source_chunk_id in top-k retrieved chunks; 0.0 otherwise.
+    - answer_similarity: cosine similarity embed(generated_answer) vs embed(expected_answer)
+      (only when generator node present).
+    - composite_score = 0.5*avg_hit + 0.5*avg_similarity  (or avg_hit when no generator).
+    """
+    from typing import cast
+
+    from ragp_api.plugins.base import Embedder, Generator, Retriever
+    from ragp_api.plugins.registry import get_plugin
+
+    retriever_node = next((n for n in nodes if n["plugin_kind"] == "retriever"), None)
+    generator_node = next((n for n in nodes if n["plugin_kind"] == "generator"), None)
+    embedder_node = next((n for n in nodes if n["plugin_kind"] == "embedder"), None)
+
+    if retriever_node is None:
+        return {"retrieval_hit": 0.5, "answer_similarity": 0.5, "composite_score": 0.5}
+
+    retriever_cls = get_plugin("retriever", retriever_node["plugin_name"])
+    if retriever_cls is None:
+        return {"retrieval_hit": 0.5, "answer_similarity": 0.5, "composite_score": 0.5}
+
+    retriever_params = dict(retriever_node.get("params", {}))
+    retriever_params["session"] = db
+
+    # Build embedder if available (for answer_similarity)
+    embedder: Embedder | None = None
+    if embedder_node is not None:
+        embedder_cls = get_plugin("embedder", embedder_node["plugin_name"])
+        if embedder_cls is not None:
+            embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
+
+    # Build generator if available
+    generator: Generator | None = None
+    if generator_node is not None:
+        generator_cls = get_plugin("generator", generator_node["plugin_name"])
+        if generator_cls is not None:
+            generator = cast(Generator, generator_cls(dict(generator_node.get("params", {}))))
+
+    hit_scores: list[float] = []
+    sim_scores: list[float] = []
+
+    for item in golden_items:
+        query = item.question
+
+        # Retrieve
+        try:
+            retriever = cast(Retriever, retriever_cls(retriever_params))
+            results = await retriever.retrieve(
+                query=query,
+                top_k=5,
+                organization_id=organization_id,
+                dataset_id=dataset_id,
+            )
+        except Exception as exc:
+            logger.debug("Retriever failed for golden item %s: %s", item.id, exc)
+            hit_scores.append(0.5)
+            continue
+
+        # Retrieval hit
+        result_ids = [r["id"] for r in results]
+        hit = 1.0 if item.source_chunk_id and item.source_chunk_id in result_ids else 0.0
+        hit_scores.append(hit)
+
+        # Answer similarity — only when both generator and embedder are available
+        if generator is not None and embedder is not None:
+            try:
+                gen_result = await generator.generate(query=query, contexts=results)
+                generated_answer = gen_result.get("answer", "")
+                vecs = await embedder.embed([generated_answer, item.answer])
+                sim = _cosine_similarity(vecs[0], vecs[1])
+                sim_scores.append(sim)
+            except Exception as exc:
+                logger.debug("Answer similarity failed for golden item %s: %s", item.id, exc)
+
+    avg_hit = sum(hit_scores) / len(hit_scores) if hit_scores else 0.5
+    avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
+    composite = 0.5 * avg_hit + 0.5 * avg_sim if avg_sim is not None else avg_hit
+
+    metrics: dict[str, float] = {
+        "retrieval_hit": round(avg_hit, 4),
+        "composite_score": round(composite, 4),
+    }
+    if avg_sim is not None:
+        metrics["answer_similarity"] = round(avg_sim, 4)
+    return metrics
 
 
 async def _self_test_metric(
@@ -141,6 +261,9 @@ async def run_experiment_inline(
     """
     Run all combinations synchronously in-request.
     Updates experiment.status and experiment.leaderboard_json in-place.
+
+    If the dataset has golden Q&A items, uses retrieval_hit + answer_similarity metrics.
+    Otherwise falls back to self-test hit-rate heuristic.
     """
     try:
         experiment.status = "running"
@@ -150,13 +273,24 @@ async def run_experiment_inline(
         dataset_id: str = experiment.dataset_id
         organization_id: str = experiment.organization_id
 
-        # Load dataset chunks for self-test
-        chunks = await _load_dataset_chunks(db, dataset_id, organization_id)
+        # Check whether golden Q&A exists for this dataset
+        golden_items = await _load_golden_items(db, dataset_id)
+        use_golden = len(golden_items) > 0
+
+        # Load dataset chunks for self-test fallback (only needed when no golden)
+        chunks: list[dict[str, Any]] = []
+        if not use_golden:
+            chunks = await _load_dataset_chunks(db, dataset_id, organization_id)
 
         leaderboard = []
         for nodes in combinations:
             try:
-                metrics = await _self_test_metric(nodes, chunks, organization_id, db)
+                if use_golden:
+                    metrics = await _golden_metrics(
+                        nodes, golden_items, organization_id, dataset_id, db
+                    )
+                else:
+                    metrics = await _self_test_metric(nodes, chunks, organization_id, db)
             except Exception as exc:
                 logger.warning("Metrics computation failed for combo %s: %s", nodes, exc)
                 metrics = {"hit_rate": 0.0, "composite_score": 0.0}
