@@ -203,6 +203,8 @@ externalSecrets:
 # NetworkPolicy (default deny + per-service allow)
 networkPolicy:
   enabled: false
+  cilium:
+    enabled: false
 
 # Observability stack (prod only)
 observability:

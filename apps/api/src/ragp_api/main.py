@@ -42,5 +42,6 @@ app.include_router(routes_plugins.router, prefix=_v1_prefix)
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health() -> dict:
     return {"status": "ok"}

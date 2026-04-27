@@ -2,14 +2,15 @@
 # Single-instance pilot, no HA, http only via *.139-100-200-55.nip.io.
 
 global:
-  imageRegistry: "ghcr.io/lekot"
+  imageRegistry: ""
   storageClass: "fast.ru-3b"
   imagePullSecrets:
     - name: ghcr-pull
 
 api:
   image:
-    tag: "0.1.0"
+    registry: "ghcr.io/lekot"
+    tag: "0.1.1"
   replicas: 1
   resources:
     requests:
@@ -26,7 +27,8 @@ api:
 
 web:
   image:
-    tag: "0.1.0"
+    registry: "ghcr.io/lekot"
+    tag: "0.1.1"
   replicas: 1
   resources:
     requests:
@@ -44,20 +46,15 @@ web:
     NEXT_PUBLIC_API_URL: "http://api.139-100-200-55.nip.io"
 
 worker:
-  enabled: true
-  replicas: 1
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+  enabled: false
 
 postgres:
   enabled: true
   cnpg:
     instances: 1
+    secretName: "rag-p-postgres-app"
+    databaseName: "ragp"
+    ownerName: "ragp"
     storage:
       size: 10Gi
       storageClass: "fast.ru-3b"
@@ -72,35 +69,16 @@ redis:
   architecture: standalone
 
 langfuse:
-  enabled: true
-  ingress:
-    enabled: true
-    className: traefik
-    host: langfuse.139-100-200-55.nip.io
-    tls: false
+  enabled: false
 
 permify:
-  enabled: true
+  enabled: false
 
 minio:
-  enabled: true
-  mode: standalone
-  persistence:
-    enabled: true
-    size: 5Gi
-    storageClass: "fast.ru-3b"
-  auth:
-    rootUser: minio
-    rootPassword: changeme-staging-only
-  resources:
-    requests:
-      cpu: 50m
-      memory: 256Mi
+  enabled: false
 
 litellm:
-  enabled: true
-  config:
-    model_list: []
+  enabled: false
 
 externalSecrets:
   enabled: false

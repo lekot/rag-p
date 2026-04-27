@@ -76,7 +76,7 @@ Full image reference with optional global registry override.
 Usage: include "rag-p.image" (dict "root" . "image" .Values.api.image)
 */}}
 {{- define "rag-p.image" -}}
-{{- $registry := .root.Values.global.imageRegistry | default "" }}
+{{- $registry := .image.registry | default .root.Values.global.imageRegistry | default "" }}
 {{- $repo := .image.repository }}
 {{- $tag := .image.tag | default "latest" }}
 {{- if $registry }}

@@ -17,6 +17,10 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/web-configmap.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: web
           image: {{ include "rag-p.image" (dict "root" . "image" .Values.web.image) }}

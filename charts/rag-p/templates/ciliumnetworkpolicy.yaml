@@ -1,0 +1,216 @@
+{{- if .Values.networkPolicy.cilium.enabled }}
+---
+# Cilium L7-aware policies. Layer 7 rules require Cilium with envoy proxy.
+# Default-deny is intentionally NOT included here to avoid conflict with
+# Selectel-managed components in kube-system; explicit allows only.
+
+# api can be reached by Traefik (ingress) and by worker pods on port 8000.
+# Egress: api can talk to postgres, redis, minio, permify, litellm, langfuse.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "rag-p.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": traefik
+        - matchLabels:
+            app.kubernetes.io/component: worker
+      toPorts:
+        - ports:
+            - port: "{{ .Values.api.service.port }}"
+              protocol: TCP
+          rules:
+            http:
+              - method: "GET"
+                path: "/healthz"
+              - method: "GET"
+                path: "/api/.*"
+              - method: "POST"
+                path: "/api/.*"
+              - method: "PUT"
+                path: "/api/.*"
+              - method: "PATCH"
+                path: "/api/.*"
+              - method: "DELETE"
+                path: "/api/.*"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ include "rag-p.fullname" . }}-postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    {{- if .Values.minio.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: minio
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    {{- end }}
+    {{- if .Values.permify.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: permify
+      toPorts:
+        - ports:
+            - port: "3476"
+              protocol: TCP
+    {{- end }}
+    {{- if .Values.litellm.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: litellm
+      toPorts:
+        - ports:
+            - port: "4000"
+              protocol: TCP
+    {{- end }}
+    {{- if .Values.langfuse.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: langfuse
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    {{- end }}
+    # DNS to kube-dns
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # External egress to LLM providers (OpenAI, Anthropic, Cohere) and HTTPS world
+    - toFQDNs:
+        - matchPattern: "*.openai.com"
+        - matchPattern: "*.anthropic.com"
+        - matchPattern: "*.cohere.com"
+        - matchPattern: "*.cohere.ai"
+        - matchPattern: "*.huggingface.co"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# web is reached only by Traefik. Egress to api over HTTP/JSON.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "rag-p.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: web
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": traefik
+      toPorts:
+        - ports:
+            - port: "{{ .Values.web.service.port | default 3000 }}"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: api
+      toPorts:
+        - ports:
+            - port: "{{ .Values.api.service.port }}"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# worker — same egress as api but no ingress from outside.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "rag-p.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ include "rag-p.fullname" . }}-postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    {{- if .Values.minio.enabled }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: minio
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    {{- end }}
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchPattern: "*.openai.com"
+        - matchPattern: "*.anthropic.com"
+        - matchPattern: "*.cohere.com"
+        - matchPattern: "*.cohere.ai"
+        - matchPattern: "*.huggingface.co"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+{{- end }}

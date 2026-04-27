@@ -8,10 +8,9 @@ metadata:
     {{- include "rag-p.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
 spec:
   instances: {{ .Values.postgres.cnpg.instances }}
+  imageName: {{ .Values.postgres.cnpg.imageName | default "ghcr.io/cloudnative-pg/postgresql:16.4" }}
 
   postgresql:
-    shared_preload_libraries:
-      - vectors.so
     parameters:
       max_connections: "200"
       shared_buffers: "256MB"

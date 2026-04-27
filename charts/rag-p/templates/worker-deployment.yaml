@@ -16,6 +16,10 @@ spec:
       labels:
         {{- include "rag-p.componentLabels" (dict "root" . "component" "worker") | nindent 8 }}
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker
           image: {{ include "rag-p.image" (dict "root" . "image" .Values.api.image) }}
