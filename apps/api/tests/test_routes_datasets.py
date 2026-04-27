@@ -1,5 +1,6 @@
 import io
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -222,3 +223,120 @@ async def test_list_documents_after_upload(client: AsyncClient, organization_id:
     for doc in docs:
         assert doc["chunk_count"] > 0
         assert doc["status"] == "parsed"
+
+
+# ---------------------------------------------------------------------------
+# POST /datasets/{dataset_id}/search
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_returns_top_k(client: AsyncClient, organization_id: str):
+    """Search endpoint returns chunks with correct shape; embedder and retriever are mocked."""
+    dataset_id = await _create_dataset(client, organization_id)
+    sample = "The quick brown fox jumps over the lazy dog. " * 60
+
+    upload_resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("fox.txt", io.BytesIO(sample.encode()), "text/plain")},
+        data={"chunker_name": "recursive-character"},
+    )
+    assert upload_resp.status_code == 201
+    doc_id = upload_resp.json()["document_id"]
+
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": "The quick brown fox jumps",
+            "score": 0.021,
+            "metadata": {"chunk_index": 0},
+            "document_id": doc_id,
+            "document_name": "upload://fox.txt",
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "text": "over the lazy dog",
+            "score": 0.018,
+            "metadata": {"chunk_index": 1},
+            "document_id": doc_id,
+            "document_name": "upload://fox.txt",
+        },
+    ]
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_mock_get_plugin(fake_chunks),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/search",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "fox", "top_k": 5},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "chunks" in body
+    assert len(body["chunks"]) == len(fake_chunks)
+    for chunk in body["chunks"]:
+        assert "id" in chunk
+        assert "text" in chunk
+        assert "score" in chunk
+        assert "metadata" in chunk
+        assert "document_id" in chunk
+        assert "document_name" in chunk
+
+
+@pytest.mark.asyncio
+async def test_search_dataset_not_found_returns_404(client: AsyncClient, organization_id: str):
+    fake_id = str(uuid.uuid4())
+    resp = await client.post(
+        f"/api/v1/datasets/{fake_id}/search",
+        headers={"X-Organization-Id": organization_id},
+        json={"query": "hello", "top_k": 5},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_search_without_org_header_returns_422(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/search",
+        json={"query": "hello", "top_k": 5},
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Helper: wrap get_plugin so embedder and retriever are mocked
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_get_plugin(fake_chunks: list[dict]):
+    """Return a get_plugin side_effect that stubs embedder and retriever plugins."""
+
+    fake_vec = [0.0] * 1024
+
+    class _FakeEmbedder:
+        def __init__(self, params):  # noqa: ANN001
+            pass
+
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [fake_vec for _ in texts]
+
+    class _FakeRetriever:
+        def __init__(self, params):  # noqa: ANN001
+            pass
+
+        async def retrieve(self, **kwargs) -> list[dict]:  # noqa: ANN003
+            return fake_chunks
+
+    def _side_effect(plugin_type: str, name: str):  # noqa: ANN001
+        if plugin_type == "embedder":
+            return _FakeEmbedder
+        if plugin_type == "retriever":
+            return _FakeRetriever
+        return None
+
+    return _side_effect

@@ -32,6 +32,21 @@ const ChunkSchema = z.object({
 
 export type Chunk = z.infer<typeof ChunkSchema>;
 
+const SearchChunkSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  score: z.number(),
+  metadata: z.record(z.unknown()),
+  document_id: z.string(),
+  document_name: z.string(),
+});
+
+export type SearchChunk = z.infer<typeof SearchChunkSchema>;
+
+const SearchResultSchema = z.object({
+  chunks: z.array(SearchChunkSchema),
+});
+
 const DocumentDetailSchema = z.object({
   id: z.string(),
   source_uri: z.string(),
@@ -76,6 +91,22 @@ export const datasetsRouter = router({
       return apiClient.post<{ status: string }>(
         `/api/v1/datasets/${input.id}/generate`,
         {}
+      );
+    }),
+
+  search: protectedProcedure
+    .input(
+      z.object({
+        datasetId: z.string(),
+        query: z.string().min(1),
+        top_k: z.number().int().min(1).max(50).default(10),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.post<z.infer<typeof SearchResultSchema>>(
+        `/api/v1/datasets/${input.datasetId}/search`,
+        { query: input.query, top_k: input.top_k },
+        { "x-organization-id": ctx.organization_id }
       );
     }),
 

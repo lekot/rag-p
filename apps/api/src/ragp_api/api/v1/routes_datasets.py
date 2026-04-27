@@ -353,3 +353,98 @@ async def upload_document(
         embedded=embedded,
         chunks_preview=preview,
     )
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+
+class SearchIn(BaseModel):
+    query: str
+    top_k: int = 10
+
+
+class SearchChunkOut(BaseModel):
+    id: str
+    text: str
+    score: float
+    metadata: dict[str, Any]
+    document_id: str
+    document_name: str
+
+
+class SearchOut(BaseModel):
+    chunks: list[SearchChunkOut]
+
+
+@router.post("/{dataset_id}/search", response_model=SearchOut)
+async def search_dataset(
+    dataset_id: str,
+    body: SearchIn,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> SearchOut:
+    # Verify dataset ownership
+    ds_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    if ds_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    # Build embedder (same priority as ingest: Ollama → Cohere → OpenAI)
+    ollama_host = os.environ.get("OLLAMA_HOST", "")
+    cohere_key = os.environ.get("COHERE_API_KEY", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    embedder = None
+    if ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls({"model": "bge-m3"})
+    elif cohere_key:
+        embedder_cls = get_plugin("embedder", "cohere-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls(
+                {"model": "embed-multilingual-v3.0", "input_type": "search_query"}
+            )
+    elif openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls({"model": "openai/text-embedding-3-small"})
+
+    query_vec: list[float] | None = None
+    if embedder is not None:
+        try:
+            vecs = await embedder.embed([body.query])
+            query_vec = vecs[0]
+        except Exception:
+            # Fall back to BM25-only path; dense branch will be skipped by retriever
+            pass
+
+    # Retrieve
+    retriever_cls = get_plugin("retriever", "pgvector-hybrid")
+    if retriever_cls is None:
+        raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
+
+    retriever = retriever_cls({"session": db})
+    raw_chunks = await retriever.retrieve(
+        query=body.query,
+        top_k=body.top_k,
+        organization_id=organization_id,
+        dataset_id=dataset_id,
+        query_vec=query_vec,
+    )
+
+    return SearchOut(
+        chunks=[
+            SearchChunkOut(
+                id=c["id"],
+                text=c["text"],
+                score=c["score"],
+                metadata=c["metadata"],
+                document_id=c["document_id"],
+                document_name=c["document_name"],
+            )
+            for c in raw_chunks
+        ]
+    )
