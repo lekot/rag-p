@@ -13,9 +13,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override sqlalchemy.url from DATABASE_URL env var when running in k8s/CI
+# Override sqlalchemy.url from DATABASE_URL env var when running in k8s/CI.
+# Force the async driver so async_engine_from_config below can use it.
 _db_url = os.environ.get("DATABASE_URL")
 if _db_url:
+    if _db_url.startswith("postgresql://"):
+        _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     config.set_main_option("sqlalchemy.url", _db_url)
 
 from ragp_api.db.base import Base  # noqa: E402
