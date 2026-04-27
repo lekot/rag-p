@@ -1,6 +1,6 @@
 import io
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -340,3 +340,139 @@ def _make_mock_get_plugin(fake_chunks: list[dict]):
         return None
 
     return _side_effect
+
+
+def _make_ask_get_plugin(fake_chunks: list[dict], generator_mock: MagicMock):
+    """Return a get_plugin side_effect that stubs embedder, retriever, and generator plugins."""
+
+    fake_vec = [0.0] * 1024
+
+    class _FakeEmbedder:
+        def __init__(self, params):  # noqa: ANN001
+            pass
+
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [fake_vec for _ in texts]
+
+    class _FakeRetriever:
+        def __init__(self, params):  # noqa: ANN001
+            pass
+
+        async def retrieve(self, **kwargs) -> list[dict]:  # noqa: ANN003
+            return fake_chunks
+
+    def _side_effect(plugin_type: str, name: str):  # noqa: ANN001
+        if plugin_type == "embedder":
+            return _FakeEmbedder
+        if plugin_type == "retriever":
+            return _FakeRetriever
+        if plugin_type == "generator":
+            return generator_mock
+        return None
+
+    return _side_effect
+
+
+# ---------------------------------------------------------------------------
+# POST /datasets/{dataset_id}/ask
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_answer_with_chunks(client: AsyncClient, organization_id: str):
+    """Ask endpoint returns answer, chunks and usage; embedder, retriever, generator are mocked."""
+    dataset_id = await _create_dataset(client, organization_id)
+
+    doc_id = str(uuid.uuid4())
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": "The quick brown fox jumps",
+            "score": 0.021234,
+            "metadata": {"chunk_index": 0},
+            "document_id": doc_id,
+            "document_name": "upload://fox.txt",
+        },
+    ]
+
+    # Generator class mock: constructor returns an instance with async generate()
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock(
+        return_value={
+            "answer": "The fox jumps.",
+            "trace": {
+                "model": "deepseek/deepseek-v4-flash",
+                "usage": {"prompt_tokens": 42, "completion_tokens": 10},
+            },
+        }
+    )
+
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_ask_get_plugin(fake_chunks, generator_cls),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "What does the fox do?", "top_k": 5},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"] == "The fox jumps."
+    assert len(body["chunks"]) == 1
+    chunk = body["chunks"][0]
+    assert "id" in chunk
+    assert "text" in chunk
+    assert "score" in chunk
+    assert "document_id" in chunk
+    assert "document_name" in chunk
+    # Score must be rounded to 4 decimal places
+    assert chunk["score"] == round(0.021234, 4)
+    assert body["usage"]["prompt_tokens"] == 42
+    assert body["usage"]["completion_tokens"] == 10
+    # Ensure generator was called
+    gen_instance.generate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ask_empty_retrieval_skips_llm(client: AsyncClient, organization_id: str):
+    """When retriever returns empty list, LLM must NOT be called."""
+    dataset_id = await _create_dataset(client, organization_id)
+
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock()
+
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_ask_get_plugin([], generator_cls),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "anything", "top_k": 5},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["chunks"] == []
+    assert body["usage"]["prompt_tokens"] == 0
+    assert body["usage"]["completion_tokens"] == 0
+    assert "answer" in body
+    # LLM must not have been called
+    gen_instance.generate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ask_dataset_not_found_returns_404(client: AsyncClient, organization_id: str):
+    fake_id = str(uuid.uuid4())
+    resp = await client.post(
+        f"/api/v1/datasets/{fake_id}/ask",
+        headers={"X-Organization-Id": organization_id},
+        json={"query": "hello", "top_k": 5},
+    )
+    assert resp.status_code == 404

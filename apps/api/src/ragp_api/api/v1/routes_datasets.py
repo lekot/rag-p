@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, Dataset, Document
 from ragp_api.deps import get_db, get_organization_id
-from ragp_api.plugins.base import Chunker, Embedder, Retriever
+from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -450,4 +450,133 @@ async def search_dataset(
             )
             for c in raw_chunks
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ask  (RAG full-cycle: embed → retrieve → generate)
+# ---------------------------------------------------------------------------
+
+
+class AskIn(BaseModel):
+    query: str
+    top_k: int = 5
+    model: str = "deepseek/deepseek-v4-flash"
+
+
+class AskChunkOut(BaseModel):
+    id: str
+    text: str
+    score: float
+    document_id: str
+    document_name: str
+
+
+class AskUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class AskOut(BaseModel):
+    answer: str
+    chunks: list[AskChunkOut]
+    usage: AskUsage
+
+
+@router.post("/{dataset_id}/ask", response_model=AskOut)
+async def ask_dataset(
+    dataset_id: str,
+    body: AskIn,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> AskOut:
+    # Verify dataset ownership
+    ds_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    if ds_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    # Build embedder (same priority as ingest/search: Ollama → Cohere → OpenAI)
+    ollama_host = os.environ.get("OLLAMA_HOST", "")
+    cohere_key = os.environ.get("COHERE_API_KEY", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    embedder: Embedder | None = None
+    if ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
+        if embedder_cls is not None:
+            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
+    elif cohere_key:
+        embedder_cls = get_plugin("embedder", "cohere-embedder")
+        if embedder_cls is not None:
+            embedder = cast(
+                Embedder,
+                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
+            )
+    elif openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
+        if embedder_cls is not None:
+            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
+
+    query_vec: list[float] | None = None
+    if embedder is not None:
+        try:
+            vecs = await embedder.embed([body.query])
+            query_vec = vecs[0]
+        except Exception:
+            pass
+
+    # Retrieve
+    retriever_cls = get_plugin("retriever", "pgvector-hybrid")
+    if retriever_cls is None:
+        raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
+
+    retriever = cast(Retriever, retriever_cls({"session": db}))
+    raw_chunks = await retriever.retrieve(
+        query=body.query,
+        top_k=body.top_k,
+        organization_id=organization_id,
+        dataset_id=dataset_id,
+        query_vec=query_vec,
+    )
+
+    # Empty retrieval → skip LLM
+    if not raw_chunks:
+        return AskOut(
+            answer="Не нашёл релевантных чанков для ответа.",
+            chunks=[],
+            usage=AskUsage(prompt_tokens=0, completion_tokens=0),
+        )
+
+    # Generate answer via LiteLLM
+    generator_cls = get_plugin("generator", "litellm-generator")
+    if generator_cls is None:
+        raise HTTPException(status_code=500, detail="litellm-generator not available")
+
+    generator = cast(
+        Generator,
+        generator_cls({"model": body.model, "temperature": 0.0, "max_tokens": 1024}),
+    )
+    gen_result = await generator.generate(body.query, contexts=raw_chunks)
+
+    answer: str = gen_result.get("answer", "")
+    trace: dict[str, Any] = gen_result.get("trace", {})
+    usage_raw: dict[str, Any] = trace.get("usage", {})
+
+    return AskOut(
+        answer=answer,
+        chunks=[
+            AskChunkOut(
+                id=c["id"],
+                text=c["text"],
+                score=round(c["score"], 4),
+                document_id=c["document_id"],
+                document_name=c["document_name"],
+            )
+            for c in raw_chunks
+        ],
+        usage=AskUsage(
+            prompt_tokens=int(usage_raw.get("prompt_tokens", 0)),
+            completion_tokens=int(usage_raw.get("completion_tokens", 0)),
+        ),
     )

@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 import type { Chunk, SearchChunk } from "@/server/routers/datasets";
 
@@ -183,6 +184,103 @@ function SearchSection({ datasetId }: { datasetId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Ask section
+// ---------------------------------------------------------------------------
+
+function AskSection({ datasetId }: { datasetId: string }) {
+  const [query, setQuery] = useState("");
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+
+  const askMutation = trpc.datasets.ask.useMutation();
+
+  const handleAsk = () => {
+    if (!query.trim()) return;
+    setSourcesOpen(false);
+    askMutation.mutate({ datasetId, query: query.trim() });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleAsk();
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Ask</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col gap-2">
+          <Textarea
+            placeholder="Задайте вопрос по документам… (Ctrl+Enter)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={3}
+            className="resize-none"
+          />
+          <Button
+            onClick={handleAsk}
+            disabled={askMutation.isPending || !query.trim()}
+            className="self-end"
+          >
+            {askMutation.isPending ? "Думаю…" : "Спросить"}
+          </Button>
+        </div>
+
+        {askMutation.isError && (
+          <p className="text-sm text-destructive">
+            {askMutation.error.message}
+          </p>
+        )}
+
+        {askMutation.isSuccess && (
+          <div className="space-y-4">
+            {/* Answer card */}
+            <Card className="border-primary/20">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Ответ</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {askMutation.data.answer}
+                </p>
+
+                {/* Token usage */}
+                <p className="text-xs text-muted-foreground">
+                  prompt_tokens={askMutation.data.usage.prompt_tokens},{" "}
+                  completion_tokens={askMutation.data.usage.completion_tokens}
+                </p>
+
+                {/* Expandable sources */}
+                {askMutation.data.chunks.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => setSourcesOpen((v) => !v)}
+                    >
+                      {sourcesOpen
+                        ? "Скрыть источники"
+                        : `Источники (${askMutation.data.chunks.length})`}
+                    </button>
+                    {sourcesOpen && (
+                      <div className="space-y-2">
+                        {askMutation.data.chunks.map((chunk) => (
+                          <SearchChunkCard key={chunk.id} chunk={chunk} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Document table
 // ---------------------------------------------------------------------------
 
@@ -286,6 +384,8 @@ export default function DatasetDetailPage() {
       />
 
       <SearchSection datasetId={params.id} />
+
+      <AskSection datasetId={params.id} />
 
       <Card>
         <CardHeader>
