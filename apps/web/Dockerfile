@@ -3,21 +3,14 @@ RUN apk add --no-cache libc6-compat
 RUN npm install -g pnpm@9
 WORKDIR /repo
 
-FROM base AS deps
-# Force devDependencies (postcss, tailwindcss, autoprefixer, typescript, eslint)
-# so "next build" can compile CSS and types. CI sets NODE_ENV=production,
-# which would otherwise drop them silently and bake a non-compiled stylesheet.
-ENV NODE_ENV=development
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile --prod=false
-
 FROM base AS builder
+# Single stage: copy workspace + sources, then install ALL deps (including
+# devDependencies — postcss/tailwindcss/autoprefixer are needed for next build
+# to compile CSS). Splitting into deps/builder lost the per-package symlinks.
 ENV NODE_ENV=development
-COPY --from=deps /repo/node_modules ./node_modules
-COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web ./apps/web
+RUN pnpm install --frozen-lockfile --prod=false --filter web...
 WORKDIR /repo/apps/web
 RUN pnpm run build
 
