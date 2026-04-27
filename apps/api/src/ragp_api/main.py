@@ -21,13 +21,19 @@ from ragp_api.api.v1 import (
     routes_rag,
     routes_runs,
 )
+from ragp_api.db.redis import close_redis_pool, create_redis_pool
 from ragp_api.plugins.registry import bootstrap
+from ragp_api.settings import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     bootstrap()
-    yield
+    app.state.redis = await create_redis_pool(settings.redis_host, settings.redis_port)
+    try:
+        yield
+    finally:
+        await close_redis_pool(app.state.redis)
 
 
 app = FastAPI(

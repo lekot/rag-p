@@ -71,3 +71,8 @@ ignore_missing_imports = true
 # python-docx imports as "docx"; no py.typed marker
 module = ["docx", "docx.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# fakeredis is a dev-only test dependency; no py.typed marker
+module = ["fakeredis", "fakeredis.*"]
+ignore_missing_imports = true

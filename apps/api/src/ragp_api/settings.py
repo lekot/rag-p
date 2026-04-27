@@ -8,9 +8,13 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     debug: bool = False
 
-    # Redis (used by ARQ worker queue)
+    # Redis (used by ARQ worker queue and rate limiting)
     redis_host: str = "rag-p-redis-master"
     redis_port: int = 6379
+
+    # Rate limiting (sliding window, 60-second window)
+    rate_limit_per_key_rpm: int = 60
+    rate_limit_per_org_rpm: int = 1000
 
     # Permify
     permify_url: str = "http://localhost:3476"
