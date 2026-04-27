@@ -116,6 +116,14 @@ jobs:
           kubectl -n rag-p get pods
           helm -n rag-p history rag-p | tail -5 || true
 
+      - name: Helm dependency build
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+          helm dependency build ./charts/rag-p
+
       - name: Helm upgrade
         id: upgrade
         run: |
@@ -152,8 +160,15 @@ jobs:
           fi
 
       - name: Rollback on failure
-        if: failure()
+        if: failure() && steps.upgrade.outcome == 'success'
         run: |
-          echo "Deploy failed — rolling back"
+          echo "Smoke/rollout failed — rolling back"
           helm -n rag-p rollback rag-p
+          kubectl -n rag-p get pods
+
+      - name: Helm release status on failure
+        if: failure() && steps.upgrade.outcome != 'success'
+        run: |
+          echo "Helm upgrade itself failed — leaving release as-is for inspection"
+          helm -n rag-p history rag-p | tail -10
           kubectl -n rag-p get pods
