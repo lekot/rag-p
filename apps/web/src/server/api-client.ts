@@ -19,11 +19,14 @@ async function apiFetch<T>(
 }
 
 export const apiClient = {
-  get: <T>(path: string) => apiFetch<T>(path),
+  get: <T>(path: string, extraHeaders?: Record<string, string>) =>
+    apiFetch<T>(path, { headers: extraHeaders }),
   post: <T>(path: string, body: unknown, extraHeaders?: Record<string, string>) =>
     apiFetch<T>(path, {
       method: "POST",
       body: JSON.stringify(body),
       headers: extraHeaders,
     }),
+  delete: <T>(path: string, extraHeaders?: Record<string, string>) =>
+    apiFetch<T>(path, { method: "DELETE", headers: extraHeaders }),
 };

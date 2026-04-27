@@ -31,6 +31,17 @@ class PipelineOut(BaseModel):
     name: str
     organization_id: str
     current_version_id: str | None
+    nodes: list[PipelineNodeIn] = []
+
+
+async def _load_nodes(db: AsyncSession, version_id: str | None) -> list[PipelineNodeIn]:
+    if not version_id:
+        return []
+    result = await db.execute(select(PipelineVersion).where(PipelineVersion.id == version_id))
+    version = result.scalar_one_or_none()
+    if version is None or not version.nodes_json:
+        return []
+    return [PipelineNodeIn(**n) for n in version.nodes_json]
 
 
 @router.post("", status_code=201, response_model=PipelineOut)
@@ -66,6 +77,7 @@ async def create_pipeline(
         name=pipeline.name,
         organization_id=pipeline.organization_id,
         current_version_id=pipeline.current_version_id,
+        nodes=body.nodes,
     )
 
 
@@ -76,15 +88,19 @@ async def list_pipelines(
 ) -> list[PipelineOut]:
     result = await db.execute(select(Pipeline).where(Pipeline.organization_id == organization_id))
     pipelines = result.scalars().all()
-    return [
-        PipelineOut(
-            id=p.id,
-            name=p.name,
-            organization_id=p.organization_id,
-            current_version_id=p.current_version_id,
+    out: list[PipelineOut] = []
+    for p in pipelines:
+        nodes = await _load_nodes(db, p.current_version_id)
+        out.append(
+            PipelineOut(
+                id=p.id,
+                name=p.name,
+                organization_id=p.organization_id,
+                current_version_id=p.current_version_id,
+                nodes=nodes,
+            )
         )
-        for p in pipelines
-    ]
+    return out
 
 
 @router.get("/{pipeline_id}", response_model=PipelineOut)
@@ -96,9 +112,11 @@ async def get_pipeline(
     pipeline = result.scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
+    nodes = await _load_nodes(db, pipeline.current_version_id)
     return PipelineOut(
         id=pipeline.id,
         name=pipeline.name,
         organization_id=pipeline.organization_id,
         current_version_id=pipeline.current_version_id,
+        nodes=nodes,
     )

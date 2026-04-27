@@ -109,6 +109,26 @@ async def list_datasets(
     ]
 
 
+@router.get("/{dataset_id}", response_model=DatasetOut)
+async def get_dataset(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> DatasetOut:
+    result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    dataset = result.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+    return DatasetOut(
+        id=dataset.id,
+        name=dataset.name,
+        organization_id=dataset.organization_id,
+        source=dataset.source,
+    )
+
+
 @router.post("/{dataset_id}/generate", status_code=202)
 async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))

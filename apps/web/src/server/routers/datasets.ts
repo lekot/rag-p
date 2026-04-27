@@ -80,8 +80,10 @@ export const datasetsRouter = router({
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
-      return apiClient.get<Dataset>(`/api/v1/datasets/${input.id}`);
+    .query(async ({ input, ctx }) => {
+      return apiClient.get<Dataset>(`/api/v1/datasets/${input.id}`, {
+        "x-organization-id": ctx.organization_id,
+      });
     }),
 
   create: protectedProcedure
