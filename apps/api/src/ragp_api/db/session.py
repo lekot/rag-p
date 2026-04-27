@@ -13,3 +13,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+# Standalone context manager for use outside FastAPI request lifecycle
+# (e.g. ARQ worker tasks that cannot use dependency injection).
+async_session = AsyncSessionLocal

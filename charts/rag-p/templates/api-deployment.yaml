@@ -71,6 +71,10 @@ spec:
             - name: REDIS_URL
               value: "redis://{{ .Release.Name }}-redis-master:6379/0"
             {{- end }}
+            - name: RAGP_REDIS_HOST
+              value: "{{ .Release.Name }}-redis-master"
+            - name: RAGP_REDIS_PORT
+              value: "6379"
             {{- end }}
             {{- if .Values.minio.enabled }}
             - name: MINIO_ENDPOINT

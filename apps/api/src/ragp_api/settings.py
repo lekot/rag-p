@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     debug: bool = False
 
+    # Redis (used by ARQ worker queue)
+    redis_host: str = "rag-p-redis-master"
+    redis_port: int = 6379
+
     # Permify
     permify_url: str = "http://localhost:3476"
     permify_tenant_id: str = "t1"

@@ -28,6 +28,7 @@ dependencies = [
     "email-validator>=2.1.0",
     "pypdf>=4.3.0",
     "python-docx>=1.1.0",
+    "arq>=0.26.0",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +46,8 @@ markdown-aware = "ragp_api.plugins.chunkers.markdown:MarkdownAwareChunker"
 
 [project.entry-points."ragp.plugins.embedders"]
 litellm-embedder = "ragp_api.plugins.embedders.litellm_embedder:LiteLLMEmbedder"
+cohere-embedder = "ragp_api.plugins.embedders.cohere_embedder:CohereEmbedder"
+ollama-embedder = "ragp_api.plugins.embedders.ollama_embedder:OllamaEmbedder"
 
 [project.entry-points."ragp.plugins.retrievers"]
 pgvector-hybrid = "ragp_api.plugins.retrievers.pgvector_hybrid:PgvectorHybridRetriever"

@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -9,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Experiment, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
-from ragp_api.services.experiment_runner import run_experiment_inline
+from ragp_api.settings import settings
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
@@ -62,16 +64,19 @@ async def create_experiment(
         name=body.name,
         dataset_id=body.dataset_id,
         plugin_grid_json=body.plugin_grid,
-        status="pending",
+        status="queued",
     )
     db.add(experiment)
     await db.commit()
     await db.refresh(experiment)
 
-    # Run inline (synchronous, in-request; no Celery for prototype)
-    # [BLOCKED-NIGHT-RUN] Switch to Celery/ARQ for production workloads
-    await run_experiment_inline(experiment, db)
-    await db.refresh(experiment)
+    # Enqueue to ARQ worker — POST returns immediately (~50 ms).
+    # Poll GET /experiments/{id} until status != "queued"/"running".
+    redis = await create_pool(RedisSettings(host=settings.redis_host, port=settings.redis_port))
+    try:
+        await redis.enqueue_job("run_experiment_task", experiment.id)
+    finally:
+        await redis.aclose()
 
     return ExperimentOut(
         id=experiment.id,

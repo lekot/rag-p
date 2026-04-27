@@ -24,7 +24,7 @@ spec:
         - name: worker
           image: {{ include "rag-p.image" (dict "root" . "image" .Values.api.image) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
-          command: ["python", "-m", "ragp_api.workers"]
+          command: ["arq", "ragp_api.workers.main.WorkerSettings"]
           envFrom:
             {{- if .Values.llmKeysSecret }}
             - secretRef:
@@ -65,6 +65,10 @@ spec:
             - name: REDIS_URL
               value: "redis://{{ .Release.Name }}-redis-master:6379/0"
             {{- end }}
+            - name: RAGP_REDIS_HOST
+              value: "{{ .Release.Name }}-redis-master"
+            - name: RAGP_REDIS_PORT
+              value: "6379"
             {{- end }}
             {{- if .Values.minio.enabled }}
             - name: MINIO_ENDPOINT

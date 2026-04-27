@@ -1,6 +1,6 @@
 """Tests for experiment routes and pipeline promotion."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -28,28 +28,56 @@ PLUGIN_GRID = {
 }
 
 
-@pytest.mark.asyncio
-async def test_create_experiment_completes(client: AsyncClient, organization_id: str):
-    """POST /experiments should create experiment and transition to completed or failed."""
-    dataset_id = await _create_dataset(client, organization_id)
+def _make_redis_pool_mock() -> MagicMock:
+    """Return a mock that behaves like an arq ArqRedis pool."""
+    pool = AsyncMock()
+    pool.enqueue_job = AsyncMock(return_value=MagicMock())
+    pool.aclose = AsyncMock()
+    pool.__aenter__ = AsyncMock(return_value=pool)
+    pool.__aexit__ = AsyncMock(return_value=None)
+    return pool
 
-    # Mock inline runner so it doesn't do real DB retrieval
-    async def mock_runner(experiment, db):
-        experiment.status = "completed"
-        experiment.leaderboard_json = [
-            {
-                "nodes": [
-                    {"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}
-                ],
-                "metrics": {"hit_rate": 0.8, "composite_score": 0.8},
-                "composite_score": 0.8,
-            }
-        ]
-        await db.commit()
+
+@pytest.mark.asyncio
+async def test_experiment_enqueued_returns_queued_status(client: AsyncClient, organization_id: str):
+    """POST /experiments should persist experiment with status='queued' and enqueue the job."""
+    dataset_id = await _create_dataset(client, organization_id)
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
+    ):
+        response = await client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "Queued Experiment",
+                "organization_id": organization_id,
+                "dataset_id": dataset_id,
+                "plugin_grid": PLUGIN_GRID,
+            },
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["id"]
+    assert data["name"] == "Queued Experiment"
+    assert data["dataset_id"] == dataset_id
+    assert data["status"] == "queued"
+
+    # Verify enqueue_job was called with the experiment id
+    pool_mock.enqueue_job.assert_called_once_with("run_experiment_task", data["id"])
+
+
+@pytest.mark.asyncio
+async def test_create_experiment_enqueues_job(client: AsyncClient, organization_id: str):
+    """POST /experiments enqueues 'run_experiment_task' — job id is returned."""
+    dataset_id = await _create_dataset(client, organization_id)
+    pool_mock = _make_redis_pool_mock()
+
+    with patch(
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
         response = await client.post(
             "/api/v1/experiments",
@@ -63,54 +91,47 @@ async def test_create_experiment_completes(client: AsyncClient, organization_id:
 
     assert response.status_code == 201
     data = response.json()
-    assert data["id"]
-    assert data["name"] == "Test Experiment"
-    assert data["dataset_id"] == dataset_id
-    assert data["status"] == "completed"
+    assert data["status"] == "queued"
+    pool_mock.enqueue_job.assert_awaited_once()
+    call_args = pool_mock.enqueue_job.call_args
+    assert call_args.args[0] == "run_experiment_task"
+    assert call_args.args[1] == data["id"]
 
 
 @pytest.mark.asyncio
-async def test_create_experiment_failed(client: AsyncClient, organization_id: str):
-    """When runner fails, experiment status should be 'failed'."""
+async def test_create_experiment_redis_pool_closed_on_success(
+    client: AsyncClient, organization_id: str
+):
+    """create_pool.aclose() must be called even when enqueue succeeds."""
     dataset_id = await _create_dataset(client, organization_id)
-
-    async def mock_runner_fail(experiment, db):
-        experiment.status = "failed"
-        experiment.leaderboard_json = [{"error": "LLM key invalid"}]
-        await db.commit()
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner_fail,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
-        response = await client.post(
+        await client.post(
             "/api/v1/experiments",
             json={
-                "name": "Failed Experiment",
+                "name": "Close Test",
                 "organization_id": organization_id,
                 "dataset_id": dataset_id,
                 "plugin_grid": PLUGIN_GRID,
             },
         )
 
-    assert response.status_code == 201
-    data = response.json()
-    assert data["status"] == "failed"
+    pool_mock.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_list_experiments_org_filtered(client: AsyncClient, organization_id: str):
     """GET /experiments?organization_id=... returns only org's experiments."""
     dataset_id = await _create_dataset(client, organization_id)
-
-    async def mock_runner_complete(experiment, db):
-        experiment.status = "completed"
-        experiment.leaderboard_json = []
-        await db.commit()
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner_complete,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
         await client.post(
             "/api/v1/experiments",
@@ -141,19 +162,13 @@ async def test_list_experiments_org_filtered(client: AsyncClient, organization_i
 
 @pytest.mark.asyncio
 async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
-    """GET /experiments/{id} returns full experiment including plugin_grid and leaderboard."""
+    """GET /experiments/{id} returns full experiment including plugin_grid."""
     dataset_id = await _create_dataset(client, organization_id)
-
-    async def mock_runner(experiment, db):
-        experiment.status = "completed"
-        experiment.leaderboard_json = [
-            {"nodes": [], "metrics": {"composite_score": 0.7}, "composite_score": 0.7}
-        ]
-        await db.commit()
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
         create_resp = await client.post(
             "/api/v1/experiments",
@@ -171,12 +186,47 @@ async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
     data = resp.json()
     assert data["id"] == exp_id
     assert data["plugin_grid"] is not None
-    assert data["leaderboard"] is not None
+    # status is queued immediately after POST
+    assert data["status"] == "queued"
 
 
 @pytest.mark.asyncio
-async def test_promote_to_pipeline(client: AsyncClient, organization_id: str):
-    """POST /experiments/{id}/promote_to_pipeline creates pipeline with dataset_id."""
+async def test_promote_to_pipeline_requires_completed(client: AsyncClient, organization_id: str):
+    """POST /experiments/{id}/promote_to_pipeline returns 422 when status != 'completed'."""
+    dataset_id = await _create_dataset(client, organization_id)
+    pool_mock = _make_redis_pool_mock()
+
+    with patch(
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
+    ):
+        create_resp = await client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "Not Completed",
+                "organization_id": organization_id,
+                "dataset_id": dataset_id,
+                "plugin_grid": PLUGIN_GRID,
+            },
+        )
+
+    exp_id = create_resp.json()["id"]
+
+    promote_resp = await client.post(
+        f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
+        json={"name": "Should Fail"},
+    )
+    assert promote_resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_promote_to_pipeline(client: AsyncClient, organization_id: str, db_session):
+    """POST /experiments/{id}/promote_to_pipeline creates pipeline with dataset_id.
+
+    We simulate a completed experiment by directly updating the DB record.
+    """
+    from ragp_api.db.models import Experiment
+
     dataset_id = await _create_dataset(client, organization_id)
 
     winning_nodes = [
@@ -184,16 +234,11 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str):
         {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}},
     ]
 
-    async def mock_runner(experiment, db):
-        experiment.status = "completed"
-        experiment.leaderboard_json = [
-            {"nodes": winning_nodes, "metrics": {"composite_score": 0.9}, "composite_score": 0.9}
-        ]
-        await db.commit()
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
         create_resp = await client.post(
             "/api/v1/experiments",
@@ -206,6 +251,17 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str):
         )
 
     exp_id = create_resp.json()["id"]
+
+    # Simulate worker completing the experiment by patching DB directly
+    from sqlalchemy import select
+
+    result = await db_session.execute(select(Experiment).where(Experiment.id == exp_id))
+    experiment = result.scalar_one()
+    experiment.status = "completed"
+    experiment.leaderboard_json = [
+        {"nodes": winning_nodes, "metrics": {"composite_score": 0.9}, "composite_score": 0.9}
+    ]
+    await db_session.commit()
 
     promote_resp = await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
@@ -220,8 +276,14 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str):
 
 
 @pytest.mark.asyncio
-async def test_pipeline_list_filter_by_dataset(client: AsyncClient, organization_id: str):
+async def test_pipeline_list_filter_by_dataset(
+    client: AsyncClient, organization_id: str, db_session
+):
     """GET /pipelines?dataset_id=... filters by dataset."""
+    from sqlalchemy import select
+
+    from ragp_api.db.models import Experiment
+
     # Create two datasets
     ds1_resp = await client.post(
         "/api/v1/datasets",
@@ -234,19 +296,12 @@ async def test_pipeline_list_filter_by_dataset(client: AsyncClient, organization
     )
     ds2_id = ds2_resp.json()["id"]
 
-    # Create pipeline linked to ds1
     winning_nodes = [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}]
-
-    async def mock_runner_ds1(experiment, db):
-        experiment.status = "completed"
-        experiment.leaderboard_json = [
-            {"nodes": winning_nodes, "metrics": {"composite_score": 0.9}, "composite_score": 0.9}
-        ]
-        await db.commit()
+    pool_mock = _make_redis_pool_mock()
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.run_experiment_inline",
-        side_effect=mock_runner_ds1,
+        "ragp_api.api.v1.routes_experiments.create_pool",
+        return_value=pool_mock,
     ):
         exp_resp = await client.post(
             "/api/v1/experiments",
@@ -267,6 +322,16 @@ async def test_pipeline_list_filter_by_dataset(client: AsyncClient, organization
         )
 
     exp_id = exp_resp.json()["id"]
+
+    # Simulate worker completing
+    result = await db_session.execute(select(Experiment).where(Experiment.id == exp_id))
+    experiment = result.scalar_one()
+    experiment.status = "completed"
+    experiment.leaderboard_json = [
+        {"nodes": winning_nodes, "metrics": {"composite_score": 0.9}, "composite_score": 0.9}
+    ]
+    await db_session.commit()
+
     await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
         json={"name": "Pipeline for DS1"},

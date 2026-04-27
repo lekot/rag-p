@@ -74,7 +74,8 @@ web:
     NEXT_PUBLIC_API_URL: "https://api.lekottt.ru"
 
 worker:
-  enabled: false
+  enabled: true
+  replicas: 1
 
 postgres:
   enabled: true
