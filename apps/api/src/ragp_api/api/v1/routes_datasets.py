@@ -305,19 +305,26 @@ async def upload_document(
         )
     db.add_all(chunk_objs)
 
-    # Try embeddings if key is available
+    # Try embeddings: prefer Cohere (1024-dim, our pgvector column), fallback OpenAI via litellm
     embedded = False
+    cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
-    if openai_key:
+    embedder = None
+    if cohere_key:
+        embedder_cls = get_plugin("embedder", "cohere-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
+    elif openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls({"model": "openai/text-embedding-3-small"})
+    if embedder is not None:
         try:
-            embedder_cls = get_plugin("embedder", "litellm-embedder")
-            if embedder_cls is not None:
-                embedder = embedder_cls({"model": "openai/text-embedding-3-small"})
-                texts = [c.text for c in chunk_objs]
-                vectors = await embedder.embed(texts)
-                for chunk_obj, vec in zip(chunk_objs, vectors):
-                    chunk_obj.embedding = vec
-                embedded = True
+            texts = [c.text for c in chunk_objs]
+            vectors = await embedder.embed(texts)
+            for chunk_obj, vec in zip(chunk_objs, vectors):
+                chunk_obj.embedding = vec
+            embedded = True
         except Exception:
             # embedding is optional — proceed without it
             pass

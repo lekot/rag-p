@@ -62,7 +62,7 @@ def list_plugins() -> list[dict[str, Any]]:
 def bootstrap() -> None:
     """Import all built-in plugins so they self-register."""
     from ragp_api.plugins.chunkers import recursive, markdown  # noqa: F401
-    from ragp_api.plugins.embedders import litellm_embedder  # noqa: F401
+    from ragp_api.plugins.embedders import litellm_embedder, cohere_embedder  # noqa: F401
     from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401
     from ragp_api.plugins.rerankers import cohere  # noqa: F401
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401

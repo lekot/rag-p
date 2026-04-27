@@ -1,6 +1,8 @@
 # Selectel managed k8s staging — 1 node 2 vCPU / 8 GB RAM / 40 GB local SSD.
 # Single-instance pilot, https via lekottt.ru / api.lekottt.ru.
 
+llmKeysSecret: "llm-keys"
+
 tls:
   enabled: true
   issuerName: letsencrypt-prod
@@ -17,7 +19,7 @@ global:
 api:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.2"
+    tag: "0.1.5"
   replicas: 1
   resources:
     requests:
@@ -37,7 +39,7 @@ api:
 web:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.2"
+    tag: "0.1.5"
   replicas: 1
   resources:
     requests:

@@ -32,6 +32,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "rag-p.fullname" . }}-api
+            {{- if .Values.llmKeysSecret }}
+            - secretRef:
+                name: {{ .Values.llmKeysSecret }}
+                optional: true
+            {{- end }}
           env:
             {{- if .Values.postgres.enabled }}
             - name: POSTGRES_USER
@@ -46,6 +51,8 @@ spec:
                   key: password
             - name: DATABASE_URL
               value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "rag-p.fullname" . }}-postgres-rw:5432/{{ .Values.postgres.cnpg.databaseName }}"
+            - name: RAGP_DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "rag-p.fullname" . }}-postgres-rw:5432/{{ .Values.postgres.cnpg.databaseName }}"
             {{- end }}
             {{- if .Values.redis.enabled }}
             {{- if .Values.redis.auth.enabled }}

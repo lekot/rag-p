@@ -99,6 +99,16 @@ kubectl -n rag-p exec -it rag-p-postgres-1 -c postgres -- psql -U postgres ragp
 kubectl -n rag-p get secret rag-p-postgres-app -o jsonpath='{.data.password}' | base64 -d
 ```
 
+## TODO
+
+- **Vault / External Secrets Operator.** Currently k8s secrets are created via `kubectl create secret` (one-shot, not in version control, vulnerable to typos and rotation drift). When the cluster gets a second human or a real prod tenant, deploy:
+  - HashiCorp Vault (helm chart `hashicorp/vault`, dev mode for staging, full HA for prod) OR Bitwarden-secrets-manager
+  - external-secrets-operator (already toggleable in chart via `externalSecrets.enabled`)
+  - migrate `ghcr-pull` and `llm-keys` to ExternalSecret CRDs with auto-rotation
+- **Backups.** CNPG supports `Backup` CRD pushing to S3-compatible storage. Selectel S3 is available — wire in when `langfuse` and real datasets land.
+- **Cilium L7 NetworkPolicy.** Templates ready (`networkPolicy.cilium.enabled=true`), but staging runs without isolation while we iterate on routes. Enable before first external tenant.
+- **HPA + node autoscaling.** Currently 1 fixed node. When 2+ tenants, enable `api.autoscaling.enabled` and Selectel cluster autoscaler.
+
 ## Disaster recovery
 
 PVCs (postgres `pg-data`, minio data) live on Selectel Block Storage, survive node restart. CNPG `Backup` CRD can push to S3 — not configured on staging.

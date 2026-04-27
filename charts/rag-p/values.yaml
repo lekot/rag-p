@@ -207,6 +207,10 @@ networkPolicy:
     enabled: false
 
 # Let's Encrypt ClusterIssuer for cert-manager (created if tls.enabled)
+# Name of k8s Secret holding LLM API keys (OPENAI_API_KEY, COHERE_API_KEY,
+# ANTHROPIC_API_KEY, MINIMAX_API_KEY). Mounted into api/worker via envFrom.
+llmKeysSecret: ""
+
 tls:
   enabled: false
   issuerName: letsencrypt-prod
