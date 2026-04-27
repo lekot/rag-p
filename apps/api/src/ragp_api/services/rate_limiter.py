@@ -21,7 +21,6 @@ import math
 import time
 from typing import Any
 
-import redis.asyncio as aioredis
 from fastapi import HTTPException
 
 from ragp_api.settings import Settings
@@ -32,7 +31,7 @@ _WINDOW_SECONDS = 60
 
 
 async def check(
-    redis: aioredis.Redis[Any],
+    redis: Any,
     key: str,
     limit: int,
     window_seconds: int = _WINDOW_SECONDS,
@@ -75,7 +74,7 @@ async def check(
 
 
 async def check_rag_query_limits(
-    redis: aioredis.Redis[Any],
+    redis: Any,
     org_id: str,
     api_key_id: str,
     settings: Settings,

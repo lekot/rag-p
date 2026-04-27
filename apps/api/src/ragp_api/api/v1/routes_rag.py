@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -119,7 +118,7 @@ async def rag_query(
     body: RagQueryIn,
     db: AsyncSession = Depends(get_db),
     auth: tuple[Organization, ApiKey] | None = Depends(get_api_key_org),
-    redis: aioredis.Redis[Any] = Depends(get_redis),
+    redis: Any = Depends(get_redis),
 ) -> RagQueryOut:
     """RAG query endpoint for programmatic (API-key-authenticated) access."""
 

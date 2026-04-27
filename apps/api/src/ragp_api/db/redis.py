@@ -16,7 +16,7 @@ from fastapi import Request
 logger = logging.getLogger(__name__)
 
 
-async def create_redis_pool(host: str, port: int) -> aioredis.Redis[Any]:
+async def create_redis_pool(host: str, port: int) -> Any:
     """Create and return a redis.asyncio connection pool."""
     return aioredis.Redis(
         host=host,
@@ -27,11 +27,11 @@ async def create_redis_pool(host: str, port: int) -> aioredis.Redis[Any]:
     )
 
 
-async def close_redis_pool(pool: aioredis.Redis[Any]) -> None:
+async def close_redis_pool(pool: Any) -> None:
     """Close the redis connection pool."""
     await pool.aclose()
 
 
-async def get_redis(request: Request) -> AsyncGenerator[aioredis.Redis[Any], None]:
+async def get_redis(request: Request) -> AsyncGenerator[Any, None]:
     """FastAPI dependency — yields the Redis pool from app.state."""
     yield request.app.state.redis
