@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -9,7 +11,10 @@ from ragp_api.deps import get_db
 from ragp_api.main import app
 from ragp_api.plugins.registry import _registry, bootstrap
 
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+# If TEST_DATABASE_URL is provided (e.g. in CI with real postgres), use it.
+# Otherwise fall back to in-memory SQLite for quick local runs.
+_TEST_DB_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+_IS_POSTGRES = _TEST_DB_URL.startswith("postgresql")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -23,8 +28,14 @@ async def reset_registry():
 
 @pytest_asyncio.fixture
 async def db_engine():
-    engine = create_async_engine(TEST_DB_URL, echo=False)
+    engine = create_async_engine(_TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
+        if _IS_POSTGRES:
+            # pgvector extension must exist before create_all so that
+            # the Vector column type is recognised by Postgres.
+            await conn.execute(
+                __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
+            )
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:
