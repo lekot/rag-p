@@ -49,9 +49,7 @@ async def _create_org_with_key(
         key_hash=key_hash,
     )
 
-    dataset = Dataset(
-        id=str(uuid.uuid4()), organization_id=org_id, name="RL DS", source="uploaded"
-    )
+    dataset = Dataset(id=str(uuid.uuid4()), organization_id=org_id, name="RL DS", source="uploaded")
 
     db.add_all([org, user, membership, api_key, dataset])
     await db.commit()
@@ -136,9 +134,7 @@ async def test_rate_limit_per_key_blocks_after_limit(
                     headers={"Authorization": f"Bearer {raw_key}"},
                     json={"dataset_id": dataset_id, "query": f"q{i}"},
                 )
-                assert resp.status_code == 200, (
-                    f"Request {i + 1} unexpectedly blocked: {resp.text}"
-                )
+                assert resp.status_code == 200, f"Request {i + 1} unexpectedly blocked: {resp.text}"
 
             # (N+1)-th must be blocked
             resp = await client.post(
@@ -146,9 +142,7 @@ async def test_rate_limit_per_key_blocks_after_limit(
                 headers={"Authorization": f"Bearer {raw_key}"},
                 json={"dataset_id": dataset_id, "query": "over-limit"},
             )
-            assert resp.status_code == 429, (
-                f"Expected 429, got {resp.status_code}: {resp.text}"
-            )
+            assert resp.status_code == 429, f"Expected 429, got {resp.status_code}: {resp.text}"
             body = resp.json()
             assert body["detail"]["detail"] == "rate_limit_exceeded"
             assert body["detail"]["scope"] == "key"
@@ -238,9 +232,7 @@ async def test_rate_limit_per_org_blocks_when_multiple_keys_exhaust(
                     json={"dataset_id": dataset.id, "query": f"q{i}"},
                 )
                 # retriever returns empty → 200 with no-chunks answer
-                assert resp.status_code == 200, (
-                    f"Request {i + 1} unexpectedly blocked: {resp.text}"
-                )
+                assert resp.status_code == 200, f"Request {i + 1} unexpectedly blocked: {resp.text}"
 
             # The 4th request (over org_limit=3) should be blocked
             resp = await client.post(
@@ -248,9 +240,7 @@ async def test_rate_limit_per_org_blocks_when_multiple_keys_exhaust(
                 headers={"Authorization": f"Bearer {raw_key_b}"},
                 json={"dataset_id": dataset.id, "query": "over-org-limit"},
             )
-            assert resp.status_code == 429, (
-                f"Expected 429, got {resp.status_code}: {resp.text}"
-            )
+            assert resp.status_code == 429, f"Expected 429, got {resp.status_code}: {resp.text}"
             body = resp.json()
             assert body["detail"]["detail"] == "rate_limit_exceeded"
             assert body["detail"]["scope"] == "org"
@@ -324,8 +314,8 @@ async def test_rate_limit_redis_down_fail_open(
                 json={"dataset_id": dataset_id, "query": "redis is down"},
             )
             # Must pass through despite Redis being down
-            assert resp.status_code == 200, (
-                f"Expected 200 (fail-open), got {resp.status_code}: {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Expected 200 (fail-open), got {resp.status_code}: {resp.text}"
     finally:
         app.dependency_overrides.pop(get_redis, None)
