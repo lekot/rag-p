@@ -76,3 +76,8 @@ ignore_missing_imports = true
 # fakeredis is a dev-only test dependency; no py.typed marker
 module = ["fakeredis", "fakeredis.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# redis-py ships py.typed but Redis class is not generic in all versions
+module = ["redis", "redis.*"]
+disable_error_codes = ["type-arg"]
