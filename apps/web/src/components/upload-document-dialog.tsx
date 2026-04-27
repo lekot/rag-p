@@ -14,7 +14,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const ACCEPTED_EXTENSIONS = [".txt", ".md"];
+const ACCEPTED_EXTENSIONS = [
+  ".txt",
+  ".md",
+  ".markdown",
+  ".json",
+  ".jsonl",
+  ".ndjson",
+  ".csv",
+  ".tsv",
+  ".yaml",
+  ".yml",
+  ".xml",
+  ".html",
+  ".htm",
+  ".rst",
+  ".org",
+  ".log",
+];
 
 interface UploadDocumentDialogProps {
   open: boolean;
@@ -179,7 +196,7 @@ export function UploadDocumentDialog({
 
           {/* Drag-and-drop area */}
           <div>
-            <Label>File (.txt, .md, max 10 MB)</Label>
+            <Label>File (.txt, .md, .json, .csv, .yaml, .xml, .html, …, max 10 MB)</Label>
             <div
               data-testid="drop-zone"
               className={`mt-1 border-2 border-dashed rounded-md p-6 text-center cursor-pointer transition-colors ${

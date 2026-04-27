@@ -18,8 +18,42 @@ from ragp_api.plugins.registry import get_plugin
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_CONTENT_TYPES = {"text/plain", "text/markdown"}
-_ALLOWED_EXTENSIONS = {".txt", ".md"}
+_ALLOWED_CONTENT_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "text/csv",
+    "text/tab-separated-values",
+    "text/html",
+    "text/xml",
+    "application/xml",
+    "application/json",
+    "application/x-ndjson",
+    "application/x-yaml",
+    "application/yaml",
+    "text/yaml",
+    "text/x-yaml",
+    "text/x-rst",
+    "text/x-org",
+}
+_ALLOWED_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".jsonl",
+    ".ndjson",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".rst",
+    ".org",
+    ".log",
+}
 
 
 class DatasetCreateIn(BaseModel):
@@ -232,7 +266,11 @@ async def upload_document(
     if content_type not in _ALLOWED_CONTENT_TYPES and ext not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type: {content_type or ext}. Allowed: .txt, .md",
+            detail=(
+                f"Unsupported file type: {content_type or ext}. "
+                "Allowed text formats: .txt, .md, .json, .jsonl, .csv, .tsv, "
+                ".yaml, .yml, .xml, .html, .rst, .org, .log."
+            ),
         )
 
     # Read and size-limit

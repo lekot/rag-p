@@ -1,4 +1,5 @@
 import io
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -65,6 +66,37 @@ async def test_upload_md_file(client: AsyncClient, organization_id: str):
     )
     assert resp.status_code == 201
     assert resp.json()["chunk_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_upload_json_file(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    content = json.dumps({"items": [{"id": i, "text": "fact " * 30} for i in range(20)]})
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("kb.json", io.BytesIO(content.encode()), "application/json")},
+        data={"chunker_name": "recursive-character"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["chunk_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_upload_csv_by_extension(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    rows = "\n".join(f"{i},name-{i},value-{i * 10}" for i in range(50))
+    content = f"id,name,value\n{rows}\n"
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        # content-type intentionally generic — extension must drive acceptance
+        files={"file": ("data.csv", io.BytesIO(content.encode()), "application/octet-stream")},
+        data={"chunker_name": "recursive-character"},
+    )
+    assert resp.status_code == 201
 
 
 @pytest.mark.asyncio
