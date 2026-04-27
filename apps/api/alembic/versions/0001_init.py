@@ -17,9 +17,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
-
+    # Extensions are created during CNPG bootstrap (postInitSQL) under the
+    # superuser. The migration runs as the application user which lacks
+    # CREATE EXTENSION privileges, so we skip it here. The Cluster manifest
+    # is the source of truth for required extensions.
     op.create_table(
         "organizations",
         sa.Column("id", sa.String(36), primary_key=True),
