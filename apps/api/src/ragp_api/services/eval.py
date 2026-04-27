@@ -37,7 +37,9 @@ async def evaluate_run(
 
         result = evaluate(dataset, metrics=metrics)
         # ragas EvaluationResult supports dict-like iteration; cast to typed dict
-        return {str(k): float(v) for k, v in dict(result).items()}  # type: ignore[call-overload]
+        # ragas EvaluationResult lacks stable typing across versions
+        items_view: Any = result
+        return {str(k): float(v) for k, v in dict(items_view).items()}
     except ImportError:
         # TODO: install ragas and datasets packages
         return {"faithfulness": 0.0, "answer_relevancy": 0.0}
