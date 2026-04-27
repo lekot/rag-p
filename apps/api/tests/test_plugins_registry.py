@@ -7,16 +7,20 @@ EXPECTED_NAMES = {
     "recursive-character",
     "markdown-aware",
     "litellm-embedder",
+    "cohere-embedder",
+    "ollama-embedder",
     "pgvector-hybrid",
     "cohere",
     "litellm-generator",
 }
 
 
-def test_registry_has_all_six_plugins():
+def test_registry_has_all_expected_plugins():
     plugins = list_plugins()
     names = {p["name"] for p in plugins}
-    assert names == EXPECTED_NAMES, f"Missing plugins: {EXPECTED_NAMES - names}"
+    assert names == EXPECTED_NAMES, (
+        f"Missing: {EXPECTED_NAMES - names}; extra: {names - EXPECTED_NAMES}"
+    )
 
 
 def test_registry_covers_all_kinds():

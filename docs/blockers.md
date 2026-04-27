@@ -40,11 +40,18 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] Pre-existing test failure — test_plugins_registry
+## ~~[BLOCKED-NIGHT-RUN] Pre-existing test failure — test_plugins_registry~~ RESOLVED
 
-- **Where**: `apps/api/tests/test_plugins_registry.py::test_registry_has_all_six_plugins`
-- **Why blocked**: Тест падал ДО наших изменений — `EXPECTED_NAMES` не включает `ollama-embedder` и `cohere-embedder`, которые есть в реестре.
-- **Workaround applied**: Тест исключён из gate (`--ignore=tests/test_plugins_registry.py`).
-- **Decision needed**: Обновить `EXPECTED_NAMES` в тесте.
+- **Where**: `apps/api/tests/test_plugins_registry.py`
+- **Resolved**: `EXPECTED_NAMES` дополнен `ollama-embedder` и `cohere-embedder`. Тест переименован в `test_registry_has_all_expected_plugins` (стало 8 плагинов, не 6). Все 5 тестов в файле проходят.
+
+---
+
+## [BLOCKED-NIGHT-RUN] Pytest не в CI gate
+
+- **Where**: `.github/workflows/ci.yml`
+- **Why blocked**: CI прогоняет ruff + mypy + web + helm, но **не** pytest. Поэтому регресс в тестах ловится только локально или в Sonnet-агенте.
+- **Workaround applied**: Тесты гоняют локально.
+- **Decision needed**: Добавить step `cd apps/api && uv sync --all-packages && uv run pytest tests/` в lint-py job. Требует postgres-container или мокать БД целиком.
 
 <!-- ОТКРЫТЫЕ БЛОКЕРЫ ДОБАВЛЯЮТСЯ ВЫШЕ ЭТОЙ ЛИНИИ -->
