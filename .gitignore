@@ -58,7 +58,9 @@ logs/
 
 # Local infra state
 .kube/
+infra/.kube/
 kubeconfig
+*.kubeconfig
 kind-config.local.yaml
 
 # Misc

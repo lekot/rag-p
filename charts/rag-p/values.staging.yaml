@@ -1,78 +1,112 @@
-# Staging overrides for Hetzner k3s (2x CX22)
+# Selectel managed k8s staging — 1 node 2 vCPU / 8 GB RAM / 40 GB local SSD.
+# Single-instance pilot, no HA, http only via *.139-100-200-55.nip.io.
+
 global:
   imageRegistry: "ghcr.io/lekot"
-  storageClass: "local-path"
+  storageClass: "fast.ru-3b"
+  imagePullSecrets:
+    - name: ghcr-pull
 
 api:
-  replicas: 2
+  image:
+    tag: "0.1.0"
+  replicas: 1
   resources:
     requests:
-      cpu: 200m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: 1000m
-      memory: 1Gi
+      cpu: 800m
+      memory: 768Mi
   ingress:
     enabled: true
     className: traefik
-    host: api.staging.rag-p.io
-    tls: true
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: api.139-100-200-55.nip.io
+    tls: false
 
 web:
-  replicas: 2
+  image:
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   ingress:
     enabled: true
     className: traefik
-    host: staging.rag-p.io
-    tls: true
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: 139-100-200-55.nip.io
+    tls: false
   env:
-    NEXT_PUBLIC_API_URL: "https://api.staging.rag-p.io"
+    NEXT_PUBLIC_API_URL: "http://api.139-100-200-55.nip.io"
 
 worker:
-  replicas: 2
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 postgres:
+  enabled: true
   cnpg:
-    instances: 2
+    instances: 1
     storage:
-      size: 20Gi
+      size: 10Gi
+      storageClass: "fast.ru-3b"
 
 redis:
+  enabled: true
   auth:
-    enabled: true
-    existingSecret: "redis-secret"
-  replica:
-    replicaCount: 1
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+  architecture: standalone
 
 langfuse:
+  enabled: true
   ingress:
     enabled: true
     className: traefik
-    host: langfuse.staging.rag-p.io
-    tls: true
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: langfuse.139-100-200-55.nip.io
+    tls: false
+
+permify:
+  enabled: true
 
 minio:
+  enabled: true
+  mode: standalone
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: "fast.ru-3b"
   auth:
-    existingSecret: "minio-secret"
+    rootUser: minio
+    rootPassword: changeme-staging-only
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
 
 litellm:
-  env:
-    LITELLM_MASTER_KEY: ""
+  enabled: true
+  config:
+    model_list: []
 
 externalSecrets:
-  enabled: true
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
+  enabled: false
 
 networkPolicy:
-  enabled: true
+  enabled: false
 
 observability:
   enabled: false
