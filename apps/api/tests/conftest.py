@@ -1,5 +1,4 @@
 import os
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -29,6 +28,8 @@ async def reset_registry():
 
 @pytest_asyncio.fixture
 async def db_engine():
+    from sqlalchemy import text
+
     engine = create_async_engine(_TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         if _IS_POSTGRES:
@@ -38,6 +39,25 @@ async def db_engine():
                 __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
             )
         await conn.run_sync(Base.metadata.create_all)
+        # Seed the canonical test organisation that most tests reference via
+        # X-Organization-Id or the `organization_id` fixture.  PostgreSQL
+        # enforces FK constraints (SQLite does not), so the row must exist
+        # before any Dataset / Document / Experiment can reference it.
+        if _IS_POSTGRES:
+            await conn.execute(
+                text(
+                    "INSERT INTO organizations (id, name, slug) "
+                    "VALUES ('org-test-001', 'Test Org', 'test-org') "
+                    "ON CONFLICT (id) DO NOTHING"
+                )
+            )
+        else:
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO organizations (id, name, slug) "
+                    "VALUES ('org-test-001', 'Test Org', 'test-org')"
+                )
+            )
     yield engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -69,32 +89,3 @@ async def client(db_engine):
 @pytest.fixture
 def organization_id() -> str:
     return "org-test-001"
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def seed_test_organization(db_engine: Any) -> None:
-    """Ensure the stub org 'org-test-001' exists in the DB before each test.
-
-    PostgreSQL enforces FK constraints (SQLite does not), so any
-    Dataset/Document/etc. that references organization_id='org-test-001'
-    needs the row to exist first. This fixture upserts it safely.
-    """
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    if _IS_POSTGRES:
-        insert_sql = (
-            "INSERT INTO organizations (id, name, slug) "
-            "VALUES ('org-test-001', 'Test Org', 'test-org') "
-            "ON CONFLICT (id) DO NOTHING"
-        )
-    else:
-        # SQLite upsert syntax
-        insert_sql = (
-            "INSERT OR IGNORE INTO organizations (id, name, slug) "
-            "VALUES ('org-test-001', 'Test Org', 'test-org')"
-        )
-    session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-    async with session_factory() as session:
-        await session.execute(text(insert_sql))
-        await session.commit()
