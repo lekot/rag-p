@@ -12,6 +12,37 @@ const DatasetSchema = z.object({
 
 export type Dataset = z.infer<typeof DatasetSchema>;
 
+const DocumentSummarySchema = z.object({
+  id: z.string(),
+  source_uri: z.string(),
+  status: z.string(),
+  parsed_at: z.string().nullable().optional(),
+  chunk_count: z.number(),
+});
+
+export type DocumentSummary = z.infer<typeof DocumentSummarySchema>;
+
+const ChunkSchema = z.object({
+  index: z.number(),
+  text: z.string(),
+  len: z.number(),
+  metadata: z.record(z.unknown()),
+  has_embedding: z.boolean().optional(),
+});
+
+export type Chunk = z.infer<typeof ChunkSchema>;
+
+const DocumentDetailSchema = z.object({
+  id: z.string(),
+  source_uri: z.string(),
+  status: z.string(),
+  parsed_at: z.string().nullable().optional(),
+  chunk_count: z.number(),
+  chunks: z.array(ChunkSchema),
+});
+
+export type DocumentDetail = z.infer<typeof DocumentDetailSchema>;
+
 export const datasetsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return apiClient.get<Dataset[]>(
@@ -19,11 +50,17 @@ export const datasetsRouter = router({
     );
   }),
 
+  byId: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ input }) => {
+      return apiClient.get<Dataset>(`/api/v1/datasets/${input.id}`);
+    }),
+
   create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1),
-        source: z.string(),
+        source: z.string().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -41,4 +78,22 @@ export const datasetsRouter = router({
         {}
       );
     }),
+
+  documents: router({
+    list: protectedProcedure
+      .input(z.object({ datasetId: z.string() }))
+      .query(async ({ input }) => {
+        return apiClient.get<DocumentSummary[]>(
+          `/api/v1/datasets/${input.datasetId}/documents`
+        );
+      }),
+
+    byId: protectedProcedure
+      .input(z.object({ datasetId: z.string(), docId: z.string() }))
+      .query(async ({ input }) => {
+        return apiClient.get<DocumentDetail>(
+          `/api/v1/datasets/${input.datasetId}/documents/${input.docId}`
+        );
+      }),
+  }),
 });

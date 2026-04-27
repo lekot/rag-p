@@ -8,6 +8,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from pgvector.sqlalchemy import Vector
 
 revision: str = "0001"
 down_revision: Union[str, None] = None
@@ -92,9 +93,10 @@ def upgrade() -> None:
         "chunks",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("document_id", sa.String(36), sa.ForeignKey("documents.id"), nullable=False),
+        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
         sa.Column("text", sa.Text, nullable=False),
-        sa.Column("embedding", sa.Text, nullable=True),  # stored as text, cast in queries
-        sa.Column("tsvector_col", sa.Text, nullable=True),  # tsvector stored as text for portability
+        sa.Column("embedding", Vector(1536), nullable=True),
+        sa.Column("tsvector_col", sa.Text, nullable=True),
         sa.Column("metadata_json", sa.JSON, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )

@@ -206,6 +206,14 @@ networkPolicy:
   cilium:
     enabled: false
 
+# Let's Encrypt ClusterIssuer for cert-manager (created if tls.enabled)
+tls:
+  enabled: false
+  issuerName: letsencrypt-prod
+  acmeServer: https://acme-v02.api.letsencrypt.org/directory
+  email: ""
+  ingressClass: traefik
+
 # Observability stack (prod only)
 observability:
   enabled: false

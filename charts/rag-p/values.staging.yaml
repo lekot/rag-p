@@ -1,5 +1,12 @@
 # Selectel managed k8s staging — 1 node 2 vCPU / 8 GB RAM / 40 GB local SSD.
-# Single-instance pilot, no HA, http only via *.139-100-200-55.nip.io.
+# Single-instance pilot, https via lekottt.ru / api.lekottt.ru.
+
+tls:
+  enabled: true
+  issuerName: letsencrypt-prod
+  acmeServer: https://acme-v02.api.letsencrypt.org/directory
+  email: papanifontov@gmail.com
+  ingressClass: traefik
 
 global:
   imageRegistry: ""
@@ -10,7 +17,7 @@ global:
 api:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.1"
+    tag: "0.1.2"
   replicas: 1
   resources:
     requests:
@@ -22,13 +29,15 @@ api:
   ingress:
     enabled: true
     className: traefik
-    host: api.139-100-200-55.nip.io
-    tls: false
+    host: api.lekottt.ru
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
 
 web:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.1"
+    tag: "0.1.2"
   replicas: 1
   resources:
     requests:
@@ -40,10 +49,12 @@ web:
   ingress:
     enabled: true
     className: traefik
-    host: 139-100-200-55.nip.io
-    tls: false
+    host: lekottt.ru
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
   env:
-    NEXT_PUBLIC_API_URL: "http://api.139-100-200-55.nip.io"
+    NEXT_PUBLIC_API_URL: "https://api.lekottt.ru"
 
 worker:
   enabled: false
