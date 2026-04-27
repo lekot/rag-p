@@ -34,7 +34,7 @@ global:
 api:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.18"
+    tag: "0.1.19"
   replicas: 1
   resources:
     requests:
@@ -54,7 +54,7 @@ api:
 web:
   image:
     registry: "ghcr.io/lekot"
-    tag: "0.1.18"
+    tag: "0.1.19"
   replicas: 1
   resources:
     requests:
