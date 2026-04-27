@@ -23,9 +23,12 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
-COPY --from=builder /repo/apps/web/public ./public
+# In a pnpm workspace + Next.js standalone build, server.js lives at
+# /app/apps/web/server.js and serves /_next/static from apps/web/.next/static
+# (relative to its own location). Copy public + static into that subdir.
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/public ./apps/web/public
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/web/.next/static ./apps/web/.next/static
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
