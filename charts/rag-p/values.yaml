@@ -211,6 +211,22 @@ networkPolicy:
 # ANTHROPIC_API_KEY, MINIMAX_API_KEY). Mounted into api/worker via envFrom.
 llmKeysSecret: ""
 
+# Self-hosted embedding service. Pulls model on first start and caches in PVC.
+ollama:
+  enabled: false
+  image: ollama/ollama:0.4.7
+  model: bge-m3
+  storage:
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
 tls:
   enabled: false
   issuerName: letsencrypt-prod

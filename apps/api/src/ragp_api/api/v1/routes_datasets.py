@@ -305,12 +305,18 @@ async def upload_document(
         )
     db.add_all(chunk_objs)
 
-    # Try embeddings: prefer Cohere (1024-dim, our pgvector column), fallback OpenAI via litellm
+    # Pick an embedder by what credentials/services are reachable.
+    # Order: local Ollama → Cohere → OpenAI/litellm. All produce 1024-dim by default.
     embedded = False
+    ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     embedder = None
-    if cohere_key:
+    if ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
+        if embedder_cls is not None:
+            embedder = embedder_cls({"model": "bge-m3"})
+    elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
             embedder = embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
