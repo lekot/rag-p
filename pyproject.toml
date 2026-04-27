@@ -61,3 +61,13 @@ ignore_missing_imports = true
 # ragas and datasets have no py.typed marker
 module = ["ragas", "ragas.*", "datasets"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pypdf has no py.typed marker
+module = ["pypdf", "pypdf.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# python-docx imports as "docx"; no py.typed marker
+module = ["docx", "docx.*"]
+ignore_missing_imports = true

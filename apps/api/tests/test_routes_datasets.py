@@ -508,3 +508,120 @@ async def test_ask_dataset_not_found_returns_404(client: AsyncClient, organizati
         json={"query": "hello", "top_k": 5},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PDF / DOCX upload
+# ---------------------------------------------------------------------------
+
+
+def _make_minimal_pdf_with_text(text: str) -> bytes:
+    """Build a minimal valid PDF containing *text* using pypdf's PdfWriter."""
+    from pypdf import PdfWriter  # type: ignore[import-untyped]
+    from pypdf.generic import (  # type: ignore[import-untyped]
+        DecodedStreamObject,
+        DictionaryObject,
+        NameObject,
+    )
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+
+    # Build a minimal content stream: BT ... ET
+    content_stream = DecodedStreamObject()
+    pdf_text = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    content_stream.set_data(f"BT /F1 12 Tf 72 720 Td ({pdf_text}) Tj ET".encode())
+
+    # Register font resource so the page is valid
+    font_dict = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    resources = DictionaryObject(
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font_dict)})}
+    )
+    page[NameObject("/Resources")] = resources  # type: ignore[index]
+    page[NameObject("/Contents")] = writer._add_object(content_stream)  # type: ignore[index]
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _make_empty_pdf() -> bytes:
+    """Build a valid PDF with one blank page (no text content stream)."""
+    from pypdf import PdfWriter  # type: ignore[import-untyped]
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _make_docx_with_text(text: str) -> bytes:
+    """Build a minimal DOCX file with one paragraph."""
+    from docx import Document  # type: ignore[import-untyped]
+
+    doc = Document()
+    doc.add_paragraph(text)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_extracts_text(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    pdf_bytes = _make_minimal_pdf_with_text("Hello PDF world. " * 50)
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("document.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+        data={"chunker_name": "recursive-character"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["chunk_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_upload_docx_extracts_text(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    docx_bytes = _make_docx_with_text("Hello DOCX world. " * 50)
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={
+            "file": (
+                "document.docx",
+                io.BytesIO(docx_bytes),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+        data={"chunker_name": "recursive-character"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["chunk_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_with_no_text_returns_422(client: AsyncClient, organization_id: str):
+    dataset_id = await _create_dataset(client, organization_id)
+    pdf_bytes = _make_empty_pdf()
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("blank.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+        data={"chunker_name": "recursive-character"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "No text" in detail or "no extractable text" in detail.lower()

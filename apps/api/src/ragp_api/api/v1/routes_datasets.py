@@ -14,6 +14,7 @@ from ragp_api.db.models import Chunk, Dataset, Document
 from ragp_api.deps import get_db, get_organization_id
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
+from ragp_api.services.file_parsers import parse_to_text
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -35,6 +36,8 @@ _ALLOWED_CONTENT_TYPES = {
     "text/x-yaml",
     "text/x-rst",
     "text/x-org",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 _ALLOWED_EXTENSIONS = {
     ".txt",
@@ -53,6 +56,8 @@ _ALLOWED_EXTENSIONS = {
     ".rst",
     ".org",
     ".log",
+    ".pdf",
+    ".docx",
 }
 
 
@@ -268,8 +273,8 @@ async def upload_document(
             status_code=415,
             detail=(
                 f"Unsupported file type: {content_type or ext}. "
-                "Allowed text formats: .txt, .md, .json, .jsonl, .csv, .tsv, "
-                ".yaml, .yml, .xml, .html, .rst, .org, .log."
+                "Allowed formats: .txt, .md, .json, .jsonl, .csv, .tsv, "
+                ".yaml, .yml, .xml, .html, .rst, .org, .log, .pdf, .docx."
             ),
         )
 
@@ -278,10 +283,7 @@ async def upload_document(
     if len(raw) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
 
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=422, detail="File must be valid UTF-8") from exc
+    text = parse_to_text(filename, content_type, raw)
 
     # Parse chunker params
     try:
