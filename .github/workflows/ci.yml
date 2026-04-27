@@ -30,7 +30,7 @@ jobs:
         run: uvx ruff@0.6.9 check apps/api
 
       - name: mypy
-        run: uvx --with-editable apps/api mypy apps/api/src
+        run: uvx --with-editable apps/api --with types-jsonschema mypy@1.10 apps/api/src
 
   lint-typecheck-web:
     name: Web lint + typecheck
