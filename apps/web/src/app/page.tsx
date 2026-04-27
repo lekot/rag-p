@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 export default function DashboardPage() {
   return (
@@ -15,9 +15,9 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Build and configure RAG pipelines with custom plugins.
             </p>
-            <Button asChild size="sm">
-              <Link href="/pipelines">View Pipelines</Link>
-            </Button>
+            <Link href="/pipelines" className={buttonVariants({ size: "sm" })}>
+              View Pipelines
+            </Link>
           </CardContent>
         </Card>
         <Card>
@@ -28,9 +28,9 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Compare pipeline combinations via the leaderboard.
             </p>
-            <Button asChild size="sm">
-              <Link href="/experiments">View Experiments</Link>
-            </Button>
+            <Link href="/experiments" className={buttonVariants({ size: "sm" })}>
+              View Experiments
+            </Link>
           </CardContent>
         </Card>
         <Card>
@@ -41,9 +41,9 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Upload or auto-generate evaluation datasets with RAGAS.
             </p>
-            <Button asChild size="sm">
-              <Link href="/datasets">View Datasets</Link>
-            </Button>
+            <Link href="/datasets" className={buttonVariants({ size: "sm" })}>
+              View Datasets
+            </Link>
           </CardContent>
         </Card>
       </div>
