@@ -51,6 +51,7 @@ class Organization(Base):
     memberships: Mapped[list["Membership"]] = relationship(back_populates="organization")
     pipelines: Mapped[list["Pipeline"]] = relationship(back_populates="organization")
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="organization")
+    api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="organization")
 
 
 class User(Base):
@@ -58,9 +59,11 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     memberships: Mapped[list["Membership"]] = relationship(back_populates="user")
+    api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user")
 
 
 class Membership(Base):
@@ -203,3 +206,21 @@ class Experiment(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     leaderboard_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped["Organization"] = relationship(back_populates="api_keys")
+    user: Mapped["User"] = relationship(back_populates="api_keys")

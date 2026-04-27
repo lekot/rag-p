@@ -30,6 +30,10 @@ api:
     DATABASE_URL: ""
     REDIS_URL: ""
     MINIO_ENDPOINT: ""
+  apiSecrets:
+    # RAGP_SESSION_SECRET — secret for signing session cookies.
+    # Override in values.staging.yaml / values.prod.yaml via a proper k8s Secret.
+    sessionSecret: "dev-only-not-secret-change-in-prod"
   autoscaling:
     enabled: false
     minReplicas: 2
