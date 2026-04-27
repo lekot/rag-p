@@ -95,6 +95,9 @@ jobs:
           push: true
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.lekottt.ru
+            NEXT_PUBLIC_ORG_ID=00000000-0000-0000-0000-000000000001
           tags: |
             ${{ env.IMAGE_PREFIX }}/rag-p-web:${{ steps.tag.outputs.value }}
             ${{ env.IMAGE_PREFIX }}/rag-p-web:staging-latest

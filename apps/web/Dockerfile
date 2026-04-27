@@ -8,6 +8,12 @@ FROM base AS builder
 # devDependencies — postcss/tailwindcss/autoprefixer are needed for next build
 # to compile CSS). Splitting into deps/builder lost the per-package symlinks.
 ENV NODE_ENV=development
+# NEXT_PUBLIC_* variables are baked into the client bundle at build time.
+# Pass them via --build-arg from CI; defaults are dev-friendly.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_ORG_ID=00000000-0000-0000-0000-000000000001
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_ORG_ID=${NEXT_PUBLIC_ORG_ID}
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile --prod=false --filter web...
