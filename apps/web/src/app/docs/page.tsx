@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 const API_BASE = "https://api.lekottt.ru";
 
@@ -37,6 +40,54 @@ const RESPONSE_EXAMPLE = `{
 
 export default function DocsPage() {
   const [copied, setCopied] = useState(false);
+
+  // Playground state
+  const [apiKey, setApiKey] = useState("");
+  const [datasetId, setDatasetId] = useState("");
+  const [query, setQuery] = useState("");
+  const [topK, setTopK] = useState(5);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const didInit = useRef(false);
+
+  useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const dsId = params.get("dataset_id");
+    if (dsId) setDatasetId(dsId);
+  }, []);
+
+  async function handleRun() {
+    setRunning(true);
+    setResult(null);
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/rag/query`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dataset_id: datasetId, query, top_k: topK }),
+      });
+      const text = await resp.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
+      if (!resp.ok) {
+        setResult(JSON.stringify({ error: resp.status, body: parsed }, null, 2));
+      } else {
+        setResult(JSON.stringify(parsed, null, 2));
+      }
+    } catch (err) {
+      setResult(JSON.stringify({ error: String(err) }, null, 2));
+    } finally {
+      setRunning(false);
+    }
+  }
 
   function handleCopy() {
     void navigator.clipboard.writeText(CURL_EXAMPLE).then(() => {
@@ -195,6 +246,77 @@ export default function DocsPage() {
             <pre className="bg-muted rounded p-3 text-xs font-mono overflow-x-auto whitespace-pre">
               {CURL_EXAMPLE}
             </pre>
+          </div>
+
+          {/* Try it now */}
+          <div className="border rounded-lg p-4 space-y-4 bg-muted/30">
+            <h3 className="font-semibold">Try it now</h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="try-apikey" className="text-xs">API key</Label>
+                <Input
+                  id="try-apikey"
+                  type="password"
+                  placeholder="rgp_..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="text-xs font-mono h-8"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="try-dataset" className="text-xs">Dataset ID</Label>
+                <Input
+                  id="try-dataset"
+                  type="text"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  value={datasetId}
+                  onChange={(e) => setDatasetId(e.target.value)}
+                  className="text-xs font-mono h-8"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="try-query" className="text-xs">Query</Label>
+              <Textarea
+                id="try-query"
+                placeholder="What is...?"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                rows={2}
+                className="text-xs resize-none"
+              />
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="try-topk" className="text-xs">top_k</Label>
+                <Input
+                  id="try-topk"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={topK}
+                  onChange={(e) => setTopK(Number(e.target.value))}
+                  className="text-xs w-20 h-8"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={() => void handleRun()}
+                disabled={running || !apiKey || !datasetId || !query}
+                className="mt-5"
+              >
+                {running ? "Running..." : "Run"}
+              </Button>
+            </div>
+            {result !== null && (
+              <pre className="bg-background border rounded p-3 text-xs font-mono overflow-x-auto whitespace-pre max-h-80 overflow-y-auto">
+                {result}
+              </pre>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Этот вызов идентичен curl-команде сверху. Ключ хранится только в памяти браузера,
+              не отправляется на наш сервер кроме как через CORS-запрос к API.
+            </p>
           </div>
 
           {/* Response example */}
