@@ -1,6 +1,6 @@
 """RecursiveCharacterChunker — wraps LangChain RecursiveCharacterTextSplitter."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from ragp_api.plugins.base import Chunker, CostEstimate, HealthStatus
 from ragp_api.plugins.registry import register
@@ -10,7 +10,7 @@ from ragp_api.plugins.registry import register
 class RecursiveCharacterChunker(Chunker):
     name = "recursive-character"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "chunk_size": {"type": "integer", "default": 512, "minimum": 64},
@@ -20,7 +20,7 @@ class RecursiveCharacterChunker(Chunker):
         "default": {"chunk_size": 512, "chunk_overlap": 64},
     }
 
-    async def chunk(self, text: str) -> list[dict]:
+    async def chunk(self, text: str) -> list[dict[str, Any]]:
         chunk_size: int = self.params.get("chunk_size", 512)
         chunk_overlap: int = self.params.get("chunk_overlap", 64)
 

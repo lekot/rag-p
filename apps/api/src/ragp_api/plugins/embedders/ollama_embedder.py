@@ -1,7 +1,7 @@
 """OllamaEmbedder — embeddings via local Ollama HTTP API."""
 
 import os
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -28,7 +28,7 @@ def _resolve_dim(model: str) -> int:
 class OllamaEmbedder(Embedder):
     name = "ollama-embedder"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "model": {

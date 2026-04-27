@@ -1,6 +1,6 @@
 """PgvectorHybridRetriever — tsvector + pgvector + RRF fusion."""
 
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, HealthStatus, Retriever
 from ragp_api.plugins.registry import register
@@ -12,7 +12,7 @@ _RRF_K = 60
 class PgvectorHybridRetriever(Retriever):
     name = "pgvector-hybrid"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "weight_dense": {"type": "number", "default": 0.7, "minimum": 0, "maximum": 1},
@@ -36,7 +36,7 @@ class PgvectorHybridRetriever(Retriever):
         organization_id: str,
         dataset_id: str | None = None,
         query_vec: list[float] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Requires a live DB session injected via params['session'] at call time.
 
         Args:
@@ -63,7 +63,8 @@ class PgvectorHybridRetriever(Retriever):
             import litellm
 
             embed_resp = await litellm.aembedding(model=embedding_model, input=[query])
-            query_vec = embed_resp.data[0]["embedding"]
+            # embed_resp.data is untyped in litellm
+            query_vec = cast(list[float], embed_resp.data[0]["embedding"])
 
         vec_str = "[" + ",".join(str(v) for v in query_vec) + "]"
 
@@ -125,7 +126,7 @@ class PgvectorHybridRetriever(Retriever):
             """
         )
 
-        params: dict = {
+        params: dict[str, Any] = {
             "query_vec": vec_str,
             "query": query,
             "org_id": organization_id,

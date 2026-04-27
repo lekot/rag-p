@@ -1,6 +1,6 @@
 """MarkdownAwareChunker — wraps LangChain MarkdownHeaderTextSplitter."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from ragp_api.plugins.base import Chunker, CostEstimate, HealthStatus
 from ragp_api.plugins.registry import register
@@ -12,7 +12,7 @@ _DEFAULT_HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3")]
 class MarkdownAwareChunker(Chunker):
     name = "markdown-aware"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "chunk_size": {"type": "integer", "default": 512, "minimum": 64},
@@ -22,7 +22,7 @@ class MarkdownAwareChunker(Chunker):
         "default": {"chunk_size": 512, "chunk_overlap": 64},
     }
 
-    async def chunk(self, text: str) -> list[dict]:
+    async def chunk(self, text: str) -> list[dict[str, Any]]:
         chunk_size: int = self.params.get("chunk_size", 512)
         chunk_overlap: int = self.params.get("chunk_overlap", 64)
 

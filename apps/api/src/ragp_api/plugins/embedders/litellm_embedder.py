@@ -1,6 +1,6 @@
 """LiteLLMEmbedder — OpenAI/Cohere/Ollama embeddings via LiteLLM."""
 
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
 from ragp_api.plugins.registry import register
@@ -10,7 +10,7 @@ from ragp_api.plugins.registry import register
 class LiteLLMEmbedder(Embedder):
     name = "litellm-embedder"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "model": {
@@ -36,7 +36,10 @@ class LiteLLMEmbedder(Embedder):
 
         model: str = self.params["model"]
         response = await litellm.aembedding(model=model, input=texts)
-        embeddings = [item["embedding"] for item in response.data]
+        # response.data is untyped in litellm; each item has an "embedding" list[float]
+        embeddings: list[list[float]] = [
+            cast(list[float], item["embedding"]) for item in response.data
+        ]
 
         if self._dim_cache is None and embeddings:
             self._dim_cache = len(embeddings[0])

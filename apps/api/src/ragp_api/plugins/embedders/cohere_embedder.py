@@ -1,7 +1,7 @@
 """CohereEmbedder — direct Cohere /v2/embed client (1024-dim v3 family)."""
 
 import os
-from typing import Any
+from typing import Any, ClassVar
 
 from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
 from ragp_api.plugins.registry import register
@@ -18,7 +18,7 @@ _DIMS = {
 class CohereEmbedder(Embedder):
     name = "cohere-embedder"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "model": {
@@ -43,17 +43,15 @@ class CohereEmbedder(Embedder):
 
         import cohere
 
-        client = cohere.AsyncClientV2(api_key)
-        try:
+        async with cohere.AsyncClientV2(api_key) as client:
             response = await client.embed(
                 model=self.params["model"],
                 texts=texts,
                 input_type=self.params.get("input_type", "search_document"),
                 embedding_types=["float"],
             )
-        finally:
-            await client.close()
-        return list(response.embeddings.float_)
+        # float_ is Optional[list[list[float]]]; embedding_types=["float"] guarantees it's set
+        return list(response.embeddings.float_ or [])
 
     @property
     def dim(self) -> int:

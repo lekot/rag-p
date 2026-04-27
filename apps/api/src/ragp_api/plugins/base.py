@@ -36,7 +36,7 @@ class Chunker(PluginBase):
     kind = "chunker"
 
     @abstractmethod
-    async def chunk(self, text: str) -> list[dict]: ...
+    async def chunk(self, text: str) -> list[dict[str, Any]]: ...
 
 
 class Embedder(PluginBase):
@@ -54,18 +54,27 @@ class Retriever(PluginBase):
     kind = "retriever"
 
     @abstractmethod
-    async def retrieve(self, query: str, top_k: int, organization_id: str) -> list[dict]: ...
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int,
+        organization_id: str,
+        dataset_id: str | None = None,
+        query_vec: list[float] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 class Reranker(PluginBase):
     kind = "reranker"
 
     @abstractmethod
-    async def rerank(self, query: str, candidates: list[dict], top_k: int) -> list[dict]: ...
+    async def rerank(
+        self, query: str, candidates: list[dict[str, Any]], top_k: int
+    ) -> list[dict[str, Any]]: ...
 
 
 class Generator(PluginBase):
     kind = "generator"
 
     @abstractmethod
-    async def generate(self, query: str, contexts: list[dict]) -> dict: ...
+    async def generate(self, query: str, contexts: list[dict[str, Any]]) -> dict[str, Any]: ...

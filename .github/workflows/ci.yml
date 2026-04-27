@@ -29,6 +29,9 @@ jobs:
       - name: ruff lint
         run: uvx ruff@0.6.9 check apps/api
 
+      - name: mypy
+        run: uvx --with-editable apps/api mypy apps/api/src
+
   lint-typecheck-web:
     name: Web lint + typecheck
     runs-on: ubuntu-latest

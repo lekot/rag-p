@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import jsonschema
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, Dataset, Document
 from ragp_api.deps import get_db, get_organization_id
+from ragp_api.plugins.base import Chunker, Embedder, Retriever
 from ragp_api.plugins.registry import get_plugin
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -70,7 +71,7 @@ async def list_datasets(
 
 
 @router.post("/{dataset_id}/generate", status_code=202)
-async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
     dataset = result.scalar_one_or_none()
     if dataset is None:
@@ -266,7 +267,7 @@ async def upload_document(
             status_code=422, detail=f"Invalid chunker params: {exc.message}"
         ) from exc
 
-    chunker = chunker_cls(merged_params)
+    chunker = cast(Chunker, chunker_cls(merged_params))
 
     # Create document record
     now = datetime.now(tz=UTC)
@@ -308,21 +309,22 @@ async def upload_document(
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
-    embedder = None
+    embedder: Embedder | None = None
     if ollama_host:
         embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls({"model": "bge-m3"})
+            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
     elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls(
-                {"model": "embed-multilingual-v3.0", "input_type": "search_document"}
+            embedder = cast(
+                Embedder,
+                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"}),
             )
     elif openai_key:
         embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls({"model": "openai/text-embedding-3-small"})
+            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
     if embedder is not None:
         try:
             texts = [c.text for c in chunk_objs]
@@ -396,21 +398,22 @@ async def search_dataset(
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
-    embedder = None
+    embedder: Embedder | None = None
     if ollama_host:
         embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls({"model": "bge-m3"})
+            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
     elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls(
-                {"model": "embed-multilingual-v3.0", "input_type": "search_query"}
+            embedder = cast(
+                Embedder,
+                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
             )
     elif openai_key:
         embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls({"model": "openai/text-embedding-3-small"})
+            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
 
     query_vec: list[float] | None = None
     if embedder is not None:
@@ -426,7 +429,7 @@ async def search_dataset(
     if retriever_cls is None:
         raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
 
-    retriever = retriever_cls({"session": db})
+    retriever = cast(Retriever, retriever_cls({"session": db}))
     raw_chunks = await retriever.retrieve(
         query=body.query,
         top_k=body.top_k,

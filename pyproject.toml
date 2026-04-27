@@ -31,3 +31,33 @@ show_error_codes = true
 ignore_missing_imports = false
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# pgvector has no py.typed marker or stubs; Vector is used only in column definitions
+module = "pgvector.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# litellm has no py.typed marker; return types are dynamic wrappers
+module = "litellm"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# cohere SDK ships stubs in some versions but not consistently across v5
+module = "cohere"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# langfuse has no py.typed marker
+module = "langfuse"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# langchain text splitters have no py.typed marker
+module = "langchain_text_splitters"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# ragas and datasets have no py.typed marker
+module = ["ragas", "ragas.*", "datasets"]
+ignore_missing_imports = true

@@ -1,6 +1,6 @@
 """CohereReranker — Cohere rerank API."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from ragp_api.plugins.base import CostEstimate, HealthStatus, Reranker
 from ragp_api.plugins.registry import register
@@ -10,7 +10,7 @@ from ragp_api.plugins.registry import register
 class CohereReranker(Reranker):
     name = "cohere"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "model": {
@@ -24,7 +24,9 @@ class CohereReranker(Reranker):
         "default": {"model": "rerank-english-v3.0"},
     }
 
-    async def rerank(self, query: str, candidates: list[dict], top_k: int) -> list[dict]:
+    async def rerank(
+        self, query: str, candidates: list[dict[str, Any]], top_k: int
+    ) -> list[dict[str, Any]]:
         try:
             import cohere
 

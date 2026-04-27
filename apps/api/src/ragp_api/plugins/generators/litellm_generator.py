@@ -1,6 +1,6 @@
 """LiteLLMGenerator — LLM answer generation via LiteLLM."""
 
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
@@ -14,7 +14,7 @@ _PROMPT_TEMPLATE = (
 class LiteLLMGenerator(Generator):
     name = "litellm-generator"
     version = "0.1.0"
-    params_schema: dict[str, Any] = {
+    params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "model": {
@@ -37,7 +37,7 @@ class LiteLLMGenerator(Generator):
         },
     }
 
-    async def generate(self, query: str, contexts: list[dict]) -> dict:
+    async def generate(self, query: str, contexts: list[dict[str, Any]]) -> dict[str, Any]:
         import litellm
 
         model: str = self.params["model"]
@@ -61,8 +61,9 @@ class LiteLLMGenerator(Generator):
             max_tokens=max_tokens,
         )
 
-        answer = response.choices[0].message.content or ""
-        trace = {
+        # response is untyped in litellm; cast to str to satisfy strict mode
+        answer = cast(str, response.choices[0].message.content) or ""
+        trace: dict[str, Any] = {
             "model": model,
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
