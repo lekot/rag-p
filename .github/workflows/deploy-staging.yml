@@ -1,0 +1,159 @@
+name: Deploy to staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/lekot
+
+jobs:
+  build-api:
+    name: Build api image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tag
+        id: tag
+        run: echo "value=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push api
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/api
+          push: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/rag-p-api:${{ steps.tag.outputs.value }}
+            ${{ env.IMAGE_PREFIX }}/rag-p-api:staging-latest
+
+  build-web:
+    name: Build web image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tag
+        id: tag
+        run: echo "value=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/rag-p-web:${{ steps.tag.outputs.value }}
+            ${{ env.IMAGE_PREFIX }}/rag-p-web:staging-latest
+
+  deploy:
+    name: Deploy to Selectel staging
+    needs: [build-api, build-web]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.7
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Pre-deploy info
+        run: |
+          kubectl -n rag-p get pods
+          helm -n rag-p history rag-p | tail -5 || true
+
+      - name: Helm upgrade
+        id: upgrade
+        run: |
+          helm upgrade rag-p ./charts/rag-p \
+            -n rag-p \
+            -f charts/rag-p/values.staging.yaml \
+            --set api.image.tag=${{ needs.build-api.outputs.tag }} \
+            --set web.image.tag=${{ needs.build-web.outputs.tag }} \
+            --wait \
+            --timeout 6m
+
+      - name: Wait for rollouts
+        run: |
+          kubectl -n rag-p rollout status deploy/rag-p-api --timeout=180s
+          kubectl -n rag-p rollout status deploy/rag-p-web --timeout=180s
+
+      - name: Smoke test
+        run: |
+          set -e
+          echo "API healthz:"
+          curl -fsS --max-time 15 https://api.lekottt.ru/healthz
+          echo
+          echo "Web root (status only):"
+          status=$(curl -s -o /tmp/web.html -w "%{http_code}" --max-time 15 https://lekottt.ru/)
+          echo "HTTP $status"
+          if [ "$status" -ge 500 ]; then
+            echo "Web returned 5xx — failing smoke"
+            head -50 /tmp/web.html
+            exit 1
+          fi
+          if grep -q "Element type is invalid" /tmp/web.html; then
+            echo "Runtime error detected in HTML"
+            exit 1
+          fi
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deploy failed — rolling back"
+          helm -n rag-p rollback rag-p
+          kubectl -n rag-p get pods
