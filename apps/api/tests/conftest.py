@@ -39,23 +39,30 @@ async def db_engine():
                 __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
             )
         await conn.run_sync(Base.metadata.create_all)
-        # Seed the canonical test organisation that most tests reference via
+        # Seed the canonical test organisations that tests reference via
         # X-Organization-Id or the `organization_id` fixture.  PostgreSQL
-        # enforces FK constraints (SQLite does not), so the row must exist
-        # before any Dataset / Document / Experiment can reference it.
+        # enforces FK constraints (SQLite does not), so the rows must exist
+        # before any Dataset / Document / Experiment can reference them.
         if _IS_POSTGRES:
             await conn.execute(
                 text(
-                    "INSERT INTO organizations (id, name, slug) "
-                    "VALUES ('org-test-001', 'Test Org', 'test-org') "
+                    "INSERT INTO organizations (id, name, slug) VALUES "
+                    "('org-test-001', 'Test Org', 'test-org'), "
+                    "('other-org', 'Other Org', 'other-org') "
                     "ON CONFLICT (id) DO NOTHING"
                 )
             )
         else:
             await conn.execute(
                 text(
-                    "INSERT OR IGNORE INTO organizations (id, name, slug) "
-                    "VALUES ('org-test-001', 'Test Org', 'test-org')"
+                    "INSERT OR IGNORE INTO organizations (id, name, slug) VALUES "
+                    "('org-test-001', 'Test Org', 'test-org')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO organizations (id, name, slug) VALUES "
+                    "('other-org', 'Other Org', 'other-org')"
                 )
             )
     yield engine
