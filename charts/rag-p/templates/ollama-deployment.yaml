@@ -35,6 +35,42 @@ spec:
       labels:
         {{- include "rag-p.componentLabels" (dict "root" . "component" "ollama") | nindent 8 }}
     spec:
+      initContainers:
+        - name: pull-model
+          image: {{ .Values.ollama.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OLLAMA_HOST
+              value: "127.0.0.1:11434"
+            - name: OLLAMA_MODELS
+              value: /root/.ollama/models
+            - name: MODEL
+              value: {{ .Values.ollama.model | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              ollama serve >/tmp/serve.log 2>&1 &
+              SERVE_PID=$!
+              for i in $(seq 1 60); do
+                if ollama list >/dev/null 2>&1; then break; fi
+                sleep 1
+              done
+              if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "${MODEL}:latest"; then
+                echo "Model ${MODEL} already present, skipping pull."
+              else
+                echo "Pulling ${MODEL}..."
+                ollama pull "${MODEL}"
+              fi
+              kill "${SERVE_PID}" 2>/dev/null || true
+              wait "${SERVE_PID}" 2>/dev/null || true
+              echo "Init done."
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            {{- toYaml .Values.ollama.resources | nindent 12 }}
       containers:
         - name: ollama
           image: {{ .Values.ollama.image }}
@@ -67,18 +103,6 @@ spec:
               path: /
               port: http
             periodSeconds: 10
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    # Detached: wait for Ollama to be up, then pull the embedding model.
-                    nohup sh -c 'sleep 15; for i in 1 2 3 4 5 6 7 8 9 10; do
-                      ollama pull {{ .Values.ollama.model }} && break
-                      sleep 10
-                    done' >/tmp/pull.log 2>&1 &
       volumes:
         - name: models
           persistentVolumeClaim:

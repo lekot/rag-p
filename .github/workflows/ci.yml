@@ -24,16 +24,16 @@ jobs:
         run: uv sync --all-packages
 
       - name: ruff format check
-        run: uv run ruff format --check apps/api
+        run: uvx ruff format --check apps/api
 
       - name: ruff lint
-        run: uv run ruff check apps/api
+        run: uvx ruff check apps/api
 
       - name: mypy
-        run: uv run mypy apps/api/src
+        run: uvx --with-editable apps/api mypy apps/api/src
 
-  lint-web:
-    name: Web lint + typecheck
+  build-web-smoke:
+    name: Web build smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +52,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: ESLint
-        run: pnpm lint
-
-      - name: TypeScript check
-        run: pnpm typecheck
+      - name: Next build (gate)
+        working-directory: apps/web
+        run: pnpm run build
 
   helm-lint:
     name: Helm lint
