@@ -510,6 +510,81 @@ async def test_ask_dataset_not_found_returns_404(client: AsyncClient, organizati
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_ask_pipeline_path_returns_usage(
+    client: AsyncClient,
+    organization_id: str,
+    db_session,  # type: ignore[no-untyped-def]
+) -> None:
+    """When pipeline_id is used, usage.prompt_tokens must be > 0 (token passthrough)."""
+    from ragp_api.db.models import Pipeline, PipelineVersion
+
+    dataset_id = await _create_dataset(client, organization_id)
+
+    version_id = str(uuid.uuid4())
+    pipeline_id = str(uuid.uuid4())
+
+    nodes = [
+        {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}},
+        {
+            "plugin_kind": "generator",
+            "plugin_name": "litellm-generator",
+            "params": {"model": "deepseek/deepseek-v4-flash"},
+        },
+    ]
+    ver = PipelineVersion(id=version_id, pipeline_id=pipeline_id, nodes_json=nodes)
+    pl = Pipeline(
+        id=pipeline_id,
+        organization_id=organization_id,
+        name="Test Pipeline",
+        dataset_id=dataset_id,
+        current_version_id=version_id,
+    )
+    db_session.add_all([ver, pl])
+    await db_session.commit()
+
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": "context text",
+            "score": 0.9,
+            "metadata": {},
+            "document_id": str(uuid.uuid4()),
+            "document_name": "doc.txt",
+        }
+    ]
+
+    mock_run_result = {
+        "answer": "Pipeline answer",
+        "contexts": fake_chunks,
+        "traces": [
+            {
+                "kind": "generator",
+                "name": "litellm-generator",
+                "trace": {"usage": {"prompt_tokens": 55, "completion_tokens": 15}},
+            }
+        ],
+        "usage": {"prompt_tokens": 55, "completion_tokens": 15},
+    }
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.run_pipeline",
+        new=AsyncMock(return_value=mock_run_result),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "what?", "pipeline_id": pipeline_id},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["answer"] == "Pipeline answer"
+    assert body["usage"]["prompt_tokens"] > 0
+    assert body["usage"]["prompt_tokens"] == 55
+    assert body["usage"]["completion_tokens"] == 15
+
+
 # ---------------------------------------------------------------------------
 # PDF / DOCX upload
 # ---------------------------------------------------------------------------

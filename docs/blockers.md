@@ -31,12 +31,10 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] Токены usage в pipeline-path ask
+## ~~[BLOCKED-NIGHT-RUN] Токены usage в pipeline-path ask~~ RESOLVED
 
 - **Where**: `apps/api/src/ragp_api/api/v1/routes_datasets.py::ask_dataset` (pipeline path)
-- **Why blocked**: `run_pipeline` не возвращает token usage из генератора в структурированном виде наружу. AskOut.usage = {0, 0} при использовании pipeline_id.
-- **Workaround applied**: Возвращаем нули, функциональность Ask работает.
-- **Decision needed**: Пробросить `traces[-1].trace.usage` из `run_pipeline` результата в AskOut.
+- **Resolved**: `run_pipeline` агрегирует usage из всех generator-трейсов и возвращает `{"usage": {"prompt_tokens": N, "completion_tokens": M}}`. `ask_dataset` и `rag/query` (pipeline path) используют это значение в AskOut/RagQueryOut. Тест `test_ask_pipeline_path_returns_usage` добавлен.
 
 ---
 

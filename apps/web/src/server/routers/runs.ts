@@ -21,8 +21,16 @@ const RerankedChunkSchema = z.object({
 const RawRunDetailSchema = z.object({
   id: z.string(),
   status: z.string(),
-  pipeline_id: z.string(),
-  query: z.string(),
+  pipeline_id: z.string().optional(),
+  pipeline_version_id: z.string().optional(),
+  organization_id: z.string().optional(),
+  dataset_id: z.string().nullable().optional(),
+  query: z.string().nullable().optional(),
+  metrics: z.record(z.unknown()).nullable().optional(),
+  trace: z.record(z.unknown()).nullable().optional(),
+  started_at: z.string().nullable().optional(),
+  finished_at: z.string().nullable().optional(),
+  created_at: z.string().optional(),
   chunks: z.union([
     z.array(ScoredChunkSchema),
     z.array(z.string()),
@@ -32,15 +40,23 @@ const RawRunDetailSchema = z.object({
     z.array(z.string()),
   ]).optional(),
   answer: z.string().optional(),
-  metrics: z
-    .object({
-      faithfulness: z.number().optional(),
-      answer_relevance: z.number().optional(),
-      context_precision: z.number().optional(),
-      context_recall: z.number().optional(),
-    })
-    .optional(),
 });
+
+export const RunListItemSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  pipeline_version_id: z.string(),
+  dataset_id: z.string().nullable().optional(),
+  query: z.string().nullable().optional(),
+  status: z.string(),
+  metrics: z.record(z.unknown()).nullable().optional(),
+  trace: z.record(z.unknown()).nullable().optional(),
+  started_at: z.string().nullable().optional(),
+  finished_at: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+
+export type RunListItem = z.infer<typeof RunListItemSchema>;
 
 export type ScoredChunk = z.infer<typeof ScoredChunkSchema>;
 export type RerankedChunk = z.infer<typeof RerankedChunkSchema>;
@@ -48,17 +64,19 @@ export type RerankedChunk = z.infer<typeof RerankedChunkSchema>;
 export type RunDetail = {
   id: string;
   status: string;
-  pipeline_id: string;
-  query: string;
+  pipeline_id?: string;
+  pipeline_version_id?: string;
+  organization_id?: string;
+  dataset_id?: string | null;
+  query?: string | null;
+  metrics?: Record<string, unknown> | null;
+  trace?: Record<string, unknown> | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at?: string;
   chunks?: ScoredChunk[];
   reranked_chunks?: RerankedChunk[];
   answer?: string;
-  metrics?: {
-    faithfulness?: number;
-    answer_relevance?: number;
-    context_precision?: number;
-    context_recall?: number;
-  };
 };
 
 /** Normalise backend response to always use scored format. */
@@ -83,15 +101,33 @@ function normaliseRun(raw: z.infer<typeof RawRunDetailSchema>): RunDetail {
     id: raw.id,
     status: raw.status,
     pipeline_id: raw.pipeline_id,
+    pipeline_version_id: raw.pipeline_version_id,
+    organization_id: raw.organization_id,
+    dataset_id: raw.dataset_id,
     query: raw.query,
+    metrics: raw.metrics,
+    trace: raw.trace,
+    started_at: raw.started_at,
+    finished_at: raw.finished_at,
+    created_at: raw.created_at,
     chunks,
     reranked_chunks,
     answer: raw.answer,
-    metrics: raw.metrics,
   };
 }
 
 export const runsRouter = router({
+  list: protectedProcedure
+    .input(z.object({ dataset_id: z.string().optional() }).optional())
+    .query(async ({ input, ctx }) => {
+      const params = new URLSearchParams({ organization_id: ctx.organization_id });
+      if (input?.dataset_id) params.set("dataset_id", input.dataset_id);
+      const raw = await apiClient.get<z.infer<typeof RunListItemSchema>[]>(
+        `/api/v1/runs?${params.toString()}`
+      );
+      return z.array(RunListItemSchema).parse(raw);
+    }),
+
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {

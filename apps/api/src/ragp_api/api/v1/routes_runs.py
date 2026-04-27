@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -18,9 +20,16 @@ class RunCreateIn(BaseModel):
 
 class RunOut(BaseModel):
     id: str
-    status: str
-    pipeline_version_id: str
     organization_id: str
+    pipeline_version_id: str
+    dataset_id: str | None
+    query: str | None
+    status: str
+    metrics: dict[str, Any] | None
+    trace: dict[str, Any] | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
 
 
 @router.post("/pipelines/{pipeline_id}/runs", status_code=202, response_model=RunOut)
@@ -51,9 +60,16 @@ async def create_run(
     # TODO: enqueue async execution via background task / queue
     return RunOut(
         id=run.id,
-        status=run.status,
-        pipeline_version_id=run.pipeline_version_id,
         organization_id=run.organization_id,
+        pipeline_version_id=run.pipeline_version_id,
+        dataset_id=run.dataset_id,
+        query=run.query,
+        status=run.status,
+        metrics=run.metrics_json,
+        trace=run.traces_json,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
     )
 
 
@@ -65,22 +81,44 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     return RunOut(
         id=run.id,
-        status=run.status,
-        pipeline_version_id=run.pipeline_version_id,
         organization_id=run.organization_id,
+        pipeline_version_id=run.pipeline_version_id,
+        dataset_id=run.dataset_id,
+        query=run.query,
+        status=run.status,
+        metrics=run.metrics_json,
+        trace=run.traces_json,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
     )
 
 
 @router.get("/runs", response_model=list[RunOut])
-async def list_runs(organization_id: str, db: AsyncSession = Depends(get_db)) -> list[RunOut]:
-    result = await db.execute(select(Run).where(Run.organization_id == organization_id))
+async def list_runs(
+    organization_id: str,
+    dataset_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[RunOut]:
+    stmt = select(Run).where(Run.organization_id == organization_id)
+    if dataset_id is not None:
+        stmt = stmt.where(Run.dataset_id == dataset_id)
+    stmt = stmt.order_by(Run.created_at.desc())
+    result = await db.execute(stmt)
     runs = result.scalars().all()
     return [
         RunOut(
             id=r.id,
-            status=r.status,
-            pipeline_version_id=r.pipeline_version_id,
             organization_id=r.organization_id,
+            pipeline_version_id=r.pipeline_version_id,
+            dataset_id=r.dataset_id,
+            query=r.query,
+            status=r.status,
+            metrics=r.metrics_json,
+            trace=r.traces_json,
+            started_at=r.started_at,
+            finished_at=r.finished_at,
+            created_at=r.created_at,
         )
         for r in runs
     ]

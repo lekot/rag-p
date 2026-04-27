@@ -40,7 +40,8 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
             generator = cast(Generator, cls(params))
             result = await generator.generate(query=query, contexts=contexts)
             answer = result.get("answer", "")
-            traces.append({"kind": kind, "name": name, "trace": result.get("trace", {})})
+            gen_trace = result.get("trace", {})
+            traces.append({"kind": kind, "name": name, "trace": gen_trace})
 
         elif kind == "chunker":
             # chunker is used at ingest time, not query time
@@ -50,4 +51,18 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
             # embedder is used at ingest and retrieval time inside retriever
             traces.append({"kind": kind, "name": name, "skipped": "handled-by-retriever"})
 
-    return {"answer": answer, "contexts": contexts, "traces": traces}
+    # Aggregate token usage from all generator traces
+    prompt_tokens = 0
+    completion_tokens = 0
+    for t in traces:
+        if t.get("kind") == "generator":
+            u = t.get("trace", {}).get("usage", {})
+            prompt_tokens += int(u.get("prompt_tokens", 0))
+            completion_tokens += int(u.get("completion_tokens", 0))
+
+    return {
+        "answer": answer,
+        "contexts": contexts,
+        "traces": traces,
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+    }

@@ -17,12 +17,14 @@ from ragp_api.db.models import (
     Document,
     Pipeline,
     PipelineVersion,
+    Run,
 )
 from ragp_api.deps import get_db, get_organization_id
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.file_parsers import parse_to_text
 from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
+from ragp_api.services.pipeline_runner import run_pipeline
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -683,10 +685,12 @@ async def ask_dataset(
 
     # --- Pipeline-aware path ---
     pipeline_nodes: list[dict[str, Any]] | None = None
+    pipeline_version_id_for_run: str | None = None
     if body.pipeline_id:
         pl_result = await db.execute(select(Pipeline).where(Pipeline.id == body.pipeline_id))
         pl = pl_result.scalar_one_or_none()
         if pl is not None and pl.current_version_id:
+            pipeline_version_id_for_run = pl.current_version_id
             ver_result = await db.execute(
                 select(PipelineVersion).where(PipelineVersion.id == pl.current_version_id)
             )
@@ -696,8 +700,6 @@ async def ask_dataset(
 
     if pipeline_nodes is not None:
         # Execute via pipeline nodes
-        from ragp_api.services.pipeline_runner import run_pipeline
-
         # Inject session and org into retriever node params
         enriched_nodes: list[dict[str, Any]] = []
         for node in pipeline_nodes:
@@ -710,15 +712,41 @@ async def ask_dataset(
                 n["params"] = params
             enriched_nodes.append(n)
 
+        started_at = datetime.now(tz=UTC)
         result = await run_pipeline(enriched_nodes, body.query, db)
+        finished_at = datetime.now(tz=UTC)
+
         raw_chunks = result.get("contexts", [])
         answer = result.get("answer", "")
+        usage_dict: dict[str, Any] = result.get("usage", {})
+        prompt_tokens = int(usage_dict.get("prompt_tokens", 0))
+        completion_tokens = int(usage_dict.get("completion_tokens", 0))
+
+        # Persist Run record
+        if pipeline_version_id_for_run is not None:
+            run_record = Run(
+                id=str(uuid.uuid4()),
+                organization_id=organization_id,
+                pipeline_version_id=pipeline_version_id_for_run,
+                dataset_id=dataset_id,
+                query=body.query,
+                status="completed",
+                metrics_json={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+                traces_json={"traces": result.get("traces", [])},
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+            db.add(run_record)
+            await db.commit()
 
         if not raw_chunks and not answer:
             return AskOut(
                 answer="Не нашёл релевантных чанков для ответа.",
                 chunks=[],
-                usage=AskUsage(prompt_tokens=0, completion_tokens=0),
+                usage=AskUsage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
             )
 
         return AskOut(
@@ -733,7 +761,7 @@ async def ask_dataset(
                 )
                 for c in raw_chunks
             ],
-            usage=AskUsage(prompt_tokens=0, completion_tokens=0),
+            usage=AskUsage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
         )
 
     # --- Default hardcoded path ---

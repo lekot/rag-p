@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import uuid
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Dataset, Organization, Pipeline, PipelineVersion
+from ragp_api.db.models import ApiKey, Dataset, Organization, Pipeline, PipelineVersion, Run
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import get_api_key_org
 from ragp_api.plugins.base import Embedder, Generator, Retriever
@@ -164,9 +166,34 @@ async def rag_query(
                 n["params"] = params
             enriched.append(n)
 
+        started_at = datetime.now(tz=UTC)
         result = await run_pipeline(enriched, body.query, db)
+        finished_at = datetime.now(tz=UTC)
+
         raw_chunks: list[dict[str, Any]] = result.get("contexts", [])
         answer: str = result.get("answer", "")
+        rag_usage_dict: dict[str, Any] = result.get("usage", {})
+        rag_prompt_tokens = int(rag_usage_dict.get("prompt_tokens", 0))
+        rag_completion_tokens = int(rag_usage_dict.get("completion_tokens", 0))
+
+        # Persist Run record
+        run_record = Run(
+            id=str(uuid.uuid4()),
+            organization_id=org.id,
+            pipeline_version_id=pl.current_version_id,
+            dataset_id=body.dataset_id,
+            query=body.query,
+            status="completed",
+            metrics_json={
+                "prompt_tokens": rag_prompt_tokens,
+                "completion_tokens": rag_completion_tokens,
+            },
+            traces_json={"traces": result.get("traces", [])},
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        db.add(run_record)
+        await db.commit()
 
         if not raw_chunks and not answer:
             answer = "Не нашёл релевантных чанков для ответа."
@@ -183,7 +210,10 @@ async def rag_query(
                 )
                 for c in raw_chunks
             ],
-            usage=RagUsage(prompt_tokens=0, completion_tokens=0),
+            usage=RagUsage(
+                prompt_tokens=rag_prompt_tokens,
+                completion_tokens=rag_completion_tokens,
+            ),
             trace=RagTrace(
                 embedder="pipeline",
                 retriever="pipeline",

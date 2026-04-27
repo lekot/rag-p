@@ -39,6 +39,9 @@ export default function RootLayout({
               <a href="/datasets" className="text-sm text-muted-foreground hover:text-foreground">
                 Datasets
               </a>
+              <a href="/runs" className="text-sm text-muted-foreground hover:text-foreground">
+                Runs
+              </a>
               <a href="/docs" className="text-sm text-muted-foreground hover:text-foreground">
                 Docs
               </a>
