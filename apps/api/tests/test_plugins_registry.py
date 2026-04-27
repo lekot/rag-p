@@ -18,9 +18,9 @@ EXPECTED_NAMES = {
 def test_registry_has_all_expected_plugins():
     plugins = list_plugins()
     names = {p["name"] for p in plugins}
-    assert names == EXPECTED_NAMES, (
-        f"Missing: {EXPECTED_NAMES - names}; extra: {names - EXPECTED_NAMES}"
-    )
+    assert (
+        names == EXPECTED_NAMES
+    ), f"Missing: {EXPECTED_NAMES - names}; extra: {names - EXPECTED_NAMES}"
 
 
 def test_registry_covers_all_kinds():
