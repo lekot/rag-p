@@ -1,9 +1,6 @@
 /** @type {import("eslint").Linter.Config} */
 const config = {
-  extends: ["next/core-web-vitals"],
-  rules: {
-    "@typescript-eslint/no-explicit-any": "error",
-  },
+  extends: ["next/core-web-vitals", "next/typescript"],
 };
 
 module.exports = config;
