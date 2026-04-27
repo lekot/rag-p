@@ -87,6 +87,9 @@ class Pipeline(Base):
         String(36), ForeignKey("organizations.id"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    dataset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True
+    )
     current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

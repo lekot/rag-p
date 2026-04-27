@@ -11,23 +11,32 @@ const PipelineNodeSchema = z.object({
 const CreatePipelineSchema = z.object({
   name: z.string().min(1),
   nodes: z.array(PipelineNodeSchema),
+  dataset_id: z.string().nullable().optional(),
 });
 
 const PipelineSchema = z.object({
   id: z.string(),
   name: z.string(),
   organization_id: z.string(),
+  current_version_id: z.string().nullable().optional(),
+  dataset_id: z.string().nullable().optional(),
   nodes: z.array(PipelineNodeSchema),
 });
 
 export type Pipeline = z.infer<typeof PipelineSchema>;
 
 export const pipelinesRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
-    return apiClient.get<Pipeline[]>(
-      `/api/v1/pipelines?organization_id=${ctx.organization_id}`
-    );
-  }),
+  list: protectedProcedure
+    .input(z.object({ datasetId: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      const params = new URLSearchParams({
+        organization_id: ctx.organization_id,
+      });
+      if (input.datasetId) {
+        params.set("dataset_id", input.datasetId);
+      }
+      return apiClient.get<Pipeline[]>(`/api/v1/pipelines?${params.toString()}`);
+    }),
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))

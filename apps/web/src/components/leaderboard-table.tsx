@@ -17,8 +17,8 @@ interface Props {
   combinations: LeaderboardCombination[];
 }
 
-function formatScore(value: number | undefined): string {
-  if (value === undefined) return "-";
+function formatScore(value: number | null | undefined): string {
+  if (value == null) return "-";
   return value.toFixed(3);
 }
 

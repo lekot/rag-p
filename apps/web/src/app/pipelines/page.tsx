@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 export default function PipelinesPage() {
-  const { data: pipelines, isLoading } = trpc.pipelines.list.useQuery();
+  const { data: pipelines, isLoading } = trpc.pipelines.list.useQuery({});
 
   return (
     <div className="max-w-4xl mx-auto">

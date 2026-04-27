@@ -24,6 +24,7 @@ class PipelineCreateIn(BaseModel):
     name: str
     organization_id: str
     nodes: list[PipelineNodeIn]
+    dataset_id: str | None = None
 
 
 class PipelineOut(BaseModel):
@@ -31,6 +32,7 @@ class PipelineOut(BaseModel):
     name: str
     organization_id: str
     current_version_id: str | None
+    dataset_id: str | None = None
     nodes: list[PipelineNodeIn] = []
 
 
@@ -64,6 +66,7 @@ async def create_pipeline(
         id=pipeline_id,
         organization_id=body.organization_id,
         name=body.name,
+        dataset_id=body.dataset_id,
         current_version_id=version_id,
     )
 
@@ -77,6 +80,7 @@ async def create_pipeline(
         name=pipeline.name,
         organization_id=pipeline.organization_id,
         current_version_id=pipeline.current_version_id,
+        dataset_id=pipeline.dataset_id,
         nodes=body.nodes,
     )
 
@@ -84,9 +88,13 @@ async def create_pipeline(
 @router.get("", response_model=list[PipelineOut])
 async def list_pipelines(
     organization_id: str,
+    dataset_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[PipelineOut]:
-    result = await db.execute(select(Pipeline).where(Pipeline.organization_id == organization_id))
+    query = select(Pipeline).where(Pipeline.organization_id == organization_id)
+    if dataset_id is not None:
+        query = query.where(Pipeline.dataset_id == dataset_id)
+    result = await db.execute(query)
     pipelines = result.scalars().all()
     out: list[PipelineOut] = []
     for p in pipelines:
@@ -97,6 +105,7 @@ async def list_pipelines(
                 name=p.name,
                 organization_id=p.organization_id,
                 current_version_id=p.current_version_id,
+                dataset_id=p.dataset_id,
                 nodes=nodes,
             )
         )
@@ -118,5 +127,6 @@ async def get_pipeline(
         name=pipeline.name,
         organization_id=pipeline.organization_id,
         current_version_id=pipeline.current_version_id,
+        dataset_id=pipeline.dataset_id,
         nodes=nodes,
     )

@@ -132,12 +132,18 @@ export const datasetsRouter = router({
         query: z.string().min(1),
         top_k: z.number().int().min(1).max(50).default(5),
         model: z.string().default("deepseek/deepseek-v4-flash"),
+        pipeline_id: z.string().nullable().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       return apiClient.post<z.infer<typeof AskResultSchema>>(
         `/api/v1/datasets/${input.datasetId}/ask`,
-        { query: input.query, top_k: input.top_k, model: input.model },
+        {
+          query: input.query,
+          top_k: input.top_k,
+          model: input.model,
+          pipeline_id: input.pipeline_id ?? null,
+        },
         { "x-organization-id": ctx.organization_id }
       );
     }),

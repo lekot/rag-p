@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, Dataset, Document
+from ragp_api.db.models import Chunk, Dataset, Document, Pipeline, PipelineVersion
 from ragp_api.deps import get_db, get_organization_id
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
@@ -522,6 +522,7 @@ class AskIn(BaseModel):
     query: str
     top_k: int = 5
     model: str = "deepseek/deepseek-v4-flash"
+    pipeline_id: str | None = None
 
 
 class AskChunkOut(BaseModel):
@@ -543,6 +544,28 @@ class AskOut(BaseModel):
     usage: AskUsage
 
 
+async def _build_default_embedder(
+    ollama_host: str, cohere_key: str, openai_key: str
+) -> "Embedder | None":
+    """Build embedder using environment priority: Ollama → Cohere → OpenAI."""
+    if ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
+        if embedder_cls is not None:
+            return cast(Embedder, embedder_cls({"model": "bge-m3"}))
+    elif cohere_key:
+        embedder_cls = get_plugin("embedder", "cohere-embedder")
+        if embedder_cls is not None:
+            return cast(
+                Embedder,
+                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
+            )
+    elif openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
+        if embedder_cls is not None:
+            return cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
+    return None
+
+
 @router.post("/{dataset_id}/ask", response_model=AskOut)
 async def ask_dataset(
     dataset_id: str,
@@ -557,26 +580,67 @@ async def ask_dataset(
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
-    # Build embedder (same priority as ingest/search: Ollama → Cohere → OpenAI)
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
-    embedder: Embedder | None = None
-    if ollama_host:
-        embedder_cls = get_plugin("embedder", "ollama-embedder")
-        if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
-    elif cohere_key:
-        embedder_cls = get_plugin("embedder", "cohere-embedder")
-        if embedder_cls is not None:
-            embedder = cast(
-                Embedder,
-                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
+
+    # --- Pipeline-aware path ---
+    pipeline_nodes: list[dict[str, Any]] | None = None
+    if body.pipeline_id:
+        pl_result = await db.execute(select(Pipeline).where(Pipeline.id == body.pipeline_id))
+        pl = pl_result.scalar_one_or_none()
+        if pl is not None and pl.current_version_id:
+            ver_result = await db.execute(
+                select(PipelineVersion).where(PipelineVersion.id == pl.current_version_id)
             )
-    elif openai_key:
-        embedder_cls = get_plugin("embedder", "litellm-embedder")
-        if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
+            ver = ver_result.scalar_one_or_none()
+            if ver is not None:
+                pipeline_nodes = ver.nodes_json
+
+    if pipeline_nodes is not None:
+        # Execute via pipeline nodes
+        from ragp_api.services.pipeline_runner import run_pipeline
+
+        # Inject session and org into retriever node params
+        enriched_nodes: list[dict[str, Any]] = []
+        for node in pipeline_nodes:
+            n = dict(node)
+            if n.get("plugin_kind") == "retriever":
+                params = dict(n.get("params", {}))
+                params["session"] = db
+                params["organization_id"] = organization_id
+                params["dataset_id"] = dataset_id
+                n["params"] = params
+            enriched_nodes.append(n)
+
+        result = await run_pipeline(enriched_nodes, body.query, db)
+        raw_chunks = result.get("contexts", [])
+        answer = result.get("answer", "")
+
+        if not raw_chunks and not answer:
+            return AskOut(
+                answer="Не нашёл релевантных чанков для ответа.",
+                chunks=[],
+                usage=AskUsage(prompt_tokens=0, completion_tokens=0),
+            )
+
+        return AskOut(
+            answer=answer,
+            chunks=[
+                AskChunkOut(
+                    id=c.get("id", ""),
+                    text=c.get("text", ""),
+                    score=round(c.get("score", 0.0), 4),
+                    document_id=c.get("document_id", ""),
+                    document_name=c.get("document_name", ""),
+                )
+                for c in raw_chunks
+            ],
+            usage=AskUsage(prompt_tokens=0, completion_tokens=0),
+        )
+
+    # --- Default hardcoded path ---
+    embedder = await _build_default_embedder(ollama_host, cohere_key, openai_key)
 
     query_vec: list[float] | None = None
     if embedder is not None:
@@ -619,7 +683,7 @@ async def ask_dataset(
     )
     gen_result = await generator.generate(body.query, contexts=raw_chunks)
 
-    answer: str = gen_result.get("answer", "")
+    answer = gen_result.get("answer", "")
     trace: dict[str, Any] = gen_result.get("trace", {})
     usage_raw: dict[str, Any] = trace.get("usage", {})
 

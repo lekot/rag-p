@@ -16,6 +16,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 import type { Chunk, SearchChunk } from "@/server/routers/datasets";
@@ -190,13 +197,17 @@ function SearchSection({ datasetId }: { datasetId: string }) {
 function AskSection({ datasetId }: { datasetId: string }) {
   const [query, setQuery] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string>("__default__");
 
+  const { data: pipelines } = trpc.pipelines.list.useQuery({ datasetId });
   const askMutation = trpc.datasets.ask.useMutation();
 
   const handleAsk = () => {
     if (!query.trim()) return;
     setSourcesOpen(false);
-    askMutation.mutate({ datasetId, query: query.trim() });
+    const pipelineId =
+      selectedPipelineId === "__default__" ? undefined : selectedPipelineId;
+    askMutation.mutate({ datasetId, query: query.trim(), pipeline_id: pipelineId });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -209,6 +220,24 @@ function AskSection({ datasetId }: { datasetId: string }) {
         <CardTitle>Ask</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {pipelines && pipelines.length > 0 && (
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground font-medium">Pipeline</label>
+            <Select value={selectedPipelineId} onValueChange={setSelectedPipelineId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select pipeline…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default config</SelectItem>
+                {pipelines.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           <Textarea
             placeholder="Задайте вопрос по документам… (Ctrl+Enter)"

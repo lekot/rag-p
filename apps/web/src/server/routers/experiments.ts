@@ -3,7 +3,8 @@ import { router, protectedProcedure } from "../trpc";
 import { apiClient } from "../api-client";
 
 const PluginOptionSchema = z.object({
-  name: z.string(),
+  plugin_kind: z.string(),
+  plugin_name: z.string(),
   params: z.record(z.unknown()),
 });
 
@@ -25,15 +26,18 @@ const ExperimentSchema = z.object({
   dataset_id: z.string(),
   organization_id: z.string(),
   status: z.string().optional(),
+  plugin_grid: z.record(z.unknown()).nullable().optional(),
+  leaderboard: z.array(z.unknown()).nullable().optional(),
+  created_at: z.string().nullable().optional(),
 });
 
 export type Experiment = z.infer<typeof ExperimentSchema>;
 
 const ScoresSchema = z.object({
-  faithfulness: z.number().optional(),
-  answer_relevance: z.number().optional(),
-  context_precision: z.number().optional(),
-  context_recall: z.number().optional(),
+  faithfulness: z.number().nullable().optional(),
+  answer_relevance: z.number().nullable().optional(),
+  context_precision: z.number().nullable().optional(),
+  context_recall: z.number().nullable().optional(),
 });
 
 const LeaderboardCombinationSchema = z.object({
@@ -43,6 +47,21 @@ const LeaderboardCombinationSchema = z.object({
 });
 
 export type LeaderboardCombination = z.infer<typeof LeaderboardCombinationSchema>;
+
+const PromotePipelineSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  organization_id: z.string(),
+  current_version_id: z.string().nullable().optional(),
+  dataset_id: z.string().nullable().optional(),
+  nodes: z.array(z.object({
+    plugin_kind: z.string(),
+    plugin_name: z.string(),
+    params: z.record(z.unknown()),
+  })),
+});
+
+export type PromotedPipeline = z.infer<typeof PromotePipelineSchema>;
 
 export const experimentsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -60,7 +79,7 @@ export const experimentsRouter = router({
   create: protectedProcedure
     .input(CreateExperimentSchema)
     .mutation(async ({ input, ctx }) => {
-      return apiClient.post<{ id: string }>("/api/v1/experiments", {
+      return apiClient.post<Experiment>("/api/v1/experiments", {
         ...input,
         organization_id: ctx.organization_id,
       });
@@ -71,6 +90,15 @@ export const experimentsRouter = router({
     .query(async ({ input }) => {
       return apiClient.get<{ combinations: LeaderboardCombination[] }>(
         `/api/v1/experiments/${input.id}/leaderboard`
+      );
+    }),
+
+  promote: protectedProcedure
+    .input(z.object({ id: z.string(), name: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      return apiClient.post<PromotedPipeline>(
+        `/api/v1/experiments/${input.id}/promote_to_pipeline`,
+        { name: input.name }
       );
     }),
 });
