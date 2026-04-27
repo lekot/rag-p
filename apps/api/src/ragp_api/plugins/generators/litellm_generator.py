@@ -5,15 +5,31 @@ from typing import Any, ClassVar, cast
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
 
+_DEFAULT_SYSTEM_PROMPT = (
+    "You are a strict retrieval-grounded assistant. Rules:\n"
+    "1. Answer ONLY using facts from the provided context. NEVER use your prior "
+    "training knowledge to fill gaps.\n"
+    "2. If the context does not contain the answer, reply exactly: "
+    '"В предоставленных источниках ответа нет."\n'
+    "3. Every factual claim MUST end with a citation in square brackets pointing "
+    "to the source number, e.g. [1] or [2,3]. No claim without a citation.\n"
+    "4. Do not infer, guess, or extrapolate beyond what the context literally states.\n"
+    "5. If sources contradict, say so explicitly and cite all conflicting sources.\n"
+    "6. Answer in the same language as the question."
+)
+
 _PROMPT_TEMPLATE = (
-    "Answer the question using the context.\n\nQuestion: {query}\n\nContext:\n{contexts}"
+    "Question: {query}\n\n"
+    "Context (numbered sources — cite by number):\n{contexts}\n\n"
+    "Now answer the question using ONLY the context above. "
+    'If absent, reply: "В предоставленных источниках ответа нет."'
 )
 
 
 @register
 class LiteLLMGenerator(Generator):
     name = "litellm-generator"
-    version = "0.1.0"
+    version = "0.2.0"
     params_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -23,17 +39,14 @@ class LiteLLMGenerator(Generator):
                 "examples": ["openai/gpt-4o-mini", "openai/gpt-4o", "ollama/llama3"],
             },
             "temperature": {"type": "number", "default": 0.0, "minimum": 0, "maximum": 2},
-            "system_prompt": {
-                "type": "string",
-                "default": "You are a helpful assistant. Answer only from the provided context.",
-            },
+            "system_prompt": {"type": "string", "default": _DEFAULT_SYSTEM_PROMPT},
             "max_tokens": {"type": "integer", "default": 1024},
         },
         "required": ["model"],
         "default": {
             "model": "openai/gpt-4o-mini",
             "temperature": 0.0,
-            "system_prompt": "You are a helpful assistant. Answer only from the provided context.",
+            "system_prompt": _DEFAULT_SYSTEM_PROMPT,
         },
     }
 
@@ -42,10 +55,7 @@ class LiteLLMGenerator(Generator):
 
         model: str = self.params["model"]
         temperature: float = self.params.get("temperature", 0.0)
-        system_prompt: str = self.params.get(
-            "system_prompt",
-            "You are a helpful assistant. Answer only from the provided context.",
-        )
+        system_prompt: str = self.params.get("system_prompt", _DEFAULT_SYSTEM_PROMPT)
         max_tokens: int = self.params.get("max_tokens", 1024)
 
         context_text = "\n\n".join(f"[{i + 1}] {c.get('text', '')}" for i, c in enumerate(contexts))
