@@ -2,11 +2,10 @@ import asyncio
 import os
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from alembic import context
 
 config = context.config
 
@@ -21,8 +20,8 @@ if _db_url:
         _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     config.set_main_option("sqlalchemy.url", _db_url)
 
-from ragp_api.db.base import Base  # noqa: E402
 from ragp_api.db import models  # noqa: E402, F401
+from ragp_api.db.base import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

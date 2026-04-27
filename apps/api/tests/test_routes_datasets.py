@@ -1,18 +1,13 @@
 import io
-import json
 import uuid
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ragp_api.db.models import Dataset, Document, Chunk
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "Test DS") -> str:
     resp = await client.post(
@@ -32,6 +27,7 @@ def _txt_upload(content: str, filename: str = "hello.txt") -> dict:
 # ---------------------------------------------------------------------------
 # POST /datasets/{dataset_id}/documents
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_upload_txt_creates_chunks(client: AsyncClient, organization_id: str):
@@ -139,6 +135,7 @@ async def test_upload_dataset_not_found_returns_404(client: AsyncClient, organiz
 # GET /datasets/{dataset_id}/documents/{document_id}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_document_returns_chunks(client: AsyncClient, organization_id: str):
     dataset_id = await _create_dataset(client, organization_id)
@@ -184,6 +181,7 @@ async def test_get_document_not_found(client: AsyncClient, organization_id: str)
 # ---------------------------------------------------------------------------
 # GET /datasets/{dataset_id}/documents (list)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_list_documents_empty(client: AsyncClient, organization_id: str):

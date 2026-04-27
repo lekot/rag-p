@@ -24,7 +24,9 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
             params["session"] = session
             plugin = cls(params)
             top_k = params.get("top_k", 10)
-            contexts = await plugin.retrieve(query=query, top_k=top_k, organization_id=params.get("organization_id", ""))
+            contexts = await plugin.retrieve(
+                query=query, top_k=top_k, organization_id=params.get("organization_id", "")
+            )
             traces.append({"kind": kind, "name": name, "contexts_count": len(contexts)})
 
         elif kind == "reranker":

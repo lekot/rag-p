@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ragp_api.plugins.base import Embedder, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
 from ragp_api.plugins.registry import register
 
 

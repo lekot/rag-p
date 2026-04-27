@@ -74,9 +74,7 @@ async def list_pipelines(
     organization_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> list[PipelineOut]:
-    result = await db.execute(
-        select(Pipeline).where(Pipeline.organization_id == organization_id)
-    )
+    result = await db.execute(select(Pipeline).where(Pipeline.organization_id == organization_id))
     pipelines = result.scalars().all()
     return [
         PipelineOut(

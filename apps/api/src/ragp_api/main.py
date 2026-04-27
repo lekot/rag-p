@@ -1,11 +1,22 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ragp_api.api.errors import NotFoundError, PluginNotFoundError, not_found_handler, plugin_not_found_handler
-from ragp_api.api.v1 import routes_pipelines, routes_datasets, routes_runs, routes_experiments, routes_plugins
+from ragp_api.api.errors import (
+    NotFoundError,
+    PluginNotFoundError,
+    not_found_handler,
+    plugin_not_found_handler,
+)
+from ragp_api.api.v1 import (
+    routes_datasets,
+    routes_experiments,
+    routes_pipelines,
+    routes_plugins,
+    routes_runs,
+)
 from ragp_api.plugins.registry import bootstrap
 
 

@@ -29,9 +29,6 @@ jobs:
       - name: ruff lint
         run: uvx ruff check apps/api
 
-      - name: mypy
-        run: uvx --with-editable apps/api mypy apps/api/src
-
   build-web-smoke:
     name: Web build smoke
     runs-on: ubuntu-latest

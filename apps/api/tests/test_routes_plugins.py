@@ -19,7 +19,7 @@ async def test_get_plugins_covers_all_kinds(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     kinds = {p["kind"] for p in data}
-    assert EXPECTED_KINDS == kinds
+    assert kinds == EXPECTED_KINDS
 
 
 @pytest.mark.asyncio

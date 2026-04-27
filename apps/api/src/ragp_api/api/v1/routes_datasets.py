@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import jsonschema
@@ -61,9 +61,7 @@ async def list_datasets(
     organization_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> list[DatasetOut]:
-    result = await db.execute(
-        select(Dataset).where(Dataset.organization_id == organization_id)
-    )
+    result = await db.execute(select(Dataset).where(Dataset.organization_id == organization_id))
     datasets = result.scalars().all()
     return [
         DatasetOut(id=d.id, name=d.name, organization_id=d.organization_id, source=d.source)
@@ -84,6 +82,7 @@ async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) 
 # Document list
 # ---------------------------------------------------------------------------
 
+
 class DocumentListItem(BaseModel):
     id: str
     source_uri: str
@@ -99,9 +98,7 @@ async def list_documents(
     organization_id: str = Depends(get_organization_id),
 ) -> list[DocumentListItem]:
     ds_result = await db.execute(
-        select(Dataset).where(
-            Dataset.id == dataset_id, Dataset.organization_id == organization_id
-        )
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
     )
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
@@ -129,6 +126,7 @@ async def list_documents(
 # ---------------------------------------------------------------------------
 # Document detail
 # ---------------------------------------------------------------------------
+
 
 class ChunkDetail(BaseModel):
     index: int
@@ -166,9 +164,7 @@ async def get_document(
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
 
     chunks_result = await db.execute(
-        select(Chunk)
-        .where(Chunk.document_id == document_id)
-        .order_by(Chunk.created_at)
+        select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.created_at)
     )
     chunks = chunks_result.scalars().all()
 
@@ -197,6 +193,7 @@ async def get_document(
 # Upload document
 # ---------------------------------------------------------------------------
 
+
 class ChunkPreview(BaseModel):
     index: int
     text: str
@@ -222,9 +219,7 @@ async def upload_document(
 ) -> UploadDocumentResponse:
     # Verify dataset ownership
     ds_result = await db.execute(
-        select(Dataset).where(
-            Dataset.id == dataset_id, Dataset.organization_id == organization_id
-        )
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
     )
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
@@ -267,12 +262,14 @@ async def upload_document(
     try:
         jsonschema.validate(instance=merged_params, schema=schema)
     except jsonschema.ValidationError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid chunker params: {exc.message}") from exc
+        raise HTTPException(
+            status_code=422, detail=f"Invalid chunker params: {exc.message}"
+        ) from exc
 
     chunker = chunker_cls(merged_params)
 
     # Create document record
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     doc = Document(
         id=str(uuid.uuid4()),
         organization_id=organization_id,
@@ -319,7 +316,9 @@ async def upload_document(
     elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
-            embedder = embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
+            embedder = embedder_cls(
+                {"model": "embed-multilingual-v3.0", "input_type": "search_document"}
+            )
     elif openai_key:
         embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
@@ -328,7 +327,7 @@ async def upload_document(
         try:
             texts = [c.text for c in chunk_objs]
             vectors = await embedder.embed(texts)
-            for chunk_obj, vec in zip(chunk_objs, vectors):
+            for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
                 chunk_obj.embedding = vec
             embedded = True
         except Exception:

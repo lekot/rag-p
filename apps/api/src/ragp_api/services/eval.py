@@ -46,5 +46,5 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> dict[str, float]:
     """Average metrics across multiple eval results."""
     if not results:
         return {}
-    keys = [k for k in results[0] if isinstance(results[0][k], (int, float))]
+    keys = [k for k in results[0] if isinstance(results[0][k], int | float)]
     return {k: sum(r.get(k, 0.0) for r in results) / len(results) for k in keys}

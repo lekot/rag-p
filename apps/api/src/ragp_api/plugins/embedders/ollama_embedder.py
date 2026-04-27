@@ -5,9 +5,8 @@ from typing import Any
 
 import httpx
 
-from ragp_api.plugins.base import Embedder, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
 from ragp_api.plugins.registry import register
-
 
 _DEFAULT_DIMS = {
     "bge-m3": 1024,
@@ -48,9 +47,7 @@ class OllamaEmbedder(Embedder):
 
     def _host(self) -> str:
         return (
-            self.params.get("host")
-            or os.environ.get("OLLAMA_HOST")
-            or "http://rag-p-ollama:11434"
+            self.params.get("host") or os.environ.get("OLLAMA_HOST") or "http://rag-p-ollama:11434"
         )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

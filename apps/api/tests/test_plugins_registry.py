@@ -1,7 +1,6 @@
 import jsonschema
-import pytest
 
-from ragp_api.plugins.registry import _registry, list_plugins
+from ragp_api.plugins.registry import list_plugins
 
 EXPECTED_KINDS = {"chunker", "embedder", "retriever", "reranker", "generator"}
 EXPECTED_NAMES = {
@@ -17,13 +16,13 @@ EXPECTED_NAMES = {
 def test_registry_has_all_six_plugins():
     plugins = list_plugins()
     names = {p["name"] for p in plugins}
-    assert EXPECTED_NAMES == names, f"Missing plugins: {EXPECTED_NAMES - names}"
+    assert names == EXPECTED_NAMES, f"Missing plugins: {EXPECTED_NAMES - names}"
 
 
 def test_registry_covers_all_kinds():
     plugins = list_plugins()
     kinds = {p["kind"] for p in plugins}
-    assert EXPECTED_KINDS == kinds
+    assert kinds == EXPECTED_KINDS
 
 
 def test_all_params_schemas_are_valid():

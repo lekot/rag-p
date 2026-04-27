@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ragp_api.plugins.base import Generator, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
 
 _PROMPT_TEMPLATE = (
@@ -48,9 +48,7 @@ class LiteLLMGenerator(Generator):
         )
         max_tokens: int = self.params.get("max_tokens", 1024)
 
-        context_text = "\n\n".join(
-            f"[{i + 1}] {c.get('text', '')}" for i, c in enumerate(contexts)
-        )
+        context_text = "\n\n".join(f"[{i + 1}] {c.get('text', '')}" for i, c in enumerate(contexts))
         user_message = _PROMPT_TEMPLATE.format(query=query, contexts=context_text)
 
         response = await litellm.acompletion(
@@ -74,7 +72,11 @@ class LiteLLMGenerator(Generator):
         return {"answer": answer, "trace": trace}
 
     async def cost_estimate(self, sample_input: Any) -> CostEstimate:
-        query = str(sample_input) if not isinstance(sample_input, dict) else sample_input.get("query", "")
+        query = (
+            str(sample_input)
+            if not isinstance(sample_input, dict)
+            else sample_input.get("query", "")
+        )
         tokens_in = len(query.split()) + 200  # rough estimate including context
         tokens_out = 200
         # ~$0.15 per 1M input tokens for gpt-4o-mini

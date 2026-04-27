@@ -4,16 +4,17 @@ Revision ID: 0001
 Revises:
 Create Date: 2024-01-01 00:00:00.000000
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
 revision: str = "0001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -38,7 +39,9 @@ def upgrade() -> None:
 
     op.create_table(
         "memberships",
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), primary_key=True),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), primary_key=True
+        ),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), primary_key=True),
         sa.Column("role", sa.String(50), nullable=False, server_default="viewer"),
     )
@@ -46,7 +49,9 @@ def upgrade() -> None:
     op.create_table(
         "pipelines",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("current_version_id", sa.String(36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -63,7 +68,9 @@ def upgrade() -> None:
     op.create_table(
         "datasets",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("source", sa.String(50), nullable=False, server_default="uploaded"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -82,7 +89,9 @@ def upgrade() -> None:
     op.create_table(
         "documents",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("dataset_id", sa.String(36), sa.ForeignKey("datasets.id"), nullable=True),
         sa.Column("source_uri", sa.Text, nullable=False),
         sa.Column("parsed_at", sa.DateTime(timezone=True), nullable=True),
@@ -94,7 +103,9 @@ def upgrade() -> None:
         "chunks",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("document_id", sa.String(36), sa.ForeignKey("documents.id"), nullable=False),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("text", sa.Text, nullable=False),
         sa.Column("embedding", Vector(1536), nullable=True),
         sa.Column("tsvector_col", sa.Text, nullable=True),
@@ -105,8 +116,15 @@ def upgrade() -> None:
     op.create_table(
         "runs",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
-        sa.Column("pipeline_version_id", sa.String(36), sa.ForeignKey("pipeline_versions.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
+        sa.Column(
+            "pipeline_version_id",
+            sa.String(36),
+            sa.ForeignKey("pipeline_versions.id"),
+            nullable=False,
+        ),
         sa.Column("dataset_id", sa.String(36), sa.ForeignKey("datasets.id"), nullable=True),
         sa.Column("query", sa.Text, nullable=True),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
@@ -120,7 +138,9 @@ def upgrade() -> None:
     op.create_table(
         "experiments",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("dataset_id", sa.String(36), sa.ForeignKey("datasets.id"), nullable=False),
         sa.Column("plugin_grid_json", sa.JSON, nullable=False),

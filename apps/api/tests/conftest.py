@@ -1,13 +1,13 @@
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ragp_api.db.base import Base
 from ragp_api.db import models  # noqa: F401 — ensure models are registered
+from ragp_api.db.base import Base
 from ragp_api.deps import get_db
 from ragp_api.main import app
-from ragp_api.plugins.registry import bootstrap, _registry
+from ragp_api.plugins.registry import _registry, bootstrap
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 

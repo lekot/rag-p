@@ -1,11 +1,11 @@
 """Plugin registry — discovers plugins via importlib.metadata entrypoints."""
 
 from importlib.metadata import entry_points
-from typing import Any, Type
+from typing import Any
 
 from ragp_api.plugins.base import PluginBase
 
-_registry: dict[str, dict[str, Type[PluginBase]]] = {}
+_registry: dict[str, dict[str, type[PluginBase]]] = {}
 
 _ENTRYPOINT_GROUPS = [
     "ragp.plugins.chunkers",
@@ -19,14 +19,14 @@ _ENTRYPOINT_GROUPS = [
 def _discover() -> None:
     for group in _ENTRYPOINT_GROUPS:
         for ep in entry_points(group=group):
-            cls: Type[PluginBase] = ep.load()
+            cls: type[PluginBase] = ep.load()
             kind = cls.kind
             if kind not in _registry:
                 _registry[kind] = {}
             _registry[kind][cls.name] = cls
 
 
-def register(cls: Type[PluginBase]) -> Type[PluginBase]:
+def register(cls: type[PluginBase]) -> type[PluginBase]:
     """Decorator to register a plugin class manually."""
     kind = cls.kind
     if kind not in _registry:
@@ -35,7 +35,7 @@ def register(cls: Type[PluginBase]) -> Type[PluginBase]:
     return cls
 
 
-def get_plugin(kind: str, name: str) -> Type[PluginBase] | None:
+def get_plugin(kind: str, name: str) -> type[PluginBase] | None:
     if not _registry:
         _discover()
     return _registry.get(kind, {}).get(name)
@@ -61,12 +61,12 @@ def list_plugins() -> list[dict[str, Any]]:
 
 def bootstrap() -> None:
     """Import all built-in plugins so they self-register."""
-    from ragp_api.plugins.chunkers import recursive, markdown  # noqa: F401
+    from ragp_api.plugins.chunkers import markdown, recursive  # noqa: F401
     from ragp_api.plugins.embedders import (  # noqa: F401
-        litellm_embedder,
         cohere_embedder,
+        litellm_embedder,
         ollama_embedder,
     )
-    from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401
-    from ragp_api.plugins.rerankers import cohere  # noqa: F401
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401
+    from ragp_api.plugins.rerankers import cohere  # noqa: F401
+    from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401

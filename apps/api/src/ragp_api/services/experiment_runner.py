@@ -13,8 +13,14 @@ def build_combinations(plugin_grid: dict[str, list[dict[str, Any]]]) -> list[lis
     result = []
     for combo in combinations:
         nodes = []
-        for slot, variant in zip(slots, combo):
-            nodes.append({"plugin_kind": variant["plugin_kind"], "plugin_name": variant["plugin_name"], "params": variant.get("params", {})})
+        for _slot, variant in zip(slots, combo, strict=False):
+            nodes.append(
+                {
+                    "plugin_kind": variant["plugin_kind"],
+                    "plugin_name": variant["plugin_name"],
+                    "params": variant.get("params", {}),
+                }
+            )
         result.append(nodes)
     return result
 

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Pipeline, PipelineVersion, Run
+from ragp_api.db.models import Pipeline, Run
 from ragp_api.deps import get_db
 
 router = APIRouter(tags=["runs"])

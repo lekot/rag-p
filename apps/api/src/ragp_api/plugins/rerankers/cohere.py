@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ragp_api.plugins.base import Reranker, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, HealthStatus, Reranker
 from ragp_api.plugins.registry import register
 
 

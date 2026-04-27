@@ -55,4 +55,6 @@ class MarkdownAwareChunker(Chunker):
 
             return HealthStatus(ok=True)
         except ImportError:
-            return HealthStatus(ok=True, detail="langchain-text-splitters not installed, using fallback")
+            return HealthStatus(
+                ok=True, detail="langchain-text-splitters not installed, using fallback"
+            )

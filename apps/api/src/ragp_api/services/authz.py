@@ -1,9 +1,5 @@
 """Permify authorization client — stub with interface for MVP."""
 
-from typing import Any
-
-import httpx
-
 from ragp_api.settings import settings
 
 

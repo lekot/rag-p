@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Any, Optional
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -97,9 +97,7 @@ class PipelineVersion(Base):
     __tablename__ = "pipeline_versions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
-    pipeline_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("pipelines.id"), nullable=False
-    )
+    pipeline_id: Mapped[str] = mapped_column(String(36), ForeignKey("pipelines.id"), nullable=False)
     nodes_json: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -158,14 +156,12 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
-    document_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("documents.id"), nullable=False
-    )
+    document_id: Mapped[str] = mapped_column(String(36), ForeignKey("documents.id"), nullable=False)
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id"), nullable=False
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1024), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

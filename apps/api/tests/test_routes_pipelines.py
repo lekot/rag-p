@@ -52,7 +52,9 @@ async def test_list_pipelines(client: AsyncClient, organization_id: str):
         json={
             "name": "Pipeline A",
             "organization_id": organization_id,
-            "nodes": [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}],
+            "nodes": [
+                {"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}
+            ],
         },
     )
     response = await client.get(f"/api/v1/pipelines?organization_id={organization_id}")
@@ -75,7 +77,13 @@ async def test_create_run_for_pipeline(client: AsyncClient, organization_id: str
         json={
             "name": "Run Pipeline",
             "organization_id": organization_id,
-            "nodes": [{"plugin_kind": "generator", "plugin_name": "litellm-generator", "params": {"model": "openai/gpt-4o-mini"}}],
+            "nodes": [
+                {
+                    "plugin_kind": "generator",
+                    "plugin_name": "litellm-generator",
+                    "params": {"model": "openai/gpt-4o-mini"},
+                }
+            ],
         },
     )
     assert create_resp.status_code == 201

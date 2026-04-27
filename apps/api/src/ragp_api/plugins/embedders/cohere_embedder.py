@@ -3,9 +3,8 @@
 import os
 from typing import Any
 
-from ragp_api.plugins.base import Embedder, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
 from ragp_api.plugins.registry import register
-
 
 _DIMS = {
     "embed-english-v3.0": 1024,
@@ -73,6 +72,7 @@ class CohereEmbedder(Embedder):
             return HealthStatus(ok=False, detail="COHERE_API_KEY not set")
         try:
             import cohere  # noqa: F401
+
             return HealthStatus(ok=True)
         except ImportError:
             return HealthStatus(ok=False, detail="cohere package not installed")

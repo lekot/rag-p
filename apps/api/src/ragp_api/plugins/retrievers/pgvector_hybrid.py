@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ragp_api.plugins.base import Retriever, CostEstimate, HealthStatus
+from ragp_api.plugins.base import CostEstimate, HealthStatus, Retriever
 from ragp_api.plugins.registry import register
 
 _RRF_K = 60
@@ -51,8 +51,11 @@ class PgvectorHybridRetriever(Retriever):
         sql = text(
             """
             WITH dense AS (
-                SELECT c.id, c.text, c.metadata_json,
-                       ROW_NUMBER() OVER (ORDER BY c.embedding <-> CAST(:query_vec AS vector)) AS rank
+                SELECT
+                    c.id, c.text, c.metadata_json,
+                    ROW_NUMBER() OVER (
+                        ORDER BY c.embedding <-> CAST(:query_vec AS vector)
+                    ) AS rank
                 FROM chunks c
                 JOIN documents d ON d.id = c.document_id
                 WHERE d.organization_id = :org_id
