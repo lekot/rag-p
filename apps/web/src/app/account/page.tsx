@@ -159,9 +159,14 @@ export default function AccountPage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle>API-ключи</CardTitle>
-          <Button size="sm" onClick={() => setNewKeyDialogOpen(true)}>
-            Новый ключ
-          </Button>
+          <div className="flex items-center gap-2">
+            <a href="/docs" className="text-xs text-muted-foreground underline hover:text-foreground">
+              API Reference
+            </a>
+            <Button size="sm" onClick={() => setNewKeyDialogOpen(true)}>
+              Новый ключ
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {keysQuery.isLoading && (

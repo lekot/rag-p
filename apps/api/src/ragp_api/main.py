@@ -18,6 +18,7 @@ from ragp_api.api.v1 import (
     routes_keys,
     routes_pipelines,
     routes_plugins,
+    routes_rag,
     routes_runs,
 )
 from ragp_api.plugins.registry import bootstrap
@@ -55,6 +56,7 @@ app.include_router(routes_datasets.router, prefix=_v1_prefix)
 app.include_router(routes_runs.router, prefix=_v1_prefix)
 app.include_router(routes_experiments.router, prefix=_v1_prefix)
 app.include_router(routes_plugins.router, prefix=_v1_prefix)
+app.include_router(routes_rag.router, prefix=_v1_prefix)
 
 
 @app.get("/health")
