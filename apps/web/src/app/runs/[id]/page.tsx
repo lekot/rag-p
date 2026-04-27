@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { MetricChart } from "@/components/metric-chart";
@@ -135,6 +136,7 @@ function DeltaBadge({ delta }: { delta: number | undefined }) {
 
 export default function RunDetailPage() {
   const params = useParams<{ id: string }>();
+  if (!params) notFound();
   const { data: run, isLoading } = trpc.runs.byId.useQuery({ id: params.id });
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;

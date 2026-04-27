@@ -29,8 +29,8 @@ jobs:
       - name: ruff lint
         run: uvx ruff@0.6.9 check apps/api
 
-  build-web-smoke:
-    name: Web build smoke
+  lint-typecheck-web:
+    name: Web lint + typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,9 +49,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Next build (gate)
+      - name: ESLint
         working-directory: apps/web
-        run: pnpm run build
+        run: pnpm run lint
+
+      - name: TypeScript typecheck
+        working-directory: apps/web
+        run: pnpm run typecheck
 
   helm-lint:
     name: Helm lint

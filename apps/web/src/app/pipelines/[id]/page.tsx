@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { notFound } from "next/navigation";
 import { useParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function PipelineDetailPage() {
   const params = useParams<{ id: string }>();
+  if (!params) notFound();
   const { toast } = useToast();
   const [query, setQuery] = useState("");
 

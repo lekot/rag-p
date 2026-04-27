@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { LeaderboardTable } from "@/components/leaderboard-table";
@@ -7,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function ExperimentLeaderboardPage() {
   const params = useParams<{ id: string }>();
+  if (!params) notFound();
 
   const { data: experiment } = trpc.experiments.byId.useQuery({ id: params.id });
   const { data: leaderboard, isLoading } = trpc.experiments.leaderboard.useQuery(
