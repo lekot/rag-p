@@ -17,7 +17,6 @@ from ragp_api.db.models import ApiKey, Dataset, Membership, Organization, User
 from ragp_api.db.redis import get_redis
 from ragp_api.main import app
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
