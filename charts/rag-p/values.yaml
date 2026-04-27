@@ -30,10 +30,11 @@ api:
     DATABASE_URL: ""
     REDIS_URL: ""
     MINIO_ENDPOINT: ""
-  apiSecrets:
-    # RAGP_SESSION_SECRET — secret for signing session cookies.
-    # Override in values.staging.yaml / values.prod.yaml via a proper k8s Secret.
-    sessionSecret: "dev-only-not-secret-change-in-prod"
+  # RAGP_SESSION_SECRET injected via Secret `<release>-api-secrets` (key: sessionSecret).
+  # Create it manually before first install:
+  #   kubectl -n <ns> create secret generic <release>-api-secrets \
+  #     --from-literal=sessionSecret=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')
+  # The Secret is NOT managed by Helm — preserves session validity across upgrades.
   autoscaling:
     enabled: false
     minReplicas: 2

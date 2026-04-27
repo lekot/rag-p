@@ -87,8 +87,17 @@ LLM keys (when ready):
 kubectl -n rag-p create secret generic llm-keys \
   --from-literal=OPENAI_API_KEY=sk-... \
   --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
-  --from-literal=COHERE_API_KEY=...
+  --from-literal=COHERE_API_KEY=... \
+  --from-literal=DEEPSEEK_API_KEY=sk-...
 # then add envFrom: secretRef: name: llm-keys to api/worker deployments
+```
+
+API session secret (signs auth cookies):
+```
+kubectl -n rag-p create secret generic rag-p-api-secrets \
+  --from-literal=sessionSecret=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')
+# Required before first deploy with auth enabled.
+# Rotating sessionSecret invalidates all existing user sessions.
 ```
 
 ## Postgres access
