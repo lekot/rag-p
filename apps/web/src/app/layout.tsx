@@ -11,6 +11,9 @@ export const metadata: Metadata = {
   description: "Pipeline-as-a-Service for documents",
 };
 
+// Skip static prerender — every page hits the FastAPI backend at runtime.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: {
