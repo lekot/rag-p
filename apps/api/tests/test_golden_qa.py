@@ -9,7 +9,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Organization
+from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
 from ragp_api.services.golden_qa_generator import generate_golden_qa
 
 # ---------------------------------------------------------------------------
@@ -66,13 +66,9 @@ def _mock_litellm_response(
 @pytest.mark.asyncio
 async def test_generate_golden_qa_creates_items(db_session: AsyncSession, organization_id: str):
     """generate_golden_qa returns Q&A pairs for each sampled chunk (mocked LLM)."""
-    # Seed org, dataset, document, 3 chunks directly in DB
+    # Seed dataset, document, 3 chunks directly in DB
     ds_id = str(uuid.uuid4())
     from ragp_api.db.models import Dataset
-
-    org = Organization(id=organization_id, name="golden-qa-org", slug="golden-qa-org")
-    db_session.add(org)
-    await db_session.flush()
 
     ds = Dataset(id=ds_id, organization_id=organization_id, name="test-gs", source="uploaded")
     doc = Document(
@@ -124,10 +120,6 @@ async def test_generate_golden_qa_handles_invalid_json(
     from ragp_api.db.models import Dataset
 
     ds_id = str(uuid.uuid4())
-    org = Organization(id=organization_id, name="golden-qa-org-inv", slug="golden-qa-org-inv")
-    db_session.add(org)
-    await db_session.flush()
-
     ds = Dataset(id=ds_id, organization_id=organization_id, name="test-invalid", source="uploaded")
     doc = Document(
         id=str(uuid.uuid4()),

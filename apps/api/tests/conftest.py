@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -68,3 +69,32 @@ async def client(db_engine):
 @pytest.fixture
 def organization_id() -> str:
     return "org-test-001"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def seed_test_organization(db_engine: Any) -> None:
+    """Ensure the stub org 'org-test-001' exists in the DB before each test.
+
+    PostgreSQL enforces FK constraints (SQLite does not), so any
+    Dataset/Document/etc. that references organization_id='org-test-001'
+    needs the row to exist first. This fixture upserts it safely.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    if _IS_POSTGRES:
+        insert_sql = (
+            "INSERT INTO organizations (id, name, slug) "
+            "VALUES ('org-test-001', 'Test Org', 'test-org') "
+            "ON CONFLICT (id) DO NOTHING"
+        )
+    else:
+        # SQLite upsert syntax
+        insert_sql = (
+            "INSERT OR IGNORE INTO organizations (id, name, slug) "
+            "VALUES ('org-test-001', 'Test Org', 'test-org')"
+        )
+    session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        await session.execute(text(insert_sql))
+        await session.commit()
