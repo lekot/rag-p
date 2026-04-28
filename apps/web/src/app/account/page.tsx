@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { useUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -152,6 +153,23 @@ export default function AccountPage() {
             <span className="text-muted-foreground w-32">Роль</span>
             <span>{user.organization.role}</span>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Team Management */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Команда</CardTitle>
+          <Link href="/account/team">
+            <Button size="sm" variant="outline">
+              Управление командой →
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Пригласите коллег, управляйте ролями и приглашениями.
+          </p>
         </CardContent>
       </Card>
 
