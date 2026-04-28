@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +30,9 @@ class Settings(BaseSettings):
     # LiteLLM default model
     default_llm_model: str = "openai/gpt-4o-mini"
     default_embedding_model: str = "openai/text-embedding-3-small"
+
+    # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD)
+    starting_balance_usd: Decimal = Decimal("1.00")
 
 
 settings = Settings()

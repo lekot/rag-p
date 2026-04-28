@@ -14,6 +14,9 @@ from ragp_api.db.models import UsageEvent
 
 logger = logging.getLogger(__name__)
 
+# Imported lazily to avoid circular imports at module load time.
+# Actual import happens inside record_usage_event.
+
 # ---------------------------------------------------------------------------
 # Pricing table (USD per 1 000 tokens)
 # ---------------------------------------------------------------------------
@@ -45,7 +48,14 @@ async def record_usage_event(
     completion_tokens: int,
     latency_ms: int | None = None,
 ) -> None:
-    """Insert a UsageEvent row.  Fail-safe: logs warning on DB error, never raises."""
+    """Insert a UsageEvent row and atomically deduct from org balance.
+
+    Fail-safe: logs warning on DB error, never raises.
+    Balance deduction is always recorded even if it would bring balance negative
+    (overspend on 1 request is acceptable for MVP; pre-flight guard is in rate_limiter).
+    """
+    from ragp_api.services.billing import deduct_balance
+
     try:
         cost = calculate_cost(model, prompt_tokens, completion_tokens)
         event = UsageEvent(
@@ -60,6 +70,26 @@ async def record_usage_event(
             latency_ms=latency_ms,
         )
         db.add(event)
+        await db.flush()  # get event.id without committing yet
+
+        if cost > Decimal("0"):
+            try:
+                await deduct_balance(
+                    db,
+                    org_id=org_id,
+                    amount=cost,
+                    reference_type="usage_event",
+                    reference_id=event.id,
+                    allow_negative=True,  # record deduction even on overspend
+                )
+            except Exception:
+                logger.warning(
+                    "Balance deduction failed for org=%s cost=%s; usage event still recorded",
+                    org_id,
+                    cost,
+                    exc_info=True,
+                )
+
         await db.commit()
     except Exception:
         logger.warning("Failed to record usage event for org=%s", org_id, exc_info=True)

@@ -135,8 +135,8 @@ async def rag_query(
         raise HTTPException(status_code=401, detail="Valid API key required")
     org, api_key = auth
 
-    # 2. Rate limiting (per key + per org)
-    await check_rag_query_limits(redis, org.id, api_key.id, settings)
+    # 2. Rate limiting (per key + per org) + balance pre-flight
+    await check_rag_query_limits(redis, org.id, api_key.id, settings, db)
 
     _request_start = time.monotonic()
 

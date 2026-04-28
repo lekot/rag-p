@@ -77,6 +77,12 @@ class Organization(Base):
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="organization")
     org_members: Mapped[list["OrgMember"]] = relationship(back_populates="organization")
     org_invites: Mapped[list["OrgInvite"]] = relationship(back_populates="organization")
+    balance: Mapped["OrgBalance | None"] = relationship(
+        back_populates="organization", uselist=False
+    )
+    billing_transactions: Mapped[list["BillingTransaction"]] = relationship(
+        back_populates="organization"
+    )
 
 
 class User(Base):
@@ -363,3 +369,43 @@ class AuditEvent(Base):
         "metadata", JSON, nullable=False, default=dict
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OrgBalance(Base):
+    """Current balance for an organization (1:1 with organizations)."""
+
+    __tablename__ = "org_balances"
+
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), primary_key=True
+    )
+    balance_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("0")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="balance")
+
+
+class BillingTransaction(Base):
+    """Record of every balance change (topup / deduction / starting_credit)."""
+
+    __tablename__ = "billing_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    # 'topup' | 'deduction' | 'starting_credit'
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # always a positive value; sign is conveyed by type
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    balance_after_usd: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    # 'usage_event' | 'manual_topup' | 'system'
+    reference_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reference_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped["Organization"] = relationship(back_populates="billing_transactions")
