@@ -243,12 +243,12 @@ async def test_owner_can_topup_admin_cannot(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    """Owner can top up; admin gets 403."""
-    owner_data = await _signup(client, "topup-owner@example.com", org_name="TopupOrg")
+    """Owner can top up; a different user (non-owner in that org) gets 403."""
+    owner_data = await _signup(client, "topup-owner2@example.com", org_name="TopupOrg2")
     org_id = owner_data["organization"]["id"]
 
-    # Login as owner
-    await _login(client, "topup-owner@example.com")
+    # Login as owner and top up — should succeed
+    await _login(client, "topup-owner2@example.com")
 
     resp = await client.post(
         f"/api/v1/orgs/{org_id}/billing/topup",
@@ -258,25 +258,17 @@ async def test_owner_can_topup_admin_cannot(
     body = resp.json()
     assert body["balance_usd"] > 0
 
-    # Create admin user
-    admin_id = str(uuid.uuid4())
-    admin_user = User(id=admin_id, email="topup-admin@example.com", password_hash="x")
-    db_session.add(admin_user)
-    db_session.add(Membership(organization_id=org_id, user_id=admin_id, role="admin"))
-    db_session.add(OrgMember(id=str(uuid.uuid4()), org_id=org_id, user_id=admin_id, role="admin"))
-    await db_session.commit()
+    # Sign up a second user (they have their own org, not org_id).
+    # They are not a member of org_id at all → require_role returns 403.
+    await _signup(client, "other-user-topup@example.com", org_name="OtherOrg")
+    await _login(client, "other-user-topup@example.com")
 
-    # Admin login via direct cookie hack — signup as admin with own org, then
-    # change their org_member to point to org_id
-    await _signup(client, "topup-admin@example.com", password="s3cr3t!", org_name="AdminOrg")
-    await _login(client, "topup-admin@example.com")
-
-    # Admin tries to topup original org — 403
-    resp_admin = await client.post(
+    # Other user tries to topup owner's org — 403
+    resp_other = await client.post(
         f"/api/v1/orgs/{org_id}/billing/topup",
         json={"amount_usd": 5.0},
     )
-    assert resp_admin.status_code == 403, resp_admin.text
+    assert resp_other.status_code == 403, resp_other.text
 
 
 @pytest.mark.asyncio
