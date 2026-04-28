@@ -33,9 +33,7 @@ async def _signup(
 
 
 async def _login(client: AsyncClient, email: str, password: str = "s3cr3t!") -> dict:
-    resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password}
-    )
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -65,9 +63,7 @@ async def _seed_org_member(
 
 
 @pytest.mark.asyncio
-async def test_signup_creates_audit_event(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_signup_creates_audit_event(client: AsyncClient, db_session: AsyncSession) -> None:
     """Signing up should produce a user.signup audit event."""
     data = await _signup(client, email="signup_audit@example.com", org_name="sorg")
     org_id = data["organization"]["id"]
@@ -85,9 +81,7 @@ async def test_signup_creates_audit_event(
 
 
 @pytest.mark.asyncio
-async def test_login_creates_audit_event(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_login_creates_audit_event(client: AsyncClient, db_session: AsyncSession) -> None:
     """Login should produce a user.login audit event."""
     data = await _signup(client, email="login_audit@example.com", org_name="lorg")
     org_id = data["organization"]["id"]
@@ -166,16 +160,12 @@ async def test_audit_failure_does_not_break_request(
 
 
 @pytest.mark.asyncio
-async def test_member_cannot_view_audit(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_member_cannot_view_audit(client: AsyncClient, db_session: AsyncSession) -> None:
     """A plain member should get 403 when requesting audit events."""
     owner_data = await _signup(client, email="owner_audit@example.com", org_name="aorg")
     org_id = owner_data["organization"]["id"]
 
-    member_data = await _signup(
-        client, email="member_audit@example.com", org_name="morg"
-    )
+    member_data = await _signup(client, email="member_audit@example.com", org_name="morg")
     member_user_id = member_data["user"]["id"]
     await _seed_org_member(db_session, org_id, member_user_id, "member")
 
@@ -191,14 +181,10 @@ async def test_admin_can_view_audit_filtered_by_event_type(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """An admin should be able to view audit events filtered by event_type."""
-    owner_data = await _signup(
-        client, email="owner_audit2@example.com", org_name="aorg2"
-    )
+    owner_data = await _signup(client, email="owner_audit2@example.com", org_name="aorg2")
     org_id = owner_data["organization"]["id"]
 
-    admin_data = await _signup(
-        client, email="admin_audit2@example.com", org_name="adorg2"
-    )
+    admin_data = await _signup(client, email="admin_audit2@example.com", org_name="adorg2")
     admin_user_id = admin_data["user"]["id"]
     await _seed_org_member(db_session, org_id, admin_user_id, "admin")
 
