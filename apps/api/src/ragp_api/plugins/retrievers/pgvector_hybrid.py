@@ -78,15 +78,15 @@ class PgvectorHybridRetriever(Retriever):
                 LIMIT :top_k
                 """
             )
-            params: dict[str, Any] = {
+            bm25_params: dict[str, Any] = {
                 "query": query,
                 "org_id": organization_id,
                 "top_k": top_k,
             }
             if dataset_id is not None:
-                params["dataset_id"] = dataset_id
+                bm25_params["dataset_id"] = dataset_id
 
-            result = await session.execute(sql, params)
+            result = await session.execute(sql, bm25_params)
             rows = result.fetchall()
             return [
                 {
