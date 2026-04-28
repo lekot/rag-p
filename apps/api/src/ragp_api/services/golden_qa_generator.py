@@ -22,6 +22,10 @@ _QA_PROMPT = (
 )
 
 
+class GoldenGenerationError(RuntimeError):
+    """Raised when chunks exist but the LLM cannot produce any golden Q&A pairs."""
+
+
 async def generate_golden_qa(
     dataset_id: str,
     organization_id: str,
@@ -51,6 +55,7 @@ async def generate_golden_qa(
         return []
 
     pairs: list[dict[str, str]] = []
+    failures = 0
     for chunk in chunks:
         prompt = _QA_PROMPT.format(chunk_text=chunk.text)
         try:
@@ -82,9 +87,14 @@ async def generate_golden_qa(
                 }
             )
         except json.JSONDecodeError as exc:
+            failures += 1
             logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
         except Exception as exc:
+            failures += 1
             logger.warning("LLM call failed for chunk %s: %s — skipping", chunk.id, exc)
+
+    if not pairs and failures:
+        raise GoldenGenerationError("LLM did not generate valid golden Q&A pairs")
 
     return pairs
 

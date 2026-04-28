@@ -27,7 +27,11 @@ from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.file_parsers import parse_to_text
-from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
+from ragp_api.services.golden_qa_generator import (
+    GoldenGenerationError,
+    generate_golden_qa,
+    save_golden_items,
+)
 from ragp_api.services.object_storage import (
     ObjectStorageError,
     ObjectStorageRef,
@@ -299,12 +303,21 @@ async def generate_golden(
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
     sample_size = max(1, min(body.sample_size, 50))
-    pairs = await generate_golden_qa(
-        dataset_id=dataset_id,
-        organization_id=organization_id,
-        db=db,
-        sample_size=sample_size,
-    )
+    try:
+        pairs = await generate_golden_qa(
+            dataset_id=dataset_id,
+            organization_id=organization_id,
+            db=db,
+            sample_size=sample_size,
+        )
+    except GoldenGenerationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "golden_generation_failed",
+                "message": "Не удалось сгенерировать Golden Q&A. Проверьте настройки LLM.",
+            },
+        ) from exc
     db_items = await save_golden_items(dataset_id=dataset_id, pairs=pairs, db=db)
 
     out_items = [
@@ -983,11 +996,17 @@ async def ask_dataset(
         Generator,
         generator_cls({"model": body.model, "temperature": 0.0, "max_tokens": 1024}),
     )
-    gen_result = await generator.generate(body.query, contexts=raw_chunks)
-
-    answer = gen_result.get("answer", "")
-    trace: dict[str, Any] = gen_result.get("trace", {})
-    usage_raw: dict[str, Any] = trace.get("usage", {})
+    try:
+        gen_result = await generator.generate(body.query, contexts=raw_chunks)
+        answer = gen_result.get("answer", "")
+        trace: dict[str, Any] = gen_result.get("trace", {})
+        usage_raw: dict[str, Any] = trace.get("usage", {})
+    except Exception:
+        answer = (
+            "Нашёл релевантные чанки, но генерация ответа сейчас недоступна. "
+            "Откройте источники ниже или проверьте настройки LLM."
+        )
+        usage_raw = {"prompt_tokens": 0, "completion_tokens": 0}
 
     return AskOut(
         answer=answer,

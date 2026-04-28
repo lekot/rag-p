@@ -710,6 +710,45 @@ async def test_ask_returns_answer_with_chunks(client: AsyncClient, organization_
 
 
 @pytest.mark.asyncio
+async def test_ask_returns_chunks_when_generator_fails(
+    client: AsyncClient, organization_id: str
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    doc_id = str(uuid.uuid4())
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": "Relevant context",
+            "score": 0.02,
+            "metadata": {"chunk_index": 0},
+            "document_id": doc_id,
+            "document_name": "upload://context.txt",
+        },
+    ]
+
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_ask_get_plugin(fake_chunks, generator_cls),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "anything", "top_k": 5},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["chunks"]) == 1
+    assert "генерация ответа сейчас недоступна" in body["answer"]
+    assert body["usage"]["prompt_tokens"] == 0
+    assert body["usage"]["completion_tokens"] == 0
+
+
+@pytest.mark.asyncio
 async def test_ask_empty_retrieval_skips_llm(client: AsyncClient, organization_id: str):
     """When retriever returns empty list, LLM must NOT be called."""
     dataset_id = await _create_dataset(client, organization_id)
@@ -748,6 +787,29 @@ async def test_ask_dataset_not_found_returns_404(client: AsyncClient, organizati
         json={"query": "hello", "top_k": 5},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_generate_golden_returns_502_when_llm_generation_fails(
+    client: AsyncClient,
+    organization_id: str,
+) -> None:
+    from ragp_api.services.golden_qa_generator import GoldenGenerationError
+
+    dataset_id = await _create_dataset(client, organization_id)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.generate_golden_qa",
+        new=AsyncMock(side_effect=GoldenGenerationError("LLM unavailable")),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 1},
+        )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"]["code"] == "golden_generation_failed"
 
 
 @pytest.mark.asyncio
