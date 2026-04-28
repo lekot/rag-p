@@ -254,6 +254,11 @@ networkPolicy:
 # ANTHROPIC_API_KEY, MINIMAX_API_KEY). Mounted into api/worker via envFrom.
 llmKeysSecret: ""
 
+# Name of k8s Secret holding YooKassa credentials
+# (RAGP_YOOKASSA_SHOP_ID, RAGP_YOOKASSA_SECRET_KEY, RAGP_YOOKASSA_INN, RAGP_YOOKASSA_WEBHOOK_SECRET).
+# Pod starts even if this secret is absent (optional: true).
+yookassaSecretName: "yookassa-credentials"
+
 # Self-hosted embedding service. Pulls model on first start and caches in PVC.
 ollama:
   enabled: false
