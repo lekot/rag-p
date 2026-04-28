@@ -14,11 +14,3 @@ dependencies:
     version: "14.x.x"
     repository: https://charts.bitnami.com/bitnami
     condition: minio.enabled
-  - name: kube-prometheus-stack
-    version: "58.x.x"
-    repository: https://prometheus-community.github.io/helm-charts
-    condition: observability.prometheus.enabled
-  - name: loki-stack
-    version: "2.x.x"
-    repository: https://grafana.github.io/helm-charts
-    condition: observability.loki.enabled

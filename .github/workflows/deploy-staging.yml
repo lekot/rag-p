@@ -136,8 +136,6 @@ jobs:
       - name: Helm dependency build
         run: |
           helm repo add bitnami https://charts.bitnami.com/bitnami
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo add grafana https://grafana.github.io/helm-charts
           helm repo update
           helm dependency build ./charts/rag-p
 
@@ -147,6 +145,23 @@ jobs:
           helm -n monitoring status kube-prometheus-stack >/dev/null
           kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null
           kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null
+
+      - name: Clear stale Helm operation
+        run: |
+          set -e
+          status=$(helm -n rag-p status rag-p -o json 2>/dev/null | jq -r '.info.status // ""' || true)
+          echo "Current Helm status: ${status:-not-installed}"
+          case "$status" in
+            pending-install|pending-upgrade|pending-rollback)
+              revision=$(helm -n rag-p history rag-p -o json | jq -r '[.[] | select(.status == "deployed")] | last | .revision // ""')
+              if [ -z "$revision" ]; then
+                echo "No deployed revision found to clear stale Helm operation"
+                exit 1
+              fi
+              echo "Rolling back stale $status to deployed revision $revision"
+              helm -n rag-p rollback rag-p "$revision" --wait --timeout 5m
+              ;;
+          esac
 
       - name: Helm upgrade
         id: upgrade
