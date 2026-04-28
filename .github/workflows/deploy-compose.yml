@@ -159,6 +159,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           RAGP_S3_ENDPOINT_URL: ${{ vars.RAGP_S3_ENDPOINT_URL || 'https://s3.ru-1.storage.selcloud.ru' }}
+          RAGP_S3_REGION: ${{ vars.RAGP_S3_REGION || 'ru-1' }}
           RAGP_S3_BUCKET: ${{ vars.RAGP_S3_BUCKET }}
           RAGP_S3_ACCESS_KEY_ID: ${{ secrets.RAGP_S3_ACCESS_KEY_ID }}
           RAGP_S3_SECRET_ACCESS_KEY: ${{ secrets.RAGP_S3_SECRET_ACCESS_KEY }}
@@ -191,6 +192,7 @@ jobs:
           ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
           COHERE_API_KEY=${COHERE_API_KEY}
           RAGP_S3_ENDPOINT_URL=${RAGP_S3_ENDPOINT_URL}
+          RAGP_S3_REGION=${RAGP_S3_REGION}
           RAGP_S3_BUCKET=${RAGP_S3_BUCKET}
           RAGP_S3_ACCESS_KEY_ID=${RAGP_S3_ACCESS_KEY_ID}
           RAGP_S3_SECRET_ACCESS_KEY=${RAGP_S3_SECRET_ACCESS_KEY}

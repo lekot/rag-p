@@ -28,6 +28,12 @@ from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.file_parsers import parse_to_text
 from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
+from ragp_api.services.object_storage import (
+    ObjectStorageError,
+    ObjectStorageRef,
+    delete_raw_documents,
+    store_raw_document,
+)
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.subscription import (
     NoActiveSubscriptionError,
@@ -191,6 +197,26 @@ async def delete_dataset(
         )
     )
     total_bytes = int(storage_result.scalar_one() or 0)
+
+    documents_result = await db.execute(
+        select(Document).where(
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+        )
+    )
+    documents = list(documents_result.scalars().all())
+    try:
+        await delete_raw_documents(
+            [ObjectStorageRef(backend=doc.storage_backend, key=doc.object_key) for doc in documents]
+        )
+    except ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "object_storage_delete_failed",
+                "message": "Не удалось удалить исходные документы из S3.",
+            },
+        ) from exc
 
     document_ids = select(Document.id).where(
         Document.dataset_id == dataset_id,
@@ -545,15 +571,37 @@ async def upload_document(
 
     # Create document record
     now = datetime.now(tz=UTC)
+    document_id = str(uuid.uuid4())
+    sha256 = hashlib.sha256(raw).hexdigest()
+    try:
+        storage_ref = await store_raw_document(
+            raw=raw,
+            organization_id=organization_id,
+            dataset_id=dataset_id,
+            document_id=document_id,
+            filename=filename,
+            content_type=content_type,
+            sha256=sha256,
+        )
+    except ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "object_storage_upload_failed",
+                "message": "Не удалось сохранить исходный документ в S3.",
+            },
+        ) from exc
+
     doc = Document(
-        id=str(uuid.uuid4()),
+        id=document_id,
         organization_id=organization_id,
         dataset_id=dataset_id,
         source_uri=f"upload://{filename}",
         raw_size_bytes=len(raw),
         content_type=content_type,
-        sha256=hashlib.sha256(raw).hexdigest(),
-        storage_backend="transient",
+        sha256=sha256,
+        storage_backend=storage_ref.backend,
+        object_key=storage_ref.key,
         parsed_at=now,
         status="parsed",
     )

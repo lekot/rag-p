@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from ragp_api.db.models import Document, OrgSubscription, Plan
+from ragp_api.services.object_storage import ObjectStorageRef
 from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
@@ -205,6 +206,82 @@ async def test_upload_and_delete_use_raw_document_bytes_for_storage_quota(
         assert subscription.storage_bytes_used == 0
     finally:
         settings.enforce_subscription_quotas = old_enforce_subscription_quotas
+
+
+@pytest.mark.asyncio
+async def test_upload_stores_raw_document_in_s3_when_configured(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    raw = b"S3 backed document. " * 50
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.store_raw_document",
+        new=AsyncMock(return_value=ObjectStorageRef(backend="s3", key="orgs/o/doc.txt")),
+    ) as store_mock:
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/documents",
+            headers={"X-Organization-Id": organization_id},
+            files={"file": ("doc.txt", io.BytesIO(raw), "text/plain")},
+            data={
+                "chunker_name": "recursive-character",
+                "chunker_params": '{"chunk_size": 512, "chunk_overlap": 64}',
+            },
+        )
+
+    assert resp.status_code == 201, resp.text
+    store_mock.assert_awaited_once()
+    _, kwargs = store_mock.call_args
+    assert kwargs["raw"] == raw
+    assert kwargs["organization_id"] == organization_id
+    assert kwargs["dataset_id"] == dataset_id
+    assert kwargs["filename"] == "doc.txt"
+    assert kwargs["content_type"] == "text/plain"
+
+    document = (
+        await db_session.execute(select(Document).where(Document.id == resp.json()["document_id"]))
+    ).scalar_one()
+    assert document.storage_backend == "s3"
+    assert document.object_key == "orgs/o/doc.txt"
+
+
+@pytest.mark.asyncio
+async def test_delete_dataset_deletes_s3_raw_documents(
+    client: AsyncClient,
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.store_raw_document",
+        new=AsyncMock(return_value=ObjectStorageRef(backend="s3", key="orgs/o/doc.txt")),
+    ):
+        upload_resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/documents",
+            headers={"X-Organization-Id": organization_id},
+            files={"file": ("doc.txt", io.BytesIO(b"delete me " * 100), "text/plain")},
+            data={
+                "chunker_name": "recursive-character",
+                "chunker_params": '{"chunk_size": 512, "chunk_overlap": 64}',
+            },
+        )
+    assert upload_resp.status_code == 201, upload_resp.text
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.delete_raw_documents",
+        new=AsyncMock(),
+    ) as delete_mock:
+        delete_resp = await client.delete(
+            f"/api/v1/datasets/{dataset_id}",
+            headers={"X-Organization-Id": organization_id},
+        )
+
+    assert delete_resp.status_code == 204, delete_resp.text
+    delete_mock.assert_awaited_once()
+    refs = delete_mock.call_args.args[0]
+    assert refs == [ObjectStorageRef(backend="s3", key="orgs/o/doc.txt")]
 
 
 @pytest.mark.asyncio

@@ -50,5 +50,12 @@ class Settings(BaseSettings):
     yookassa_inn: str = ""  # RAGP_YOOKASSA_INN
     usd_to_rub_markup: Decimal = Decimal("0.03")  # 3% markup for exchange rate risk
 
+    # S3-compatible object storage for raw uploaded documents.
+    s3_endpoint_url: str = ""
+    s3_region: str = ""
+    s3_bucket: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+
 
 settings = Settings()
