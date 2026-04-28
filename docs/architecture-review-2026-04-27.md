@@ -18,6 +18,7 @@
 
 Открыто / частично:
 
+- P0 tenant isolation: после регистрации пользователь видит datasets shared/default org. Root cause: web context использует `NEXT_PUBLIC_ORG_ID` / `000...001`, а API datasets list/create принимает `organization_id` от клиента. Это нужно закрыть до любых новых фич.
 - Subscription/billing код сейчас выглядит как незавершённый слой: нужны idempotency, корректный plan switch, атомарные quota checks и тесты на webhooks.
 - Account/billing UX ещё смешивает старую wallet/top-up модель и новую subscription модель.
 - Customer journey "загрузил RAG -> подключил свой продукт" есть через API key и docs, но нет SDK/n8n/готовых workflow-интеграций.
@@ -122,17 +123,18 @@
 
 ## Первый порядок разбора после CD
 
-1. Зафиксировать целевой runtime path: Ollama-first, без Cohere как обязательного dependency.
-2. Закрыть публичный доступ к UI или ввести хотя бы минимальный allowlist/auth gate.
-3. Описать customer journey: upload -> index -> query endpoint -> answer/source -> limits/cost.
-4. Свести API contracts:
+1. Закрыть P0 tenant isolation: org scope только из authenticated session/API key, без client-provided `organization_id` как authority.
+2. Зафиксировать целевой runtime path: Ollama-first, без Cohere как обязательного dependency.
+3. Проверить auth gate end-to-end: UI закрыт, session cookie корректно пробрасывается из Next в FastAPI, `/auth/me` является source of truth.
+4. Описать customer journey: upload -> index -> query endpoint -> answer/source -> limits/cost.
+5. Свести API contracts:
    - FastAPI response models;
    - tRPC schemas;
    - UI expectations;
    - negative tests на mismatch.
-5. Вернуть web typecheck/build в блокирующий режим.
-6. Починить API plugin registry test под фактический Ollama-first набор.
-7. Посчитать себестоимость одного ingest и одного query path:
+6. Вернуть web typecheck/build в блокирующий режим.
+7. Починить API plugin registry test под фактический Ollama-first набор.
+8. Посчитать себестоимость одного ingest и одного query path:
    - CPU/RAM;
    - текущий infra floor $130/мес;
    - отказоустойчивый floor $300+/мес;
@@ -140,9 +142,9 @@
    - storage/vector growth;
    - возможная очередь;
    - лимиты на tenant.
-8. Измерить ёмкость scorer/eval path до обсуждения публичных тарифов.
-9. Добавить integration backlog: n8n community node, SDK/examples, готовые workflow recipes.
-10. После этого уже возвращаться к фичам: experiments, eval-loop, leaderboard, billing/pricing.
+9. Измерить ёмкость scorer/eval path до обсуждения публичных тарифов.
+10. Добавить integration backlog: n8n community node, SDK/examples, готовые workflow recipes.
+11. После этого уже возвращаться к фичам: experiments, eval-loop, leaderboard, billing/pricing.
 
 ## Рабочая гипотеза
 
