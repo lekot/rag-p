@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from ragp_api.db.session import async_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +24,6 @@ async def run_experiment_task(ctx: dict[str, Any], experiment_id: str) -> None:
     from sqlalchemy import select
 
     from ragp_api.db.models import Experiment
-    from ragp_api.db.session import async_session
     from ragp_api.services.experiment_runner import run_experiment_inline
 
     logger.info("Starting experiment task for experiment_id=%s", experiment_id)
