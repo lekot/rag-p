@@ -1,15 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function SignupPage() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams?.get("invite") ?? null;
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [orgName, setOrgName] = useState("");
@@ -37,7 +42,23 @@ export default function SignupPage() {
         setError(data.detail ?? "Ошибка регистрации");
         return;
       }
-      router.push("/");
+
+      // If we arrived via an invite link, accept it now
+      if (inviteToken) {
+        try {
+          await fetch(`${API_URL}/api/v1/invites/accept`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ token: inviteToken }),
+          });
+        } catch {
+          // Non-fatal: user is registered, invite accept failed silently
+        }
+        router.push("/account/team");
+      } else {
+        router.push("/");
+      }
     } catch {
       setError("Ошибка сети. Попробуйте ещё раз.");
     } finally {
@@ -52,6 +73,11 @@ export default function SignupPage() {
           <CardTitle>Регистрация</CardTitle>
         </CardHeader>
         <CardContent>
+          {inviteToken && (
+            <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+              После регистрации вы автоматически присоединитесь к организации.
+            </div>
+          )}
           <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
             <div className="space-y-1">
               <Label htmlFor="email">Email</Label>
@@ -77,23 +103,23 @@ export default function SignupPage() {
                 autoComplete="new-password"
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="org-name">
-                Название организации{" "}
-                <span className="text-muted-foreground">(необязательно)</span>
-              </Label>
-              <Input
-                id="org-name"
-                type="text"
-                placeholder="Моя компания"
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
-                autoComplete="organization"
-              />
-            </div>
-            {error && (
-              <p className="text-sm text-red-500">{error}</p>
+            {!inviteToken && (
+              <div className="space-y-1">
+                <Label htmlFor="org-name">
+                  Название организации{" "}
+                  <span className="text-muted-foreground">(необязательно)</span>
+                </Label>
+                <Input
+                  id="org-name"
+                  type="text"
+                  placeholder="Моя компания"
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  autoComplete="organization"
+                />
+              </div>
             )}
+            {error && <p className="text-sm text-red-500">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Регистрируем…" : "Зарегистрироваться"}
             </Button>
@@ -107,5 +133,19 @@ export default function SignupPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <p className="text-muted-foreground">Загрузка…</p>
+        </div>
+      }
+    >
+      <SignupForm />
+    </Suspense>
   );
 }

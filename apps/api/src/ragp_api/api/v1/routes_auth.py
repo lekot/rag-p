@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Membership, Organization, User
+from ragp_api.db.models import Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
 from ragp_api.services.passwords import hash_password, verify_password
@@ -137,6 +137,15 @@ async def signup(
         role="owner",
     )
     db.add(membership)
+
+    # Also add to org_members for new multi-user role system
+    org_member = OrgMember(
+        id=str(uuid.uuid4()),
+        org_id=org.id,
+        user_id=user.id,
+        role="owner",
+    )
+    db.add(org_member)
     await db.commit()
     await db.refresh(user)
     await db.refresh(org)
