@@ -119,4 +119,23 @@ networkPolicy:
   enabled: false
 
 observability:
-  enabled: false
+  enabled: true
+  serviceMonitor:
+    enabled: true
+  workerMetricsPort: 9090
+  prometheus:
+    enabled: false  # kube-prometheus-stack установлен на кластере отдельно
+  loki:
+    enabled: true
+  grafana:
+    enabled: false  # grafana входит в kube-prometheus-stack
+
+loki-stack:
+  loki:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: "fast.ru-3b"
+  promtail:
+    enabled: true

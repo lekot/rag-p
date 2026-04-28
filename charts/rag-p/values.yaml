@@ -248,9 +248,44 @@ tls:
 # Observability stack (prod only)
 observability:
   enabled: false
+  serviceMonitor:
+    enabled: true
+  workerMetricsPort: 9090
   prometheus:
     enabled: false
   grafana:
     enabled: false
   loki:
     enabled: false
+
+# kube-prometheus-stack sub-chart config (active only when observability.prometheus.enabled=true)
+kube-prometheus-stack:
+  grafana:
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: rag-p
+            orgId: 1
+            folder: "RAG Platform"
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /tmp/dashboards/rag-p
+
+# loki-stack sub-chart config (active only when observability.loki.enabled=true)
+loki-stack:
+  loki:
+    enabled: true
+    persistence:
+      enabled: false
+      size: 10Gi
+  promtail:
+    enabled: true
