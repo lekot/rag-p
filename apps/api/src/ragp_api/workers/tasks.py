@@ -49,7 +49,6 @@ async def aggregate_usage_daily(ctx: dict[str, Any]) -> None:
     from sqlalchemy import func, select
 
     from ragp_api.db.models import UsageDaily, UsageEvent
-    from ragp_api.db.session import async_session
 
     yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
     logger.info("aggregate_usage_daily: aggregating for %s", yesterday)
