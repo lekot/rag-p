@@ -1,0 +1,102 @@
+name: Rotate PVC (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which PVC to delete and recreate"
+        type: choice
+        required: true
+        options:
+          - ollama
+          - loki
+          - both
+      confirm:
+        description: 'Type "yes" to confirm — old data will be lost'
+        required: true
+
+jobs:
+  rotate:
+    name: Delete PVC and let Helm recreate
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard against accidental run
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "yes" ]; then
+            echo "Confirmation not provided, aborting."
+            exit 1
+          fi
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Show current PVCs
+        run: kubectl -n rag-p get pvc
+
+      - name: Delete ollama PVC + pod
+        if: ${{ github.event.inputs.target == 'ollama' || github.event.inputs.target == 'both' }}
+        run: |
+          # Find ollama PVC by labels
+          PVC=$(kubectl -n rag-p get pvc -l app.kubernetes.io/component=ollama -o name | head -1)
+          if [ -z "$PVC" ]; then
+            PVC=$(kubectl -n rag-p get pvc -o name | grep -i ollama | head -1)
+          fi
+          if [ -z "$PVC" ]; then
+            echo "No ollama PVC found — skipping"
+          else
+            echo "Scaling down ollama to detach PVC"
+            kubectl -n rag-p scale deploy/rag-p-ollama --replicas=0 || true
+            kubectl -n rag-p wait --for=delete pod -l app.kubernetes.io/component=ollama --timeout=120s || true
+            echo "Deleting $PVC"
+            kubectl -n rag-p delete "$PVC" --wait=true --timeout=120s
+          fi
+
+      - name: Delete loki PVC + pod
+        if: ${{ github.event.inputs.target == 'loki' || github.event.inputs.target == 'both' }}
+        run: |
+          PVC=$(kubectl -n rag-p get pvc -o name | grep -i loki | head -1)
+          if [ -z "$PVC" ]; then
+            echo "No loki PVC found — skipping"
+          else
+            echo "Scaling down loki StatefulSet to detach PVC"
+            kubectl -n rag-p scale sts -l app=loki --replicas=0 || true
+            kubectl -n rag-p wait --for=delete pod -l app=loki --timeout=120s || true
+            echo "Deleting $PVC"
+            kubectl -n rag-p delete "$PVC" --wait=true --timeout=120s
+          fi
+
+      - name: Helm dependency build
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+          helm dependency build ./charts/rag-p
+
+      - name: Helm upgrade (recreates PVCs from values)
+        run: |
+          helm upgrade rag-p ./charts/rag-p \
+            -n rag-p \
+            -f charts/rag-p/values.staging.yaml \
+            --reuse-values \
+            --wait \
+            --timeout 6m
+
+      - name: Show new PVCs
+        run: kubectl -n rag-p get pvc
