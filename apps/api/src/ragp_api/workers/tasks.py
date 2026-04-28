@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -50,7 +50,7 @@ async def aggregate_usage_daily(ctx: dict[str, Any]) -> None:
     from ragp_api.db.models import UsageDaily, UsageEvent
     from ragp_api.db.session import async_session
 
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
     logger.info("aggregate_usage_daily: aggregating for %s", yesterday)
 
     async with async_session() as db:

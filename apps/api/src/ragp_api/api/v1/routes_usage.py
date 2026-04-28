@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, text
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import OrgRole, UsageDaily, UsageEvent
-from ragp_api.db.models import User
+from ragp_api.db.models import OrgRole, UsageDaily, UsageEvent, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
 from ragp_api.services.permissions import require_role

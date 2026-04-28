@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -16,16 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     ApiKey,
-    Dataset,
     Membership,
-    OrgMember,
     Organization,
-    User,
+    OrgMember,
     UsageDaily,
     UsageEvent,
+    User,
 )
 from ragp_api.services.usage import calculate_cost, record_usage_event
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,13 +177,11 @@ async def test_aggregate_usage_daily_creates_summary(
     from ragp_api.workers.tasks import aggregate_usage_daily
 
     org_id = "org-test-001"
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-    yesterday_dt = datetime(
-        yesterday.year, yesterday.month, yesterday.day, 12, 0, 0, tzinfo=timezone.utc
-    )
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+    yesterday_dt = datetime(yesterday.year, yesterday.month, yesterday.day, 12, 0, 0, tzinfo=UTC)
 
     # Seed events for yesterday
-    for i in range(3):
+    for _i in range(3):
         ev = UsageEvent(
             id=str(uuid.uuid4()),
             org_id=org_id,
@@ -232,10 +228,8 @@ async def test_aggregate_usage_daily_idempotent(
     from ragp_api.workers.tasks import aggregate_usage_daily
 
     org_id = "org-test-001"
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-    yesterday_dt = datetime(
-        yesterday.year, yesterday.month, yesterday.day, 10, 0, 0, tzinfo=timezone.utc
-    )
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+    yesterday_dt = datetime(yesterday.year, yesterday.month, yesterday.day, 10, 0, 0, tzinfo=UTC)
 
     ev = UsageEvent(
         id=str(uuid.uuid4()),
