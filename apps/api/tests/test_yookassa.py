@@ -16,10 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     BillingTransaction,
-    Membership,
-    Organization,
-    OrgMember,
-    User,
 )
 from ragp_api.services.fx import get_usd_to_rub_rate
 
@@ -147,30 +143,44 @@ async def test_get_usd_to_rub_rate_falls_back_on_cbr_error() -> None:
 
 @pytest.mark.asyncio
 async def test_create_checkout_requires_owner(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient,
 ) -> None:
-    """Non-owner (admin) cannot create a checkout session — expects 403."""
-    # Create org with admin-role user
-    oid = str(uuid.uuid4())
-    uid = str(uuid.uuid4())
-    email = f"admin-{oid[:6]}@example.com"
+    """Non-member of an org cannot create a checkout session — expects 403."""
+    suffix = uuid.uuid4().hex[:6]
 
-    org = Organization(id=oid, name="co", slug=f"co-{oid[:6]}")
-    user = User(id=uid, email=email, password_hash="x")
-    membership = Membership(organization_id=oid, user_id=uid, role="admin")
-    org_member = OrgMember(id=str(uuid.uuid4()), org_id=oid, user_id=uid, role="admin")
-    db_session.add_all([org, user, membership, org_member])
-    await db_session.commit()
-
-    # Login
-    await client.post("/api/v1/auth/signup", json={"email": email, "password": _PASSWORD})
-    login_resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": _PASSWORD}
+    # User A signs up (becomes owner of org-A)
+    resp_a = await client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": f"owner-a-{suffix}@example.com",
+            "password": _PASSWORD,
+            "organization_name": f"OrgA-{suffix}",
+        },
     )
-    assert login_resp.status_code == 200
+    assert resp_a.status_code == 201, resp_a.text
+    org_a_id = resp_a.json()["organization"]["id"]
 
+    # User B signs up (owns org-B, not a member of org-A)
+    resp_b = await client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": f"owner-b-{suffix}@example.com",
+            "password": _PASSWORD,
+            "organization_name": f"OrgB-{suffix}",
+        },
+    )
+    assert resp_b.status_code == 201, resp_b.text
+
+    # Login as user B
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": f"owner-b-{suffix}@example.com", "password": _PASSWORD},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+
+    # User B tries to create a checkout for org-A — not a member, expects 403
     resp = await client.post(
-        f"/api/v1/orgs/{oid}/billing/checkout",
+        f"/api/v1/orgs/{org_a_id}/billing/checkout",
         json={"amount_usd": "10.00"},
     )
     assert resp.status_code == 403
