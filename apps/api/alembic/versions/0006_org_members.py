@@ -45,12 +45,14 @@ def upgrade() -> None:
     op.create_index("ix_org_members_org_id", "org_members", ["org_id"])
     op.create_index("ix_org_members_user_id", "org_members", ["user_id"])
 
-    # Migrate existing memberships with role='owner' into org_members
+    # Migrate existing memberships into org_members.
+    # id is String(36) (UUID), so generate fresh uuid for each row instead of
+    # concatenating org_id + '-' + user_id (which gives 73 chars and overflows).
     op.execute(
         sa.text(
             "INSERT INTO org_members (id, org_id, user_id, role, created_at) "
             "SELECT "
-            "  CONCAT(organization_id, '-', user_id) as id, "
+            "  gen_random_uuid()::text as id, "
             "  organization_id as org_id, "
             "  user_id, "
             "  role, "
