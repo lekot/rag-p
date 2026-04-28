@@ -13,6 +13,20 @@ from ragp_api.db.session import async_session
 logger = logging.getLogger(__name__)
 
 
+async def expire_subscriptions_task(ctx: dict[str, Any]) -> None:
+    """Cron task: mark expired all subscriptions whose period has ended.
+
+    Runs daily at 00:10 UTC via WorkerSettings.cron_jobs.
+    """
+    from ragp_api.services.subscription import expire_old_subscriptions
+
+    logger.info("expire_subscriptions_task: starting")
+    async with async_session() as db:
+        count = await expire_old_subscriptions(db)
+        await db.commit()
+    logger.info("expire_subscriptions_task: expired %d subscriptions", count)
+
+
 async def run_experiment_task(ctx: dict[str, Any], experiment_id: str) -> None:
     """
     ARQ task: load Experiment from DB and run the evaluation grid.

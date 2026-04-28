@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     rate_limit_per_key_rpm: int = 60
     rate_limit_per_org_rpm: int = 1000
 
+    # Auth cookies. Keep false for local HTTP; enable in TLS deployments.
+    session_cookie_secure: bool = False
+
     # Permify
     permify_url: str = "http://localhost:3476"
     permify_tenant_id: str = "t1"

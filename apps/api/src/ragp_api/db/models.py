@@ -83,6 +83,9 @@ class Organization(Base):
     billing_transactions: Mapped[list["BillingTransaction"]] = relationship(
         back_populates="organization"
     )
+    subscription: Mapped["OrgSubscription | None"] = relationship(
+        back_populates="organization", uselist=False
+    )
 
 
 class User(Base):
@@ -371,8 +374,81 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Plan(Base):
+    """Subscription plan catalogue (static seed data)."""
+
+    __tablename__ = "plans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    price_rub_monthly: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    included_q: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    included_storage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_users: Mapped[int] = mapped_column(Integer, nullable=False)
+    rpm_per_key: Mapped[int] = mapped_column(Integer, nullable=False)
+    allow_overage: Mapped[bool] = mapped_column(nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class OrgSubscription(Base):
+    """Active subscription for an organization (1:1 with organizations)."""
+
+    __tablename__ = "org_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False, unique=True
+    )
+    plan_id: Mapped[str] = mapped_column(String(32), ForeignKey("plans.id"), nullable=False)
+    # 'active' | 'expired' | 'cancelled'
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    current_period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    q_used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    storage_bytes_used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # MVP: always false — renewal is manual
+    auto_renew: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="subscription")
+    plan: Mapped["Plan"] = relationship()
+
+
+class SubscriptionEvent(Base):
+    """History of subscription lifecycle events."""
+
+    __tablename__ = "subscription_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    __table_args__ = (
+        UniqueConstraint("yookassa_payment_id", name="uq_subscription_events_yookassa_payment_id"),
+    )
+
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    plan_id: Mapped[str] = mapped_column(String(32), ForeignKey("plans.id"), nullable=False)
+    # 'started' | 'renewed' | 'expired' | 'cancelled' | 'upgraded' | 'downgraded'
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    yookassa_payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount_rub: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class OrgBalance(Base):
-    """Current balance for an organization (1:1 with organizations)."""
+    """Overage wallet for an organization — used by Corp/Enterprise for pay-as-you-go.
+
+    For subscription-based billing this is only charged when q_used exceeds
+    included_q on a plan with allow_overage=True.
+    """
 
     __tablename__ = "org_balances"
 

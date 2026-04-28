@@ -17,9 +17,10 @@
 ## [BLOCKED-NIGHT-RUN] Celery/ARQ для experiment runner
 
 - **Where**: `apps/api/src/ragp_api/services/experiment_runner.py`, `routes_experiments.py`
-- **Why blocked**: Для production нужна очередь задач (Celery/ARQ), чтобы не блокировать HTTP-запрос. Сейчас runner работает синхронно inline.
-- **Workaround applied**: `await run_experiment_inline(experiment, db)` внутри POST /experiments — работает для прототипа с небольшими гридами.
-- **Decision needed**: Выбрать Celery vs ARQ vs Background Tasks FastAPI. Архитектура уже готова к замене.
+- **Status update 2026-04-28**: ARQ/Redis выбран де-факто для MVP: dependency, Helm worker deployment и staging flag уже появились.
+- **Why still blocked**: experiment runner и queue SLA ещё не сведены в production contract: нет явного разделения live/ingest/experiment/score/maintenance pools, fairness, idempotency и backpressure.
+- **Workaround applied**: ARQ worker path есть, но часть execution path всё ещё синхронная/частичная.
+- **Decision needed**: Утвердить ARQ как MVP broker и реализовать queue contract из `docs/queue-contract-proposal.md`.
 
 ---
 
@@ -45,11 +46,27 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] Pytest не в CI gate
+## ~~[BLOCKED-NIGHT-RUN] Pytest не в CI gate~~ RESOLVED
 
 - **Where**: `.github/workflows/ci.yml`
-- **Why blocked**: CI прогоняет ruff + mypy + web + helm, но **не** pytest. Поэтому регресс в тестах ловится только локально или в Sonnet-агенте.
-- **Workaround applied**: Тесты гоняют локально.
-- **Decision needed**: Добавить step `cd apps/api && uv sync --all-packages && uv run pytest tests/` в lint-py job. Требует postgres-container или мокать БД целиком.
+- **Resolved**: CI теперь содержит pytest job с Postgres/pgvector service, `uv sync --all-packages --all-extras` и `uv run pytest`.
+
+---
+
+## [BLOCKED-NIGHT-RUN] n8n community node как продуктовый вход
+
+- **Where**: будущий integration package / docs / public API contract.
+- **Why blocked**: Есть `POST /api/v1/rag/query` и API keys, но нет zero-code интеграции для n8n users.
+- **Workaround applied**: Пользователь может дергать HTTP Request node вручную по `/docs`, но это не community node и не polished journey.
+- **Decision needed**: Спроектировать n8n node contract: credentials, query action, upload/index action, status polling, examples, rate-limit semantics.
+
+---
+
+## [BLOCKED-NIGHT-RUN] Atomic Q reservation for live API usage
+
+- **Where**: `services/rate_limiter.py`, `services/usage.py`, `routes_rag.py`.
+- **Why blocked**: Сейчас preflight проверяет `q_used`, а списание Q выполняется после генерации в usage tracking. Это лучше прежнего wallet-only gate, но ещё не идеальный enterprise contract: при гонках и fail-open usage recording возможен перерасход сверх hard quota.
+- **Workaround applied**: Подписка и rate limit уже блокируют очевидные no-plan/quota-exceeded кейсы; для YooKassa/subscription lifecycle добавлена DB idempotency.
+- **Decision needed**: Ввести явный `reserve_q` до генерации после проверки dataset/pipeline ownership, а `record_usage_event` оставить только для audit/cost/overage settlement. Нужно одновременно обновить старые billing/rag tests с wallet-model на subscription-model.
 
 <!-- ОТКРЫТЫЕ БЛОКЕРЫ ДОБАВЛЯЮТСЯ ВЫШЕ ЭТОЙ ЛИНИИ -->

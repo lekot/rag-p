@@ -26,6 +26,12 @@ from ragp_api.services.audit import log_audit_event
 from ragp_api.services.file_parsers import parse_to_text
 from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
 from ragp_api.services.pipeline_runner import run_pipeline
+from ragp_api.services.subscription import (
+    NoActiveSubscriptionError,
+    StorageQuotaExceededError,
+    consume_storage,
+    release_storage,
+)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -166,6 +172,22 @@ async def delete_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
     dataset_name = dataset.name
+
+    # Calculate total bytes stored for this dataset (all documents' chunks)
+    # We approximate by summing text lengths of all chunks in this dataset.
+    # This is consistent with what was charged on upload (len(raw) file bytes).
+    # For a more precise approach, sum document sizes — but raw bytes per upload
+    # is what we tracked, so we release by document count * avg.
+    # Simpler: release all chunk text bytes as a best-effort approximation.
+    chunks_result = await db.execute(
+        select(Chunk).join(Document, Chunk.document_id == Document.id).where(
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+        )
+    )
+    chunks = chunks_result.scalars().all()
+    total_bytes = sum(len(c.text.encode("utf-8")) for c in chunks)
+
     await db.delete(dataset)
     await log_audit_event(
         db,
@@ -177,6 +199,10 @@ async def delete_dataset(
         metadata={"name": dataset_name},
         request=request,
     )
+
+    if total_bytes > 0:
+        await release_storage(db, organization_id, total_bytes)
+
     await db.commit()
 
 
@@ -443,6 +469,28 @@ async def upload_document(
     raw = await file.read(_MAX_UPLOAD_BYTES + 1)
     if len(raw) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
+
+    # Storage quota check — must happen before any DB writes
+    try:
+        await consume_storage(db, organization_id, len(raw))
+    except NoActiveSubscriptionError:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        )
+    except StorageQuotaExceededError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "storage_quota_exceeded",
+                "storage_used": exc.used,
+                "storage_limit": exc.limit,
+                "message": "Лимит хранилища исчерпан. Удалите датасеты или перейдите на старший план.",
+            },
+        )
 
     text = parse_to_text(filename, content_type, raw)
 

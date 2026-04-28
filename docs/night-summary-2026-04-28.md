@@ -48,9 +48,13 @@ flowchart TD
 
 см. [docs/blockers.md](./blockers.md)
 
-Актуальные (нерешённые):
-- **Celery/ARQ** — experiment runner синхронный, блокирует HTTP при больших гридах.
-- **Pytest не в CI gate** — тесты гоняются локально, не в GitHub Actions.
+Актуальные (нерешённые / частичные):
+- **ARQ queue contract** — ARQ/Redis worker path уже появился, но experiment/live/ingest/score/maintenance SLA, fairness и idempotency ещё не сведены в контракт реализации.
+- **Subscription enforcement** — pricing/subscription слой появился, но требует ревью атомарности quota, YooKassa idempotency, plan switch и тестов.
+- **n8n community node** — нужен как zero-code вход для пользователей n8n поверх `POST /api/v1/rag/query` и будущих upload/index/status actions.
+
+Закрыто после старой записи:
+- **Pytest в CI gate** — `.github/workflows/ci.yml` теперь содержит pytest job с Postgres/pgvector service.
 
 ## Что НЕ сделано (бэклог)
 
@@ -61,7 +65,7 @@ flowchart TD
 - Cohere reranker (cohere blocked from RU IP — оставлен в реестре, не используется)
 - Background usage tracking + billing dashboard
 - Старый бинарный .doc parser (textract/antiword)
-- Pytest в CI (требует postgres-container или full mock)
+- n8n community node: credentials, query action, upload/index action, status polling, examples
 
 ## Workflow для нового пользователя
 

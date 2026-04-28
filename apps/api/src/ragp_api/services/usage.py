@@ -58,13 +58,22 @@ async def record_usage_event(
     completion_tokens: int,
     latency_ms: int | None = None,
 ) -> None:
-    """Insert a UsageEvent row and atomically deduct from org balance.
+    """Insert a UsageEvent row and increment the subscription quota counter.
+
+    For plans with allow_overage=True (Corp/Enterprise), if q_used exceeds
+    included_q the overage cost is also deducted from the org's balance wallet.
 
     Fail-safe: logs warning on DB error, never raises.
-    Balance deduction is always recorded even if it would bring balance negative
-    (overspend on 1 request is acceptable for MVP; pre-flight guard is in rate_limiter).
     """
+    from sqlalchemy import select
+
+    from ragp_api.db.models import Plan
     from ragp_api.services.billing import deduct_balance
+    from ragp_api.services.subscription import (
+        NoActiveSubscriptionError,
+        consume_q,
+        get_active_subscription,
+    )
 
     try:
         cost = calculate_cost(model, prompt_tokens, completion_tokens)
@@ -82,19 +91,40 @@ async def record_usage_event(
         db.add(event)
         await db.flush()  # get event.id without committing yet
 
+        # Increment subscription quota counter
+        try:
+            await consume_q(db, org_id, count=1)
+        except NoActiveSubscriptionError:
+            # No subscription — still record usage, just skip quota tracking
+            pass
+        except Exception:
+            logger.warning(
+                "consume_q failed for org=%s; usage event still recorded",
+                org_id,
+                exc_info=True,
+            )
+
+        # Overage billing for Corp/Enterprise: if quota exceeded, charge balance
         if cost > Decimal("0"):
             try:
-                await deduct_balance(
-                    db,
-                    org_id=org_id,
-                    amount=cost,
-                    reference_type="usage_event",
-                    reference_id=event.id,
-                    allow_negative=True,  # record deduction even on overspend
-                )
+                sub = await get_active_subscription(db, org_id)
+                if sub is not None:
+                    plan_result = await db.execute(
+                        select(Plan).where(Plan.id == sub.plan_id)
+                    )
+                    plan = plan_result.scalar_one_or_none()
+                    if plan is not None and plan.allow_overage and sub.q_used > plan.included_q:
+                        await deduct_balance(
+                            db,
+                            org_id=org_id,
+                            amount=cost,
+                            reference_type="usage_event",
+                            reference_id=event.id,
+                            allow_negative=True,
+                        )
             except Exception:
                 logger.warning(
-                    "Balance deduction failed for org=%s cost=%s; usage event still recorded",
+                    "Overage billing failed for org=%s cost=%s; usage event still recorded",
                     org_id,
                     cost,
                     exc_info=True,

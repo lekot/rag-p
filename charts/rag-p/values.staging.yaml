@@ -35,6 +35,8 @@ api:
   image:
     registry: "ghcr.io/lekot"
     tag: "0.1.19"
+  env:
+    RAGP_SESSION_COOKIE_SECURE: "true"
   replicas: 1
   resources:
     requests:

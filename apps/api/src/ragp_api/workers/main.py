@@ -11,7 +11,11 @@ from arq.cron import cron
 from prometheus_client import Counter, Histogram, start_http_server
 
 from ragp_api.settings import settings
-from ragp_api.workers.tasks import aggregate_usage_daily, run_experiment_task
+from ragp_api.workers.tasks import (
+    aggregate_usage_daily,
+    expire_subscriptions_task,
+    run_experiment_task,
+)
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics
@@ -60,6 +64,8 @@ class WorkerSettings:
     functions = [run_experiment_task, aggregate_usage_daily]
     cron_jobs = [
         cron(aggregate_usage_daily, hour=1, minute=0, run_at_startup=False),
+        # Daily: expire subscriptions whose period has ended
+        cron(expire_subscriptions_task, hour=0, minute=10, run_at_startup=False),
     ]
     redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
     max_jobs = 5

@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import math
 import time
-from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
@@ -82,37 +81,70 @@ async def check_rag_query_limits(
     settings: Settings,
     db: AsyncSession | None = None,
 ) -> None:
-    """Check balance, per-key and per-org rate limits.
+    """Check subscription quota, per-key and per-org rate limits.
 
-    Raises HTTPException(402) if balance is zero or negative.
+    Raises HTTPException(402) if there is no active subscription or the
+    query quota is exhausted (for plans without overage).
     Raises HTTPException(429) if either rate limit is exceeded.
     Fails open if Redis raises any connection error.
-    db is optional for backward-compat; balance check is skipped if None.
+    db is optional for backward-compat; quota check is skipped if None.
     """
-    # --- Balance pre-flight check ---
+    # --- Subscription / quota pre-flight check ---
     if db is not None:
-        from ragp_api.services.billing import get_balance
+        from ragp_api.db.models import Plan
+        from ragp_api.services.subscription import get_active_subscription
+        from sqlalchemy import select
 
         try:
-            balance = await get_balance(db, org_id)
-            if balance <= Decimal("0"):
+            sub = await get_active_subscription(db, org_id)
+            if sub is None:
                 raise HTTPException(
                     status_code=402,
                     detail={
-                        "code": "insufficient_balance",
-                        "balance_usd": float(balance),
-                        "message": "Top up your balance at /account/billing",
+                        "code": "no_active_plan",
+                        "message": (
+                            "Активной подписки нет. Купите план на /pricing"
+                        ),
                     },
                 )
+
+            plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
+            plan = plan_result.scalar_one_or_none()
+
+            if plan is not None and sub.q_used >= plan.included_q:
+                if not plan.allow_overage:
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "code": "quota_exceeded",
+                            "q_used": sub.q_used,
+                            "q_limit": plan.included_q,
+                            "message": (
+                                "Лимит запросов на тариф исчерпан. "
+                                "Дождитесь конца периода или перейдите на старший план."
+                            ),
+                        },
+                    )
+                # Corp/Enterprise: allow overage — overage billing happens in record_usage_event
+
+            # Dynamic RPM from plan (0 = unlimited)
+            if plan is not None and plan.rpm_per_key > 0:
+                rpm_limit = plan.rpm_per_key
+            else:
+                rpm_limit = settings.rate_limit_per_key_rpm
+
         except HTTPException:
             raise
         except Exception as exc:
             logger.warning(
-                "Balance check failed for org=%s (%s: %s) — failing open",
+                "Subscription check failed for org=%s (%s: %s) — failing open",
                 org_id,
                 type(exc).__name__,
                 exc,
             )
+            rpm_limit = settings.rate_limit_per_key_rpm
+    else:
+        rpm_limit = settings.rate_limit_per_key_rpm
 
     # --- Rate limiting ---
     try:
@@ -120,7 +152,7 @@ async def check_rag_query_limits(
         ok_key, retry_key = await check(
             redis,
             key_redis_key,
-            settings.rate_limit_per_key_rpm,
+            rpm_limit,
             _WINDOW_SECONDS,
         )
         if not ok_key:
@@ -130,7 +162,7 @@ async def check_rag_query_limits(
                 detail={
                     "detail": "rate_limit_exceeded",
                     "scope": "key",
-                    "limit": settings.rate_limit_per_key_rpm,
+                    "limit": rpm_limit,
                     "window_seconds": _WINDOW_SECONDS,
                 },
             )

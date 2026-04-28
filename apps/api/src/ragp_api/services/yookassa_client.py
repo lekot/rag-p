@@ -36,7 +36,7 @@ async def create_payment(
     amount_usd: Decimal,
     redis: Any,
 ) -> tuple[str, str, Decimal]:
-    """Create a YooKassa payment with an NPD fiscal receipt.
+    """Create a YooKassa payment with an NPD fiscal receipt (overage / wallet top-up).
 
     Returns a tuple of ``(payment_id, confirmation_url, amount_rub)``.
 
@@ -76,7 +76,54 @@ async def create_payment(
         "metadata": {
             "org_id": str(org_id),
             "amount_usd": str(amount_usd),
+            "type": "topup",
         },
+        "receipt": receipt,
+    }
+
+    payment = Payment.create(payment_data)
+    return payment.id, payment.confirmation.confirmation_url, amount_rub
+
+
+async def create_payment_rub(
+    *,
+    org_id: UUID,
+    user_email: str,
+    amount_rub: Decimal,
+    description: str,
+    metadata: dict[str, str],
+    redis: Any,
+) -> tuple[str, str, Decimal]:
+    """Create a YooKassa payment for a fixed RUB amount (subscription plans).
+
+    Returns a tuple of ``(payment_id, confirmation_url, amount_rub)``.
+    """
+    _configure()
+
+    receipt: dict[str, Any] = {
+        "customer": {"email": user_email},
+        "items": [
+            {
+                "description": description,
+                "quantity": "1.00",
+                "amount": {"value": str(amount_rub), "currency": "RUB"},
+                "vat_code": 1,  # no VAT (NPD / self-employed)
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
+            }
+        ],
+        "tax_system_code": settings.yookassa_taxation_system,  # 6 = NPD
+    }
+
+    payment_data: dict[str, Any] = {
+        "amount": {"value": str(amount_rub), "currency": "RUB"},
+        "confirmation": {
+            "type": "redirect",
+            "return_url": settings.yookassa_return_url,
+        },
+        "capture": True,
+        "description": description,
+        "metadata": metadata,
         "receipt": receipt,
     }
 

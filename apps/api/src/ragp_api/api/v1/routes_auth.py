@@ -15,10 +15,9 @@ from ragp_api.db.models import Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
 from ragp_api.services.audit import log_audit_event
-from ragp_api.services.billing import topup_balance
 from ragp_api.services.passwords import hash_password, verify_password
 from ragp_api.services.sessions import make_session_cookie, read_session_cookie
-from ragp_api.settings import settings as _settings
+from ragp_api.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -77,7 +76,7 @@ def _set_session_cookie(response: Response, user_id: str, org_id: str) -> None:
         max_age=_COOKIE_MAX_AGE,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set to True in production behind HTTPS
+        secure=settings.session_cookie_secure,
     )
 
 
@@ -162,16 +161,9 @@ async def signup(
         request=request,
     )
 
-    # Grant starting balance (welcome bonus)
-    if _settings.starting_balance_usd > 0:
-        await topup_balance(
-            db,
-            org_id=org.id,
-            amount=_settings.starting_balance_usd,
-            tx_type="starting_credit",
-            created_by=None,
-            note="Welcome bonus",
-        )
+    # No starting balance is granted on signup.
+    # New organisations must purchase a plan via /pricing → ЮKassa
+    # before making RAG queries.
 
     await db.commit()
     await db.refresh(user)
