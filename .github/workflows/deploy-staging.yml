@@ -188,6 +188,17 @@ jobs:
             -n rag-p \
             -f charts/rag-p-runtime/values.staging.yaml
 
+      - name: Verify runtime ownership split
+        run: |
+          set -e
+          helm -n rag-p status rag-p-runtime >/dev/null
+          if helm -n rag-p get manifest rag-p | grep -qE 'name: rag-p-ollama($|-models)'; then
+            echo "App release still owns Ollama resources"
+            exit 1
+          fi
+          helm -n rag-p get manifest rag-p-runtime | grep -q 'name: rag-p-ollama'
+          helm -n rag-p get manifest rag-p-runtime | grep -q 'name: rag-p-ollama-models'
+
       - name: Wait for rollouts
         run: |
           kubectl -n rag-p rollout status deploy/rag-p-api --timeout=180s
