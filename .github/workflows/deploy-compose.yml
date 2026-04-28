@@ -206,7 +206,11 @@ jobs:
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "docker login ghcr.io -u lekot --password-stdin"
+          if [ -n "$GHCR_READ_TOKEN" ]; then
+            printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "docker login ghcr.io -u lekot --password-stdin"
+          else
+            echo "GHCR_READ_TOKEN is not set; pulling images without docker login"
+          fi
           ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "
             set -euo pipefail
             cd '$COMPOSE_DIR'
