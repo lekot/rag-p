@@ -109,7 +109,7 @@ export default function AuditPage() {
         setHasMore(data.length === LIMIT);
         setLoaded(true);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Ошибка загрузки");
+        setError(e instanceof Error ? e.message : "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё");
       } finally {
         setLoading(false);
       }
@@ -120,7 +120,7 @@ export default function AuditPage() {
   if (user === null) {
     return (
       <div className="max-w-4xl mx-auto mt-12 text-center text-muted-foreground">
-        Требуется авторизация
+        РўСЂРµР±СѓРµС‚СЃСЏ Р°РІС‚РѕСЂРёР·Р°С†РёСЏ
       </div>
     );
   }
@@ -128,7 +128,7 @@ export default function AuditPage() {
   if (user === undefined) {
     return (
       <div className="max-w-4xl mx-auto mt-12 text-center text-muted-foreground">
-        Загрузка…
+        Р—Р°РіСЂСѓР·РєР°вЂ¦
       </div>
     );
   }
@@ -141,7 +141,7 @@ export default function AuditPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Журнал событий</CardTitle>
+          <CardTitle>Р–СѓСЂРЅР°Р» СЃРѕР±С‹С‚РёР№</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filters */}
@@ -156,10 +156,10 @@ export default function AuditPage() {
               }}
             >
               <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Все события" />
+                <SelectValue placeholder="РўРёРї СЃРѕР±С‹С‚РёСЏ" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Все события</SelectItem>
+                <SelectItem value="all">Р’СЃРµ СЃРѕР±С‹С‚РёСЏ</SelectItem>
                 {EVENT_TYPES.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
@@ -171,7 +171,7 @@ export default function AuditPage() {
               onClick={() => void fetchEvents(true)}
               disabled={loading}
             >
-              {loading ? "Загрузка…" : loaded ? "Обновить" : "Загрузить"}
+              {loading ? "Р—Р°РіСЂСѓР·РєР°вЂ¦" : loaded ? "РћР±РЅРѕРІРёС‚СЊ" : "Р—Р°РіСЂСѓР·РёС‚СЊ"}
             </Button>
           </div>
 
@@ -180,7 +180,7 @@ export default function AuditPage() {
           )}
 
           {loaded && events.length === 0 && (
-            <p className="text-sm text-muted-foreground">Событий не найдено.</p>
+            <p className="text-sm text-muted-foreground">РЎРѕР±С‹С‚РёР№ РЅРµ РЅР°Р№РґРµРЅРѕ.</p>
           )}
 
           {events.length > 0 && (
@@ -189,12 +189,12 @@ export default function AuditPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-40">Время</TableHead>
-                      <TableHead>Событие</TableHead>
-                      <TableHead>Пользователь</TableHead>
-                      <TableHead>Ресурс</TableHead>
+                      <TableHead className="w-40">Р’СЂРµРјСЏ</TableHead>
+                      <TableHead>РЎРѕР±С‹С‚РёРµ</TableHead>
+                      <TableHead>РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ</TableHead>
+                      <TableHead>Р РµСЃСѓСЂСЃ</TableHead>
                       <TableHead>IP</TableHead>
-                      <TableHead>Метаданные</TableHead>
+                      <TableHead>РњРµС‚Р°РґР°РЅРЅС‹Рµ</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -215,12 +215,12 @@ export default function AuditPage() {
                           {e.resource_type}
                           {e.resource_id && (
                             <span className="ml-1 font-mono">
-                              {e.resource_id.slice(0, 8)}…
+                              {e.resource_id.slice(0, 8)}вЂ¦
                             </span>
                           )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {e.ip_address ?? "—"}
+                          {e.ip_address ?? "вЂ”"}
                         </TableCell>
                         <TableCell className="text-xs font-mono text-muted-foreground max-w-xs truncate">
                           {JSON.stringify(e.metadata)}
@@ -234,7 +234,7 @@ export default function AuditPage() {
               {hasMore && (
                 <div className="text-center">
                   <Button variant="outline" onClick={() => void fetchEvents(false)} disabled={loading}>
-                    {loading ? "Загрузка…" : "Загрузить ещё"}
+                    {loading ? "Р—Р°РіСЂСѓР·РєР°вЂ¦" : "Р—Р°РіСЂСѓР·РёС‚СЊ РµС‰С‘"}
                   </Button>
                 </div>
               )}
