@@ -32,6 +32,7 @@ from ragp_api.services.subscription import (
     consume_storage,
     release_storage,
 )
+from ragp_api.settings import settings
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -473,28 +474,30 @@ async def upload_document(
         raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
 
     # Storage quota check — must happen before any DB writes
-    try:
-        await consume_storage(db, organization_id, len(raw))
-    except NoActiveSubscriptionError as exc:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "no_active_plan",
-                "message": "Активной подписки нет. Купите план на /pricing",
-            },
-        ) from exc
-    except StorageQuotaExceededError as exc:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "storage_quota_exceeded",
-                "storage_used": exc.used,
-                "storage_limit": exc.limit,
-                "message": (
-                    "Лимит хранилища исчерпан. " "Удалите датасеты или перейдите на старший план."
-                ),
-            },
-        ) from exc
+    if settings.enforce_subscription_quotas:
+        try:
+            await consume_storage(db, organization_id, len(raw))
+        except NoActiveSubscriptionError as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "no_active_plan",
+                    "message": "Активной подписки нет. Купите план на /pricing",
+                },
+            ) from exc
+        except StorageQuotaExceededError as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "storage_quota_exceeded",
+                    "storage_used": exc.used,
+                    "storage_limit": exc.limit,
+                    "message": (
+                        "Лимит хранилища исчерпан. "
+                        "Удалите датасеты или перейдите на старший план."
+                    ),
+                },
+            ) from exc
 
     text = parse_to_text(filename, content_type, raw)
 

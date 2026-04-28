@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Rate limiting (sliding window, 60-second window)
     rate_limit_per_key_rpm: int = 60
     rate_limit_per_org_rpm: int = 1000
+    enforce_subscription_quotas: bool = True
 
     # Auth cookies. Keep false for local HTTP; enable in TLS deployments.
     session_cookie_secure: bool = False

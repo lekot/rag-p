@@ -90,7 +90,7 @@ async def check_rag_query_limits(
     db is optional for backward-compat; quota check is skipped if None.
     """
     # --- Subscription / quota pre-flight check ---
-    if db is not None:
+    if db is not None and settings.enforce_subscription_quotas:
         from sqlalchemy import select
 
         from ragp_api.db.models import Plan

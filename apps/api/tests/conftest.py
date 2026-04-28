@@ -13,6 +13,7 @@ from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.main import app
 from ragp_api.plugins.registry import _registry, bootstrap
+from ragp_api.settings import settings
 
 # If TEST_DATABASE_URL is provided (e.g. in CI with real postgres), use it.
 # Otherwise fall back to in-memory SQLite for quick local runs.
@@ -23,9 +24,12 @@ _IS_POSTGRES = _TEST_DB_URL.startswith("postgresql")
 @pytest_asyncio.fixture(autouse=True)
 async def reset_registry():
     """Clear plugin registry before each test to avoid cross-test pollution."""
+    old_enforce_subscription_quotas = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = False
     _registry.clear()
     bootstrap()
     yield
+    settings.enforce_subscription_quotas = old_enforce_subscription_quotas
     _registry.clear()
 
 
