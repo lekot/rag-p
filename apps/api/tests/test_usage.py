@@ -94,10 +94,10 @@ async def _seed_org_with_api_key(
 
 def test_calculate_cost_deepseek_correct() -> None:
     """Known values for deepseek/deepseek-v4-flash pricing."""
-    # 1000 prompt tokens * 0.00027 / 1000 + 1000 completion * 0.0011 / 1000
-    # = 0.00027 + 0.0011 = 0.00137
+    # 1000 prompt * 0.00023 / 1000 + 1000 completion * 0.00058 / 1000
+    # = 0.00023 + 0.00058 = 0.00081
     cost = calculate_cost("deepseek/deepseek-v4-flash", 1000, 1000)
-    assert cost == Decimal("0.001370")
+    assert cost == Decimal("0.000810")
 
 
 def test_calculate_cost_unknown_model_zero_cost() -> None:
