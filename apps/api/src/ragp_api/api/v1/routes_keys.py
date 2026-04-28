@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ragp_api.db.models import ApiKey, Membership, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
+from ragp_api.services.audit import log_audit_event
 
 router = APIRouter(prefix="/keys", tags=["keys"])
 
@@ -39,7 +40,7 @@ class KeyOut(BaseModel):
 
 class KeyCreatedOut(BaseModel):
     id: str
-    key: str  # Full key — returned ONCE only
+    key: str  # Full key -- returned ONCE only
     name: str
     key_prefix: str
 
@@ -90,6 +91,7 @@ async def list_keys(
 @router.post("", response_model=KeyCreatedOut, status_code=201)
 async def create_key(
     body: KeyCreateIn,
+    request: Request,
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -109,6 +111,18 @@ async def create_key(
         key_hash=key_hash,
     )
     db.add(api_key)
+    await db.flush()
+
+    await log_audit_event(
+        db,
+        org_id=org_id,
+        user_id=user.id,
+        event_type="key.create",
+        resource_type="key",
+        resource_id=api_key.id,
+        metadata={"prefix": key_prefix},
+        request=request,
+    )
     await db.commit()
     await db.refresh(api_key)
 
@@ -123,6 +137,7 @@ async def create_key(
 @router.delete("/{key_id}", status_code=204)
 async def delete_key(
     key_id: str,
+    request: Request,
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -134,4 +149,14 @@ async def delete_key(
     if api_key is None:
         raise HTTPException(status_code=404, detail="API key not found")
     await db.delete(api_key)
+    await log_audit_event(
+        db,
+        org_id=org_id,
+        user_id=user.id,
+        event_type="key.revoke",
+        resource_type="key",
+        resource_id=key_id,
+        metadata={},
+        request=request,
+    )
     await db.commit()

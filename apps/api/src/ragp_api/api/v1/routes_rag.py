@@ -1,4 +1,4 @@
-"""Public RAG query endpoint — authenticated via API key (Bearer token)."""
+"""Public RAG query endpoint -- authenticated via API key (Bearer token)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ from ragp_api.deps import get_db
 from ragp_api.deps_auth import get_api_key_org
 from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
+from ragp_api.services.audit import log_audit_event
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.rate_limiter import check_rag_query_limits
 from ragp_api.services.usage import calculate_cost, record_usage_event
@@ -122,6 +123,7 @@ async def _resolve_embedder() -> tuple[Embedder | None, str]:
 @router.post("/query", response_model=RagQueryOut)
 async def rag_query(
     body: RagQueryIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: tuple[Organization, ApiKey] | None = Depends(get_api_key_org),
     redis: Any = Depends(get_redis),
@@ -213,6 +215,18 @@ async def rag_query(
         if not raw_chunks and not answer:
             answer = "Не нашёл релевантных чанков для ответа."
 
+        await log_audit_event(
+            db,
+            org_id=org.id,
+            user_id=api_key.user_id,
+            event_type="rag.query",
+            resource_type="api_key",
+            resource_id=api_key.id,
+            metadata={"pipeline_id": body.pipeline_id},
+            request=request,
+        )
+        await db.commit()
+
         # Determine model used by pipeline generator node
         pipeline_model = next(
             (
@@ -260,11 +274,11 @@ async def rag_query(
                 embedder="pipeline",
                 retriever="pipeline",
                 generator="pipeline",
-                model="pipeline",
+                model=pipeline_model,
             ),
         )
 
-    # 4. Default path: embed → retrieve → generate
+    # 4. Default path: embed -> retrieve -> generate
     embedder, embedder_name = await _resolve_embedder()
 
     query_vec: list[float] | None = None
@@ -328,6 +342,18 @@ async def rag_query(
         )
     except Exception:
         logger.warning("Usage recording failed (default path)", exc_info=True)
+
+    await log_audit_event(
+        db,
+        org_id=org.id,
+        user_id=api_key.user_id,
+        event_type="rag.query",
+        resource_type="api_key",
+        resource_id=api_key.id,
+        metadata={"pipeline_id": None},
+        request=request,
+    )
+    await db.commit()
 
     return RagQueryOut(
         answer=answer,

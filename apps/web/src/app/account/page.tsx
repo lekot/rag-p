@@ -190,6 +190,23 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
+      {/* Audit Log */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-base font-semibold">Audit Log</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            События безопасности и действия в организации.
+          </p>
+          <Link href="/account/audit">
+            <Button variant="outline" size="sm">
+              Открыть Audit Log
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
       {/* API Keys */}
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">

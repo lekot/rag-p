@@ -6,7 +6,7 @@ import re
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ragp_api.db.models import Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
+from ragp_api.services.audit import log_audit_event
 from ragp_api.services.passwords import hash_password, verify_password
-from ragp_api.services.sessions import make_session_cookie
+from ragp_api.services.sessions import make_session_cookie, read_session_cookie
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -87,6 +88,7 @@ def _set_session_cookie(response: Response, user_id: str, org_id: str) -> None:
 async def signup(
     body: SignupIn,
     response: Response,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     # Check duplicate email
@@ -146,6 +148,17 @@ async def signup(
         role="owner",
     )
     db.add(org_member)
+
+    await log_audit_event(
+        db,
+        org_id=org.id,
+        user_id=user.id,
+        event_type="user.signup",
+        resource_type="user",
+        resource_id=user.id,
+        metadata={"email": user.email, "org_name": org.name},
+        request=request,
+    )
     await db.commit()
     await db.refresh(user)
     await db.refresh(org)
@@ -162,6 +175,7 @@ async def signup(
 async def login(
     body: LoginIn,
     response: Response,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     result = await db.execute(select(User).where(User.email == body.email))
@@ -185,6 +199,18 @@ async def login(
 
     _set_session_cookie(response, user.id, org.id)
 
+    await log_audit_event(
+        db,
+        org_id=org.id,
+        user_id=user.id,
+        event_type="user.login",
+        resource_type="user",
+        resource_id=user.id,
+        metadata={},
+        request=request,
+    )
+    await db.commit()
+
     return AuthOut(
         user=UserOut(id=user.id, email=user.email),
         organization=OrgOut(id=org.id, name=org.name, slug=org.slug, role=membership.role),
@@ -192,7 +218,27 @@ async def login(
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response) -> None:
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        parsed = read_session_cookie(token)
+        if parsed:
+            user_id, org_id = parsed
+            await log_audit_event(
+                db,
+                org_id=org_id,
+                user_id=user_id,
+                event_type="user.logout",
+                resource_type="user",
+                resource_id=user_id,
+                metadata={},
+                request=request,
+            )
+            await db.commit()
     response.delete_cookie(COOKIE_NAME)
 
 
