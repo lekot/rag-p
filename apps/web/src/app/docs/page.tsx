@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const API_BASE = "https://api.lekottt.ru";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const CURL_EXAMPLE = `curl -X POST ${API_BASE}/api/v1/rag/query \\
   -H "Authorization: Bearer rgp_YOUR_KEY" \\
@@ -59,6 +60,19 @@ export default function DocsPage() {
   }, []);
 
   async function handleRun() {
+    if (!UUID_RE.test(datasetId.trim())) {
+      setResult(
+        JSON.stringify(
+          {
+            error: "dataset_id must be a UUID",
+            hint: "Откройте нужный датасет и скопируйте UUID из адресной строки /datasets/<uuid>. Имя вроде TG_chat сюда не подходит.",
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
     setRunning(true);
     setResult(null);
     try {
@@ -68,7 +82,7 @@ export default function DocsPage() {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ dataset_id: datasetId, query, top_k: topK }),
+        body: JSON.stringify({ dataset_id: datasetId.trim(), query, top_k: topK }),
       });
       const text = await resp.text();
       let parsed: unknown;
@@ -264,7 +278,7 @@ export default function DocsPage() {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="try-dataset" className="text-xs">Dataset ID</Label>
+                <Label htmlFor="try-dataset" className="text-xs">Dataset UUID</Label>
                 <Input
                   id="try-dataset"
                   type="text"
@@ -273,6 +287,9 @@ export default function DocsPage() {
                   onChange={(e) => setDatasetId(e.target.value)}
                   className="text-xs font-mono h-8"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  Нужен UUID из URL датасета, не его имя.
+                </p>
               </div>
             </div>
             <div className="space-y-1">

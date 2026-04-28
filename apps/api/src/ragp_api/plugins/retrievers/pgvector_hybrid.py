@@ -1,6 +1,6 @@
 """PgvectorHybridRetriever — tsvector + pgvector + RRF fusion."""
 
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from ragp_api.plugins.base import CostEstimate, HealthStatus, Retriever
 from ragp_api.plugins.registry import register
@@ -56,20 +56,51 @@ class PgvectorHybridRetriever(Retriever):
         weight_dense: float = self.params.get("weight_dense", 0.7)
         weight_bm25: float = self.params.get("weight_bm25", 0.3)
 
-        if query_vec is None:
-            embedding_model: str = self.params.get(
-                "embedding_model", "openai/text-embedding-3-small"
-            )
-            import litellm
-
-            embed_resp = await litellm.aembedding(model=embedding_model, input=[query])
-            # embed_resp.data is untyped in litellm
-            query_vec = cast(list[float], embed_resp.data[0]["embedding"])
-
-        vec_str = "[" + ",".join(str(v) for v in query_vec) + "]"
-
         # Optional dataset filter clause
         dataset_filter = "AND d.dataset_id = :dataset_id" if dataset_id is not None else ""
+
+        if query_vec is None:
+            sql = text(
+                f"""
+                SELECT c.id, c.text, c.metadata_json, c.document_id,
+                       doc.source_uri AS document_name,
+                       ts_rank_cd(
+                           to_tsvector('english', c.text),
+                           plainto_tsquery('english', :query)
+                       ) AS score
+                FROM chunks c
+                JOIN documents doc ON doc.id = c.document_id
+                JOIN documents d ON d.id = c.document_id
+                WHERE d.organization_id = :org_id
+                  AND c.text != ''
+                  {dataset_filter}
+                ORDER BY score DESC
+                LIMIT :top_k
+                """
+            )
+            params: dict[str, Any] = {
+                "query": query,
+                "org_id": organization_id,
+                "top_k": top_k,
+            }
+            if dataset_id is not None:
+                params["dataset_id"] = dataset_id
+
+            result = await session.execute(sql, params)
+            rows = result.fetchall()
+            return [
+                {
+                    "id": row.id,
+                    "text": row.text,
+                    "metadata": row.metadata_json or {},
+                    "score": float(row.score),
+                    "document_id": row.document_id,
+                    "document_name": row.document_name,
+                }
+                for row in rows
+            ]
+
+        vec_str = "[" + ",".join(str(v) for v in query_vec) + "]"
 
         sql = text(
             f"""

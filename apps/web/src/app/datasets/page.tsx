@@ -16,15 +16,6 @@ export default function DatasetsPage() {
   const utils = trpc.useUtils();
   const { data: datasets, isLoading } = trpc.datasets.list.useQuery();
 
-  const generateMutation = trpc.datasets.generate.useMutation({
-    onSuccess: () => {
-      toast({ title: "Generation started" });
-      void utils.datasets.list.invalidate();
-    },
-    onError: (err) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
-  });
   const deleteMutation = trpc.datasets.delete.useMutation({
     onSuccess: () => {
       toast({ title: "Dataset deleted" });
@@ -77,14 +68,6 @@ export default function DatasetsPage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => generateMutation.mutate({ id: ds.id })}
-                  disabled={generateMutation.isPending}
-                >
-                  Auto-generate (RAGAS)
-                </Button>
                 <Button
                   variant="destructive"
                   size="sm"

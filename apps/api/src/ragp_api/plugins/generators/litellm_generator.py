@@ -5,6 +5,8 @@ from typing import Any, ClassVar, cast
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
 
+_DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
+
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a strict retrieval-grounded assistant. Rules:\n"
     "1. Answer ONLY using facts from the provided context. NEVER use your prior "
@@ -35,8 +37,12 @@ class LiteLLMGenerator(Generator):
         "properties": {
             "model": {
                 "type": "string",
-                "default": "openai/gpt-4o-mini",
-                "examples": ["openai/gpt-4o-mini", "openai/gpt-4o", "ollama/llama3"],
+                "default": _DEFAULT_MODEL,
+                "examples": [
+                    "deepseek/deepseek-v4-flash",
+                    "deepseek/deepseek-chat",
+                    "ollama/llama3",
+                ],
             },
             "temperature": {"type": "number", "default": 0.0, "minimum": 0, "maximum": 2},
             "system_prompt": {"type": "string", "default": _DEFAULT_SYSTEM_PROMPT},
@@ -44,7 +50,7 @@ class LiteLLMGenerator(Generator):
         },
         "required": ["model"],
         "default": {
-            "model": "openai/gpt-4o-mini",
+            "model": _DEFAULT_MODEL,
             "temperature": 0.0,
             "system_prompt": _DEFAULT_SYSTEM_PROMPT,
         },

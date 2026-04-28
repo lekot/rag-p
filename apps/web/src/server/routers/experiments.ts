@@ -38,12 +38,19 @@ const ScoresSchema = z.object({
   answer_relevance: z.number().nullable().optional(),
   context_precision: z.number().nullable().optional(),
   context_recall: z.number().nullable().optional(),
+  retrieval_hit: z.number().nullable().optional(),
+  hit_rate: z.number().nullable().optional(),
+  answer_similarity: z.number().nullable().optional(),
 });
 
 const LeaderboardCombinationSchema = z.object({
   config: z.record(z.unknown()),
   scores: ScoresSchema,
   composite_score: z.number(),
+  status: z.string().optional(),
+  error_code: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+  warning: z.string().nullable().optional(),
 });
 
 export type LeaderboardCombination = z.infer<typeof LeaderboardCombinationSchema>;

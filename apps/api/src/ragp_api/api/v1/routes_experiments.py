@@ -34,6 +34,34 @@ class ExperimentOut(BaseModel):
     created_at: datetime | None = None
 
 
+class LeaderboardScoresOut(BaseModel):
+    faithfulness: float | None = None
+    answer_relevance: float | None = None
+    context_precision: float | None = None
+    context_recall: float | None = None
+    retrieval_hit: float | None = None
+    hit_rate: float | None = None
+    answer_similarity: float | None = None
+
+
+class LeaderboardCombinationOut(BaseModel):
+    config: dict[str, Any]
+    scores: LeaderboardScoresOut
+    composite_score: float
+    status: str = "completed"
+    error_code: str | None = None
+    error: str | None = None
+    warning: str | None = None
+    nodes: list[dict[str, Any]] = []
+
+
+class LeaderboardOut(BaseModel):
+    experiment_id: str
+    status: str
+    leaderboard: list[Any]
+    combinations: list[LeaderboardCombinationOut]
+
+
 class PromoteIn(BaseModel):
     name: str
 
@@ -135,11 +163,11 @@ async def get_experiment(
     )
 
 
-@router.get("/{experiment_id}/leaderboard")
+@router.get("/{experiment_id}/leaderboard", response_model=LeaderboardOut)
 async def get_leaderboard(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> LeaderboardOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
     if experiment is None:
@@ -157,25 +185,33 @@ async def get_leaderboard(
         composite = entry.get("composite_score", metrics.get("composite_score", 0.0))
         config: dict[str, Any] = {f"{n['plugin_kind']}": n["plugin_name"] for n in nodes}
         combinations.append(
-            {
-                "config": config,
-                "scores": {
-                    "faithfulness": metrics.get("faithfulness"),
-                    "answer_relevance": metrics.get("answer_relevance"),
-                    "context_precision": metrics.get("context_precision"),
-                    "context_recall": metrics.get("context_recall"),
-                },
-                "composite_score": composite,
-                "nodes": nodes,
-            }
+            LeaderboardCombinationOut(
+                config=config,
+                scores=LeaderboardScoresOut(
+                    faithfulness=metrics.get("faithfulness"),
+                    answer_relevance=metrics.get("answer_relevance")
+                    or metrics.get("answer_similarity"),
+                    context_precision=metrics.get("context_precision"),
+                    context_recall=metrics.get("context_recall") or metrics.get("retrieval_hit"),
+                    retrieval_hit=metrics.get("retrieval_hit"),
+                    hit_rate=metrics.get("hit_rate"),
+                    answer_similarity=metrics.get("answer_similarity"),
+                ),
+                composite_score=composite,
+                status=metrics.get("status", "completed"),
+                error_code=metrics.get("error_code"),
+                error=metrics.get("error"),
+                warning=metrics.get("warning"),
+                nodes=nodes,
+            )
         )
 
-    return {
-        "experiment_id": experiment_id,
-        "status": experiment.status,
-        "leaderboard": raw_leaderboard,
-        "combinations": combinations,
-    }
+    return LeaderboardOut(
+        experiment_id=experiment_id,
+        status=experiment.status,
+        leaderboard=raw_leaderboard,
+        combinations=combinations,
+    )
 
 
 @router.post("/{experiment_id}/promote_to_pipeline", status_code=201, response_model=PipelineOut)

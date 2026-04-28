@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
 
     # LiteLLM default model
-    default_llm_model: str = "openai/gpt-4o-mini"
+    default_llm_model: str = "deepseek/deepseek-v4-flash"
     default_embedding_model: str = "openai/text-embedding-3-small"
 
     # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD).

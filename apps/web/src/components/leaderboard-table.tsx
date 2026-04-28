@@ -22,6 +22,15 @@ function formatScore(value: number | null | undefined): string {
   return value.toFixed(3);
 }
 
+function metricValue(row: LeaderboardCombination, keys: string[]): number | null | undefined {
+  const scores = row.scores as Record<string, number | null | undefined>;
+  for (const key of keys) {
+    const value = scores[key];
+    if (value != null) return value;
+  }
+  return undefined;
+}
+
 function ConfigBadges({ config }: { config: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap gap-1">
@@ -45,8 +54,9 @@ export function LeaderboardTable({ combinations }: Props) {
         <TableRow>
           <TableHead className="w-12">Rank</TableHead>
           <TableHead>Config</TableHead>
-          <TableHead className="w-24 text-right">Faithful</TableHead>
-          <TableHead className="w-24 text-right">Relevance</TableHead>
+          <TableHead className="w-28">Status</TableHead>
+          <TableHead className="w-24 text-right">Retrieval</TableHead>
+          <TableHead className="w-24 text-right">Answer</TableHead>
           <TableHead className="w-24 text-right">Precision</TableHead>
           <TableHead className="w-24 text-right">Recall</TableHead>
           <TableHead className="w-24 text-right font-semibold">Score</TableHead>
@@ -61,12 +71,22 @@ export function LeaderboardTable({ combinations }: Props) {
             </TableCell>
             <TableCell>
               <ConfigBadges config={row.config as Record<string, unknown>} />
+              {(row.error || row.warning) && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {row.error ?? row.warning}
+                </p>
+              )}
+            </TableCell>
+            <TableCell>
+              <Badge variant={row.status === "failed" ? "destructive" : "secondary"}>
+                {row.status ?? "completed"}
+              </Badge>
             </TableCell>
             <TableCell className="text-right font-mono">
-              {formatScore(row.scores.faithfulness)}
+              {formatScore(metricValue(row, ["retrieval_hit", "hit_rate"]))}
             </TableCell>
             <TableCell className="text-right font-mono">
-              {formatScore(row.scores.answer_relevance)}
+              {formatScore(metricValue(row, ["answer_similarity", "answer_relevance"]))}
             </TableCell>
             <TableCell className="text-right font-mono">
               {formatScore(row.scores.context_precision)}
@@ -87,7 +107,7 @@ export function LeaderboardTable({ combinations }: Props) {
         ))}
         {sorted.length === 0 && (
           <TableRow>
-            <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+            <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
               No results yet.
             </TableCell>
           </TableRow>

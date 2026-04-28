@@ -13,6 +13,15 @@ from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Experiment
 logger = logging.getLogger(__name__)
 
 
+def _metric_error(code: str, message: str) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "error_code": code,
+        "error": message,
+        "composite_score": 0.0,
+    }
+
+
 def build_combinations(plugin_grid: dict[str, list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
     """Build cartesian product of plugin variants across pipeline slots."""
     slots = list(plugin_grid.keys())
@@ -97,7 +106,7 @@ async def _golden_metrics(
     organization_id: str,
     dataset_id: str,
     db: AsyncSession,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """
     Evaluate a pipeline combo against golden Q&A pairs.
 
@@ -117,11 +126,14 @@ async def _golden_metrics(
     embedder_node = next((n for n in nodes if n["plugin_kind"] == "embedder"), None)
 
     if retriever_node is None:
-        return {"retrieval_hit": 0.5, "answer_similarity": 0.5, "composite_score": 0.5}
+        return _metric_error("missing_retriever", "Pipeline has no retriever node")
 
     retriever_cls = get_plugin("retriever", retriever_node["plugin_name"])
     if retriever_cls is None:
-        return {"retrieval_hit": 0.5, "answer_similarity": 0.5, "composite_score": 0.5}
+        return _metric_error(
+            "unknown_retriever",
+            f"Retriever plugin is not registered: {retriever_node['plugin_name']}",
+        )
 
     retriever_params = dict(retriever_node.get("params", {}))
     retriever_params["session"] = db
@@ -142,22 +154,28 @@ async def _golden_metrics(
 
     hit_scores: list[float] = []
     sim_scores: list[float] = []
+    retrieval_failures = 0
 
     for item in golden_items:
         query = item.question
 
         # Retrieve
         try:
+            query_vec: list[float] | None = None
+            if embedder is not None:
+                query_vec = (await embedder.embed([query]))[0]
             retriever = cast(Retriever, retriever_cls(retriever_params))
             results = await retriever.retrieve(
                 query=query,
                 top_k=5,
                 organization_id=organization_id,
                 dataset_id=dataset_id,
+                query_vec=query_vec,
             )
         except Exception as exc:
-            logger.debug("Retriever failed for golden item %s: %s", item.id, exc)
-            hit_scores.append(0.5)
+            logger.warning("Retriever failed for golden item %s: %s", item.id, exc)
+            retrieval_failures += 1
+            hit_scores.append(0.0)
             continue
 
         # Retrieval hit
@@ -176,16 +194,24 @@ async def _golden_metrics(
             except Exception as exc:
                 logger.debug("Answer similarity failed for golden item %s: %s", item.id, exc)
 
-    avg_hit = sum(hit_scores) / len(hit_scores) if hit_scores else 0.5
+    if not hit_scores:
+        return _metric_error("no_golden_scores", "Golden evaluation produced no scores")
+
+    avg_hit = sum(hit_scores) / len(hit_scores)
     avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
     composite = 0.5 * avg_hit + 0.5 * avg_sim if avg_sim is not None else avg_hit
 
-    metrics: dict[str, float] = {
+    metrics: dict[str, Any] = {
+        "status": "completed",
         "retrieval_hit": round(avg_hit, 4),
+        "context_recall": round(avg_hit, 4),
         "composite_score": round(composite, 4),
     }
     if avg_sim is not None:
         metrics["answer_similarity"] = round(avg_sim, 4)
+        metrics["answer_relevance"] = round(avg_sim, 4)
+    if retrieval_failures:
+        metrics["warning"] = f"{retrieval_failures} golden item(s) failed during retrieval"
     return metrics
 
 
@@ -193,65 +219,93 @@ async def _self_test_metric(
     nodes: list[dict[str, Any]],
     chunks: list[dict[str, Any]],
     organization_id: str,
+    dataset_id: str,
     db: AsyncSession,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """
     Simple self-test: for each chunk, query = first 50 chars of text,
     check if the chunk appears in top-3 retrieval. Returns hit_rate [0,1].
-    Falls back to mock metrics if no retriever or no chunks.
+    Returns explicit failed/skipped metrics instead of a neutral placeholder.
     [BLOCKED-NIGHT-RUN] Self-test metric is a proxy only — no golden Q&A set available.
     Real eval requires golden Q&A from user or DeepSeek generation (Phase 5).
     """
     if not chunks:
-        # No data — return neutral mock metrics
-        return {"hit_rate": 0.5, "composite_score": 0.5}
+        return _metric_error("no_dataset_chunks", "Dataset has no chunks to evaluate")
 
     # Find retriever node
     retriever_node = next((n for n in nodes if n["plugin_kind"] == "retriever"), None)
     if retriever_node is None:
-        # No retriever in this combo — neutral score
-        return {"hit_rate": 0.5, "composite_score": 0.5}
+        return _metric_error("missing_retriever", "Pipeline has no retriever node")
+    embedder_node = next((n for n in nodes if n["plugin_kind"] == "embedder"), None)
 
     from typing import cast
 
-    from ragp_api.plugins.base import Retriever
+    from ragp_api.plugins.base import Embedder, Retriever
     from ragp_api.plugins.registry import get_plugin
 
     retriever_cls = get_plugin("retriever", retriever_node["plugin_name"])
     if retriever_cls is None:
-        return {"hit_rate": 0.5, "composite_score": 0.5}
+        return _metric_error(
+            "unknown_retriever",
+            f"Retriever plugin is not registered: {retriever_node['plugin_name']}",
+        )
 
     params = dict(retriever_node.get("params", {}))
     params["session"] = db
 
-    dataset_id = None
-    # Try to get dataset_id from chunks' document (we pass it via metadata if available)
-    if chunks:
-        dataset_id = chunks[0].get("metadata", {}).get("dataset_id")
+    embedder: Embedder | None = None
+    if embedder_node is not None:
+        embedder_cls = get_plugin("embedder", embedder_node["plugin_name"])
+        if embedder_cls is None:
+            return _metric_error(
+                "unknown_embedder",
+                f"Embedder plugin is not registered: {embedder_node['plugin_name']}",
+            )
+        embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
 
     hit_count = 0
+    attempted = 0
+    failures = 0
     test_sample = chunks[:5]  # Test on up to 5 chunks to avoid long runs
 
     for chunk in test_sample:
         query = chunk["text"][:80]
         try:
+            query_vec: list[float] | None = None
+            if embedder is not None:
+                query_vec = (await embedder.embed([query]))[0]
             retriever = cast(Retriever, retriever_cls(params))
             results = await retriever.retrieve(
                 query=query,
                 top_k=3,
                 organization_id=organization_id,
                 dataset_id=dataset_id,
+                query_vec=query_vec,
             )
+            attempted += 1
             result_ids = [r["id"] for r in results]
             if chunk["id"] in result_ids:
                 hit_count += 1
         except Exception as exc:
-            logger.debug("Retriever self-test failed for chunk %s: %s", chunk["id"], exc)
-            # If retriever fails (no embedding etc), use neutral score
-            return {"hit_rate": 0.5, "composite_score": 0.5}
+            logger.warning("Retriever self-test failed for chunk %s: %s", chunk["id"], exc)
+            failures += 1
 
-    hit_rate = hit_count / len(test_sample) if test_sample else 0.5
-    return {"hit_rate": round(hit_rate, 4), "composite_score": round(hit_rate, 4)}
+    if attempted == 0:
+        return _metric_error(
+            "retriever_failed",
+            f"Retriever failed for all sampled chunks ({failures}/{len(test_sample)})",
+        )
+
+    hit_rate = hit_count / attempted
+    metrics: dict[str, Any] = {
+        "status": "completed",
+        "hit_rate": round(hit_rate, 4),
+        "context_recall": round(hit_rate, 4),
+        "composite_score": round(hit_rate, 4),
+    }
+    if failures:
+        metrics["warning"] = f"{failures} sampled chunk(s) failed during retrieval"
+    return metrics
 
 
 async def run_experiment_inline(
@@ -290,7 +344,9 @@ async def run_experiment_inline(
                         nodes, golden_items, organization_id, dataset_id, db
                     )
                 else:
-                    metrics = await _self_test_metric(nodes, chunks, organization_id, db)
+                    metrics = await _self_test_metric(
+                        nodes, chunks, organization_id, dataset_id, db
+                    )
             except Exception as exc:
                 logger.warning("Metrics computation failed for combo %s: %s", nodes, exc)
                 metrics = {"hit_rate": 0.0, "composite_score": 0.0}

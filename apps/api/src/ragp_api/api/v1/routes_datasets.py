@@ -263,7 +263,16 @@ async def generate_dataset(
     dataset = result.scalar_one_or_none()
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
-    return {"status": "accepted", "dataset_id": dataset_id, "message": "RAGAS generation queued"}
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "ragas_dataset_generation_not_implemented",
+            "message": (
+                "Автогенерация датасета RAGAS пока не реализована. "
+                "Загрузите документ или сгенерируйте Golden Q&A внутри датасета."
+            ),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
