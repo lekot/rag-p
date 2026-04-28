@@ -153,13 +153,14 @@ jobs:
           echo "Current Helm status: ${status:-not-installed}"
           case "$status" in
             pending-install|pending-upgrade|pending-rollback)
-              revision=$(helm -n rag-p history rag-p -o json | jq -r '[.[] | select(.status == "deployed")] | last | .revision // ""')
-              if [ -z "$revision" ]; then
+              deployed_revision=$(helm -n rag-p history rag-p -o json | jq -r '[.[] | select(.status == "deployed")] | last | .revision // ""')
+              pending_revision=$(helm -n rag-p history rag-p -o json | jq -r '[.[] | select(.status | startswith("pending-"))] | last | .revision // ""')
+              if [ -z "$deployed_revision" ] || [ -z "$pending_revision" ]; then
                 echo "No deployed revision found to clear stale Helm operation"
                 exit 1
               fi
-              echo "Rolling back stale $status to deployed revision $revision"
-              helm -n rag-p rollback rag-p "$revision" --wait --timeout 5m
+              echo "Deleting stale Helm metadata for $status revision $pending_revision; deployed revision is $deployed_revision"
+              kubectl -n rag-p delete secret "sh.helm.release.v1.rag-p.v${pending_revision}"
               ;;
           esac
 
