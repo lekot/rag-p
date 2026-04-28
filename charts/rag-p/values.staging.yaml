@@ -87,6 +87,9 @@ postgres:
     storage:
       size: 10Gi
       storageClass: "fast.ru-3b"
+    backup:
+      enabled: true
+      bucketName: "rag-p-backups-staging"
 
 redis:
   enabled: true

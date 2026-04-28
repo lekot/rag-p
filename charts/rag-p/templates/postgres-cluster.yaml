@@ -28,4 +28,25 @@ spec:
     {{- if or .Values.postgres.cnpg.storage.storageClass .Values.global.storageClass }}
     storageClass: {{ .Values.postgres.cnpg.storage.storageClass | default .Values.global.storageClass }}
     {{- end }}
+
+  {{- if .Values.postgres.cnpg.backup.enabled }}
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://{{ .Values.postgres.cnpg.backup.bucketName }}/cnpg
+      endpointURL: {{ .Values.postgres.cnpg.backup.endpointURL }}
+      s3Credentials:
+        accessKeyId:
+          name: cnpg-s3-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cnpg-s3-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+        maxParallel: 8
+      data:
+        compression: gzip
+        jobs: 2
+    retentionPolicy: {{ .Values.postgres.cnpg.backup.retentionPolicy | quote }}
+  {{- end }}
 {{- end }}
