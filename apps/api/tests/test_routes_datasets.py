@@ -9,7 +9,19 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from ragp_api.db.models import Document, OrgSubscription, Plan
+from ragp_api.db.models import (
+    Chunk,
+    Dataset,
+    DatasetGoldenItem,
+    DatasetItem,
+    Document,
+    Experiment,
+    OrgSubscription,
+    Pipeline,
+    PipelineVersion,
+    Plan,
+    Run,
+)
 from ragp_api.services.object_storage import ObjectStorageRef
 from ragp_api.settings import settings
 
@@ -282,6 +294,117 @@ async def test_delete_dataset_deletes_s3_raw_documents(
     delete_mock.assert_awaited_once()
     refs = delete_mock.call_args.args[0]
     assert refs == [ObjectStorageRef(backend="s3", key="orgs/o/doc.txt")]
+
+
+@pytest.mark.asyncio
+async def test_delete_dataset_cleans_runtime_dependents(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+
+    upload_resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/documents",
+        headers={"X-Organization-Id": organization_id},
+        files={"file": ("doc.txt", io.BytesIO(b"delete runtime refs " * 100), "text/plain")},
+        data={
+            "chunker_name": "recursive-character",
+            "chunker_params": '{"chunk_size": 512, "chunk_overlap": 64}',
+        },
+    )
+    assert upload_resp.status_code == 201, upload_resp.text
+    document_id = upload_resp.json()["document_id"]
+    chunk = (
+        (await db_session.execute(select(Chunk).where(Chunk.document_id == document_id)))
+        .scalars()
+        .first()
+    )
+    assert chunk is not None
+    chunk_id = chunk.id
+
+    pipeline = Pipeline(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        name="Runtime pipeline",
+        dataset_id=dataset_id,
+    )
+    version = PipelineVersion(
+        id=str(uuid.uuid4()),
+        pipeline_id=pipeline.id,
+        nodes_json=[],
+    )
+    run = Run(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        pipeline_version_id=version.id,
+        dataset_id=dataset_id,
+        status="completed",
+    )
+    db_session.add_all(
+        [
+            DatasetItem(
+                id=str(uuid.uuid4()),
+                dataset_id=dataset_id,
+                question="q",
+                golden_answer="a",
+                golden_contexts_json=[],
+            ),
+            DatasetGoldenItem(
+                id=str(uuid.uuid4()),
+                dataset_id=dataset_id,
+                question="golden q",
+                answer="golden a",
+                source_chunk_id=chunk_id,
+            ),
+            Experiment(
+                id=str(uuid.uuid4()),
+                organization_id=organization_id,
+                name="Dataset experiment",
+                dataset_id=dataset_id,
+                plugin_grid_json={},
+                status="completed",
+            ),
+            pipeline,
+            version,
+            run,
+        ]
+    )
+    await db_session.commit()
+
+    delete_resp = await client.delete(
+        f"/api/v1/datasets/{dataset_id}",
+        headers={"X-Organization-Id": organization_id},
+    )
+
+    assert delete_resp.status_code == 204, delete_resp.text
+    db_session.expire_all()
+    assert (
+        await db_session.execute(select(Dataset).where(Dataset.id == dataset_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(Document).where(Document.id == document_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(Chunk).where(Chunk.id == chunk_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(DatasetItem).where(DatasetItem.dataset_id == dataset_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(
+            select(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
+        )
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(Experiment).where(Experiment.dataset_id == dataset_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(Pipeline).where(Pipeline.id == pipeline.id))
+    ).scalar_one().dataset_id is None
+    assert (
+        await db_session.execute(select(Run).where(Run.id == run.id))
+    ).scalar_one().dataset_id is None
 
 
 @pytest.mark.asyncio

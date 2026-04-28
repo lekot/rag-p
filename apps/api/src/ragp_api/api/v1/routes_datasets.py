@@ -8,14 +8,16 @@ from typing import Any, cast
 import jsonschema
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     Chunk,
     Dataset,
     DatasetGoldenItem,
+    DatasetItem,
     Document,
+    Experiment,
     Organization,
     Pipeline,
     PipelineVersion,
@@ -225,6 +227,24 @@ async def delete_dataset(
     document_ids = select(Document.id).where(
         Document.dataset_id == dataset_id,
         Document.organization_id == organization_id,
+    )
+    await db.execute(delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id))
+    await db.execute(delete(DatasetItem).where(DatasetItem.dataset_id == dataset_id))
+    await db.execute(
+        update(Pipeline)
+        .where(Pipeline.dataset_id == dataset_id, Pipeline.organization_id == organization_id)
+        .values(dataset_id=None)
+    )
+    await db.execute(
+        update(Run)
+        .where(Run.dataset_id == dataset_id, Run.organization_id == organization_id)
+        .values(dataset_id=None)
+    )
+    await db.execute(
+        delete(Experiment).where(
+            Experiment.dataset_id == dataset_id,
+            Experiment.organization_id == organization_id,
+        )
     )
     await db.execute(delete(Chunk).where(Chunk.document_id.in_(document_ids)))
     await db.execute(
