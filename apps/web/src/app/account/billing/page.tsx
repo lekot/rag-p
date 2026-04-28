@@ -27,7 +27,7 @@ import {
 import type { BillingTransaction } from "@/server/routers/billing";
 
 function formatDate(iso: string): string {
-  if (!iso) return "\u2014";
+  if (!iso) return "—";
   return new Date(iso).toLocaleString("ru-RU", {
     day: "2-digit",
     month: "2-digit",
@@ -62,15 +62,15 @@ function BalanceDisplay({ balance }: { balance: number }) {
 function TxTypeBadge({ type }: { type: string }) {
   const map: Record<string, { label: string; className: string }> = {
     topup: {
-      label: "\u041f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435",
+      label: "Пополнение",
       className: "text-green-700 bg-green-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
     starting_credit: {
-      label: "\u0411\u043e\u043d\u0443\u0441",
+      label: "Бонус",
       className: "text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
     deduction: {
-      label: "\u0421\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
+      label: "Списание",
       className: "text-red-700 bg-red-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
   };
@@ -80,7 +80,7 @@ function TxTypeBadge({ type }: { type: string }) {
 
 function TxAmount({ type, amount }: { type: string; amount: number }) {
   const isPositive = type === "topup" || type === "starting_credit";
-  const sign = isPositive ? "+" : "\u2212";
+  const sign = isPositive ? "+" : "−";
   const cls = isPositive ? "text-green-600 font-medium" : "text-red-600 font-medium";
   return (
     <span className={cls}>
@@ -112,7 +112,7 @@ function YookassaCheckoutDialog({
     setError(null);
     const parsed = parseFloat(amountUnits);
     if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
-      setError("\u0421\u0443\u043c\u043c\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u043e\u0442 1 \u0434\u043e 1000 \u0440\u0430\u0441\u0447\u0451\u0442\u043d\u044b\u0445 \u0435\u0434\u0438\u043d\u0438\u0446");
+      setError("Сумма должна быть от 1 до 1000 расчётных единиц");
       return;
     }
     setSubmitting(true);
@@ -125,13 +125,13 @@ function YookassaCheckoutDialog({
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
-        throw new Error(body.detail ?? "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 \u043f\u043b\u0430\u0442\u0435\u0436\u0430");
+        throw new Error(body.detail ?? "Ошибка при создании платежа");
       }
       const data = await resp.json();
       // Redirect to YooKassa
       window.location.href = data.confirmation_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "\u041e\u0448\u0438\u0431\u043a\u0430");
+      setError(err instanceof Error ? err.message : "Ошибка");
       setSubmitting(false);
     }
   }
@@ -140,11 +140,11 @@ function YookassaCheckoutDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>\u041f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 \u042e\u041a\u0430\u0441\u0441\u0430</DialogTitle>
+          <DialogTitle>Пополнение через ЮКасса</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="yk-amount">\u0421\u0443\u043c\u043c\u0430 \u043f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f</Label>
+            <Label htmlFor="yk-amount">Сумма пополнения</Label>
             <Input
               id="yk-amount"
               type="number"
@@ -163,12 +163,12 @@ function YookassaCheckoutDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              \u041e\u0442\u043c\u0435\u043d\u0430
+              Отмена
             </Button>
             <Button type="submit" disabled={submitting || !amountUnits}>
               {submitting
-                ? "\u041f\u0435\u0440\u0435\u043d\u0430\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435\u2026"
-                : "\u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043a \u043e\u043f\u043b\u0430\u0442\u0435"}
+                ? "Перенаправление…"
+                : "Перейти к оплате"}
             </Button>
           </DialogFooter>
         </form>
@@ -195,6 +195,10 @@ export default function BillingPage() {
     { orgId },
     { enabled: Boolean(orgId) }
   );
+  const subscriptionQuery = trpc.billing.subscription.useQuery(
+    { orgId },
+    { enabled: Boolean(orgId) }
+  );
 
   // Invalidate billing data when returning from payment gateway
   useEffect(() => {
@@ -208,15 +212,15 @@ export default function BillingPage() {
   if (user === null) {
     return (
       <div className="max-w-lg mx-auto mt-12 text-center text-muted-foreground">
-        \u041d\u0435 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d
+        Не авторизован
       </div>
     );
   }
 
-  if (user === undefined || billingQuery.isLoading) {
+  if (user === undefined || billingQuery.isLoading || subscriptionQuery.isLoading) {
     return (
       <div className="max-w-lg mx-auto mt-12 text-center text-muted-foreground">
-        \u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430\u2026
+        Загрузка…
       </div>
     );
   }
@@ -224,46 +228,64 @@ export default function BillingPage() {
   const billing = billingQuery.data;
   const balance = billing?.balance_usd ?? 0;
   const transactions: BillingTransaction[] = billing?.transactions ?? [];
+  const subscription = subscriptionQuery.data;
+  const usesOverageWallet = subscription?.plan.allow_overage ?? false;
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/account" className="hover:underline">
-          \u041b\u0438\u0447\u043d\u044b\u0439 \u043a\u0430\u0431\u0438\u043d\u0435\u0442
+          Личный кабинет
         </Link>
         <span>/</span>
-        <span>\u0411\u0438\u043b\u043b\u0438\u043d\u0433</span>
+        <span>Биллинг</span>
       </div>
 
-      <h1 className="text-2xl font-bold">\u0411\u0438\u043b\u043b\u0438\u043d\u0433</h1>
+      <h1 className="text-2xl font-bold">Баланс перерасхода</h1>
 
       {/* Payment processing banner */}
       {paidParam === "1" && (
         <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          \u041f\u043b\u0430\u0442\u0451\u0436 \u043e\u0431\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f. \u0411\u0430\u043b\u0430\u043d\u0441 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0432 \u0442\u0435\u0447\u0435\u043d\u0438\u0435 \u043c\u0438\u043d\u0443\u0442\u044b.
+          Платёж обрабатывается. Баланс обновится в течение минуты.
         </div>
       )}
 
       {/* Balance card */}
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle>\u0411\u0430\u043b\u0430\u043d\u0441</CardTitle>
-          {isOwner && (
+          <CardTitle>Кошелёк перерасхода</CardTitle>
+          {isOwner && usesOverageWallet && (
             <Button size="sm" onClick={() => setCheckoutOpen(true)}>
-              \u041f\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c
+              Пополнить
             </Button>
           )}
         </CardHeader>
         <CardContent>
-          <BalanceDisplay balance={balance} />
-          {balance <= 0 && (
-            <p className="mt-2 text-sm text-red-600">
-              \u0411\u0430\u043b\u0430\u043d\u0441 \u0438\u0441\u0447\u0435\u0440\u043f\u0430\u043d. API-\u0437\u0430\u043f\u0440\u043e\u0441\u044b \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b.
-            </p>
+          {usesOverageWallet ? (
+            <>
+              <BalanceDisplay balance={balance} />
+              {balance <= 0 && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Кошелёк пуст. Основные лимиты подписки от этого не зависят.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Для тарифа {subscription?.plan.name ?? "без перерасхода"} отдельный баланс не используется:
+                запросы и документы списываются из включённых лимитов подписки.
+              </p>
+              <Link href="/pricing">
+                <Button size="sm" variant="outline">
+                  Посмотреть тарифы
+                </Button>
+              </Link>
+            </div>
           )}
-          {!isOwner && (
+          {!isOwner && usesOverageWallet && (
             <p className="mt-2 text-sm text-muted-foreground">
-              \u041f\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0431\u0430\u043b\u0430\u043d\u0441 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u043e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u0438.
+              Пополнить баланс может только владелец организации.
             </p>
           )}
         </CardContent>
@@ -272,22 +294,22 @@ export default function BillingPage() {
       {/* Transactions */}
       <Card>
         <CardHeader>
-          <CardTitle>\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439</CardTitle>
+          <CardTitle>История транзакций</CardTitle>
         </CardHeader>
         <CardContent>
           {transactions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              \u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.
+              Транзакций пока нет.
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>\u0414\u0430\u0442\u0430</TableHead>
-                  <TableHead>\u0422\u0438\u043f</TableHead>
-                  <TableHead>\u0421\u0443\u043c\u043c\u0430</TableHead>
-                  <TableHead>\u0411\u0430\u043b\u0430\u043d\u0441 \u043f\u043e\u0441\u043b\u0435</TableHead>
-                  <TableHead>\u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435</TableHead>
+                  <TableHead>Дата</TableHead>
+                  <TableHead>Тип</TableHead>
+                  <TableHead>Сумма</TableHead>
+                  <TableHead>Баланс после</TableHead>
+                  <TableHead>Примечание</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -306,7 +328,7 @@ export default function BillingPage() {
                       {formatUnits(tx.balance_after_usd)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs max-w-[180px] truncate">
-                      {tx.note ?? tx.reference_type ?? "\u2014"}
+                      {tx.note ?? tx.reference_type ?? "—"}
                     </TableCell>
                   </TableRow>
                 ))}

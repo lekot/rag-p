@@ -65,7 +65,7 @@ export default function AccountPage() {
     enabled: user !== null && user !== undefined,
   });
 
-  // Billing balance
+  // Billing balance. For fixed plans this is only an overage wallet, not the subscription quota.
   const billingQuery = trpc.billing.get.useQuery(
     { orgId: user?.organization?.id ?? "" },
     { enabled: Boolean(user?.organization?.id) }
@@ -77,6 +77,7 @@ export default function AccountPage() {
   const billingData = billingQuery.data as BillingData | null | undefined;
   const subscriptionData = subscriptionQuery.data as SubscriptionData | null | undefined;
   const billingBalance = billingData?.balance_usd ?? 0;
+  const usesOverageWallet = subscriptionData?.plan.allow_overage ?? false;
   const balanceTone =
     billingBalance > 1
       ? "text-green-600"
@@ -290,26 +291,36 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
-      {/* Billing balance card */}
+      {/* Billing overage wallet */}
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle>Биллинг</CardTitle>
-          <Link href="/account/billing">
-            <Button size="sm" variant="outline">
-              Управление балансом →
-            </Button>
-          </Link>
+          <CardTitle>Баланс перерасхода</CardTitle>
+          {usesOverageWallet && (
+            <Link href="/account/billing">
+              <Button size="sm" variant="outline">
+                Управление балансом →
+              </Button>
+            </Link>
+          )}
         </CardHeader>
         <CardContent className="space-y-1">
-          <div className="text-sm text-muted-foreground">Текущий баланс</div>
-          {billingQuery.isLoading ? (
+          <div className="text-sm text-muted-foreground">
+            {usesOverageWallet
+              ? "Кошелёк для согласованного перерасхода"
+              : "На текущем тарифе перерасход блокируется, отдельный баланс не нужен"}
+          </div>
+          {billingQuery.isLoading && usesOverageWallet ? (
             <div className="text-muted-foreground text-sm">Загрузка…</div>
-          ) : (
+          ) : usesOverageWallet ? (
             <div className={`text-2xl font-bold tabular-nums ${balanceTone}`}>
               {billingBalance.toFixed(2)} ед.
             </div>
+          ) : (
+            <div className="text-sm font-medium text-muted-foreground">
+              Используются лимиты подписки
+            </div>
           )}
-          {billingQuery.isError && (
+          {billingQuery.isError && usesOverageWallet && (
             <div className="text-xs text-destructive">Не удалось загрузить баланс</div>
           )}
         </CardContent>
