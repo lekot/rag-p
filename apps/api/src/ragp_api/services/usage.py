@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -65,7 +66,7 @@ async def record_usage_event(
         await db.rollback()
 
 
-def build_usage_summary(rows: list[Any], days: int) -> dict[str, Any]:
+def build_usage_summary(rows: Sequence[Any], days: int) -> dict[str, Any]:
     """Build the summary response from usage_daily rows.
 
     Each row must expose: day, model, total_prompt_tokens,
