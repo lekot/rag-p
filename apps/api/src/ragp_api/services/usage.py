@@ -21,12 +21,19 @@ logger = logging.getLogger(__name__)
 # Pricing table (USD per 1 000 tokens)
 # ---------------------------------------------------------------------------
 
+#
+# Client-facing prices (USD per 1 000 tokens) — already include:
+#   - DeepSeek wholesale cost (cache-miss): input $0.14/1M, output $0.28/1M
+#   - 6% VAT on the upstream payment
+#   - 6% NPD tax on incoming revenue (effective gross-up 1/0.94 ≈ 1.064)
+#   - margin to cover compute, storage, idle and ops
+#
+# Equivalent in RUB at $1 ≈ ₽95:  ₽20/1M input  /  ₽50/1M output  ≈  ₽30/1M for a 2:1 mix.
+# When the wholesale list price changes, update wholesale_*_per_1m_usd below
+# and re-derive the per-1K client number.
 MODEL_PRICING_USD_PER_1K: dict[str, dict[str, float]] = {
-    "deepseek/deepseek-v4-flash": {"prompt": 0.00027, "completion": 0.0011},
-    "deepseek/deepseek-chat": {"prompt": 0.00027, "completion": 0.0011},
-    "openai/gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
-    "openai/gpt-4o": {"prompt": 0.005, "completion": 0.015},
-    "openai/gpt-4-turbo": {"prompt": 0.01, "completion": 0.03},
+    "deepseek/deepseek-v4-flash": {"prompt": 0.00021, "completion": 0.00053},
+    "deepseek/deepseek-chat": {"prompt": 0.00021, "completion": 0.00053},
 }
 
 
