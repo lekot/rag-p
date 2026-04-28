@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import uuid
@@ -183,22 +184,13 @@ async def delete_dataset(
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
     dataset_name = dataset.name
 
-    # Calculate total bytes stored for this dataset (all documents' chunks)
-    # We approximate by summing text lengths of all chunks in this dataset.
-    # This is consistent with what was charged on upload (len(raw) file bytes).
-    # For a more precise approach, sum document sizes — but raw bytes per upload
-    # is what we tracked, so we release by document count * avg.
-    # Simpler: release all chunk text bytes as a best-effort approximation.
-    chunks_result = await db.execute(
-        select(Chunk)
-        .join(Document, Chunk.document_id == Document.id)
-        .where(
+    storage_result = await db.execute(
+        select(func.coalesce(func.sum(Document.raw_size_bytes), 0)).where(
             Document.dataset_id == dataset_id,
             Document.organization_id == organization_id,
         )
     )
-    chunks = chunks_result.scalars().all()
-    total_bytes = sum(len(c.text.encode("utf-8")) for c in chunks)
+    total_bytes = int(storage_result.scalar_one() or 0)
 
     await db.delete(dataset)
     await log_audit_event(
@@ -547,6 +539,10 @@ async def upload_document(
         organization_id=organization_id,
         dataset_id=dataset_id,
         source_uri=f"upload://{filename}",
+        raw_size_bytes=len(raw),
+        content_type=content_type,
+        sha256=hashlib.sha256(raw).hexdigest(),
+        storage_backend="transient",
         parsed_at=now,
         status="parsed",
     )

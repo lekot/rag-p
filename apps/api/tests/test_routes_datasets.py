@@ -1,11 +1,15 @@
 import io
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
+from ragp_api.db.models import Document, OrgSubscription, Plan
 from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
@@ -113,6 +117,94 @@ async def test_upload_txt_creates_chunks(client: AsyncClient, organization_id: s
     assert body["chunks_preview"][0]["len"] > 0
     # No OPENAI_API_KEY in test env → embedded must be False
     assert body["embedded"] is False
+
+
+@pytest.mark.asyncio
+async def test_upload_and_delete_use_raw_document_bytes_for_storage_quota(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    now = datetime.now(UTC)
+    db_session.add(
+        Plan(
+            id="storage-test",
+            name="Storage Test",
+            price_rub_monthly=Decimal("100"),
+            included_q=100,
+            included_storage_bytes=10_000,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    db_session.add(
+        OrgSubscription(
+            id=str(uuid.uuid4()),
+            org_id=organization_id,
+            plan_id="storage-test",
+            status="active",
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            q_used=0,
+            storage_bytes_used=0,
+            auto_renew=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
+
+    dataset_id = await _create_dataset(client, organization_id)
+    raw = b"a" * 700
+    old_enforce_subscription_quotas = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    try:
+        upload_resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/documents",
+            headers={"X-Organization-Id": organization_id},
+            files={"file": ("doc.txt", io.BytesIO(raw), "text/plain")},
+            data={
+                "chunker_name": "recursive-character",
+                "chunker_params": '{"chunk_size": 512, "chunk_overlap": 64}',
+            },
+        )
+        assert upload_resp.status_code == 201, upload_resp.text
+
+        db_session.expire_all()
+        subscription = (
+            await db_session.execute(
+                select(OrgSubscription).where(OrgSubscription.org_id == organization_id)
+            )
+        ).scalar_one()
+        assert subscription.storage_bytes_used == len(raw)
+
+        document = (
+            await db_session.execute(
+                select(Document).where(Document.id == upload_resp.json()["document_id"])
+            )
+        ).scalar_one()
+        assert document.raw_size_bytes == len(raw)
+        assert document.content_type == "text/plain"
+        assert document.sha256 is not None
+
+        delete_resp = await client.delete(
+            f"/api/v1/datasets/{dataset_id}",
+            headers={"X-Organization-Id": organization_id},
+        )
+        assert delete_resp.status_code == 204, delete_resp.text
+
+        db_session.expire_all()
+        subscription = (
+            await db_session.execute(
+                select(OrgSubscription).where(OrgSubscription.org_id == organization_id)
+            )
+        ).scalar_one()
+        assert subscription.storage_bytes_used == 0
+    finally:
+        settings.enforce_subscription_quotas = old_enforce_subscription_quotas
 
 
 @pytest.mark.asyncio

@@ -225,6 +225,11 @@ class Document(Base):
         String(36), ForeignKey("datasets.id"), nullable=True
     )
     source_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_backend: Mapped[str] = mapped_column(String(32), nullable=False, default="transient")
+    object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
