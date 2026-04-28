@@ -1,10 +1,22 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum as PyEnum
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -295,3 +307,40 @@ class ApiKey(Base):
 
     organization: Mapped["Organization"] = relationship(back_populates="api_keys")
     user: Mapped["User"] = relationship(back_populates="api_keys")
+
+
+class UsageEvent(Base):
+    """Raw per-request usage record."""
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    api_key_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    pipeline_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=Decimal("0"))
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class UsageDaily(Base):
+    """Daily aggregated usage per org + model."""
+
+    __tablename__ = "usage_daily"
+    __table_args__ = (
+        UniqueConstraint("org_id", "day", "model", name="uq_usage_daily_org_day_model"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    total_prompt_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_completion_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 6), nullable=False, default=Decimal("0")
+    )
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
