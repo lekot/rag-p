@@ -222,7 +222,7 @@ export default function AccountPage() {
                   : "text-red-600"
               }`}
             >
-              ${billingBalance.toFixed(2)}
+              {billingBalance.toFixed(2)} ед.
             </div>
           )}
         </CardContent>

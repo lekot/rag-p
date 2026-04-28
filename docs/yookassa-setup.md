@@ -90,6 +90,6 @@ Full test card list: https://yookassa.ru/developers/payment-acceptance/testing-a
 1. Run step 2 above with production `shopId`, `secretKey`, `INN`.
 2. Run step 3 to register the webhook URL.
 3. Set `RAGP_YOOKASSA_TEST_MODE=false` via step 4.
-4. Make a test payment of $1 through the billing page.
+4. Make a test payment of 100 ₽ through the billing page.
 5. Verify the balance increased and a `yookassa_payment` transaction appeared.
 6. Check FNS "Moi Nalog" app — a receipt should appear within a few minutes.

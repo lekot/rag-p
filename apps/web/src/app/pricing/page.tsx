@@ -159,7 +159,7 @@ export default function PricingPage() {
             <p className="font-medium mb-1">Оплата:</p>
             <ul className="list-disc list-inside text-xs space-y-1">
               <li>Банковские карты через ЮKassa</li>
-              <li>Минимум одного платежа — $1 (≈ 95 ₽)</li>
+              <li>Минимальный платёж — 100 ₽</li>
               <li>Чек ФНС автоматически через приложение «Мой налог»</li>
               <li>Возврат — в течение 14 дней при списаниях ≤ 10% от суммы пополнения</li>
             </ul>

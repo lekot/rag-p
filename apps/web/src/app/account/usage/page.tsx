@@ -44,11 +44,11 @@ const MODEL_COLORS = [
   "#a855f7",
 ];
 
-function formatCost(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.001) return `$${usd.toFixed(6)}`;
-  if (usd < 1) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
+function formatUnits(value: number): string {
+  if (value === 0) return "0.00 ед.";
+  if (value < 0.001) return `${value.toFixed(6)} ед.`;
+  if (value < 1) return `${value.toFixed(4)} ед.`;
+  return `${value.toFixed(2)} ед.`;
 }
 
 function formatTokens(n: number): string {
@@ -158,7 +158,7 @@ export default function UsagePage() {
         <div>
           <h1 className="text-2xl font-bold">Usage &amp; Billing</h1>
           <p className="text-sm text-muted-foreground">
-            Расходы токенов и стоимость запросов
+            Расход токенов и расчётных единиц
           </p>
         </div>
         <Link href="/account">
@@ -212,22 +212,22 @@ export default function UsagePage() {
             <Card>
               <CardHeader className="pb-1">
                 <CardTitle className="text-sm text-muted-foreground font-normal">
-                  Общая стоимость
+                  Расчётные единицы
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{formatCost(totalCost)}</p>
+                <p className="text-2xl font-bold">{formatUnits(totalCost)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-1">
                 <CardTitle className="text-sm text-muted-foreground font-normal">
-                  Ср. стоимость запроса
+                  Единиц на запрос
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">
-                  {formatCost(avgCostPerRequest)}
+                  {formatUnits(avgCostPerRequest)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {totalRequests} запросов
@@ -239,7 +239,7 @@ export default function UsagePage() {
           {/* Bar chart */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Расходы по дням</CardTitle>
+              <CardTitle className="text-base">Расход единиц по дням</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={200}>
@@ -252,12 +252,12 @@ export default function UsagePage() {
                   <YAxis
                     tick={{ fontSize: 11 }}
                     tickFormatter={(v: number) =>
-                      v === 0 ? "0" : `$${v.toFixed(4)}`
+                      v === 0 ? "0" : `${v.toFixed(4)}`
                     }
                     width={70}
                   />
                   <Tooltip
-                    formatter={(v: number) => [formatCost(v), "Стоимость"]}
+                    formatter={(v: number) => [formatUnits(v), "Единицы"]}
                   />
                   <Bar dataKey="cost" fill="#6366f1" radius={[2, 2, 0, 0]} />
                 </BarChart>
@@ -275,7 +275,7 @@ export default function UsagePage() {
               <CardContent>
                 {pieData.length === 1 ? (
                   <p className="text-sm text-center text-muted-foreground py-4">
-                    {pieData[0].name}: {formatCost(pieData[0].value)}
+                    {pieData[0].name}: {formatUnits(pieData[0].value)}
                   </p>
                 ) : (
                   <ResponsiveContainer width="100%" height={200}>
@@ -321,7 +321,7 @@ export default function UsagePage() {
                     <TableRow>
                       <TableHead className="pl-4">Модель</TableHead>
                       <TableHead className="text-right">Токены</TableHead>
-                      <TableHead className="text-right pr-4">Стоимость</TableHead>
+                      <TableHead className="text-right pr-4">Единицы</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -334,7 +334,7 @@ export default function UsagePage() {
                           {formatTokens(data.prompt + data.completion)}
                         </TableCell>
                         <TableCell className="text-right text-xs pr-4">
-                          {formatCost(data.cost)}
+                          {formatUnits(data.cost)}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -143,10 +143,10 @@
 |---|---|---|
 | Staging k3s, 2 ноды | Hetzner CX22 × 2 | €10-12/мес |
 | Production k3s, 3 ноды | Hetzner CX32 × 3 | €25-30/мес |
-| Cohere rerank API | По usage | $0-50/мес для пилота |
-| OpenAI embeddings + LLM | По usage | $20-100/мес для демо |
+| Cohere rerank API | По usage | 0-5 000 ₽/мес для пилота |
+| OpenAI embeddings + LLM | По usage | 2 000-10 000 ₽/мес для демо |
 | Domain + сертификаты | Selectel + Let's Encrypt | €0 (уже есть) |
-| LlamaParse (если нужен) | Managed | $0-25/мес |
+| LlamaParse (если нужен) | Managed | 0-2 500 ₽/мес |
 | **Итого MVP** | | **~€60-200/мес** |
 
 Бутстрап-режим. Терпимо.

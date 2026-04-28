@@ -37,11 +37,11 @@ function formatDate(iso: string): string {
   });
 }
 
-function formatUsd(amount: number): string {
-  if (amount === 0) return "$0.00";
-  if (amount < 0.001) return `$${amount.toFixed(6)}`;
-  if (amount < 1) return `$${amount.toFixed(4)}`;
-  return `$${amount.toFixed(2)}`;
+function formatUnits(amount: number): string {
+  if (amount === 0) return "0.00 ед.";
+  if (amount < 0.001) return `${amount.toFixed(6)} ед.`;
+  if (amount < 1) return `${amount.toFixed(4)} ед.`;
+  return `${amount.toFixed(2)} ед.`;
 }
 
 function BalanceDisplay({ balance }: { balance: number }) {
@@ -54,7 +54,7 @@ function BalanceDisplay({ balance }: { balance: number }) {
 
   return (
     <div className={`text-4xl font-bold tabular-nums ${colorClass}`}>
-      {formatUsd(balance)}
+      {formatUnits(balance)}
     </div>
   );
 }
@@ -85,7 +85,7 @@ function TxAmount({ type, amount }: { type: string; amount: number }) {
   return (
     <span className={cls}>
       {sign}
-      {formatUsd(amount)}
+      {formatUnits(amount)}
     </span>
   );
 }
@@ -93,11 +93,6 @@ function TxAmount({ type, amount }: { type: string; amount: number }) {
 // ---------------------------------------------------------------------------
 // YooKassa checkout form
 // ---------------------------------------------------------------------------
-
-interface CheckoutPreview {
-  amountRub: number;
-  rateUsdRub: number;
-}
 
 function YookassaCheckoutDialog({
   orgId,
@@ -108,40 +103,16 @@ function YookassaCheckoutDialog({
   open: boolean;
   onClose: () => void;
 }) {
-  const [amountUsd, setAmountUsd] = useState("10");
-  const [preview, setPreview] = useState<CheckoutPreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [amountUnits, setAmountUnits] = useState("10");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  // Debounced preview fetch
-  useEffect(() => {
-    const parsed = parseFloat(amountUsd);
-    if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
-      setPreview(null);
-      return;
-    }
-    setPreviewLoading(true);
-    const timer = setTimeout(() => {
-      // Fetch rate preview from checkout endpoint (dry-run not available,
-      // so we call a dedicated fx endpoint if it exists, or compute client-side)
-      // For now we use a simple estimate from the last known rate stored in localStorage
-      const cachedRate = parseFloat(localStorage.getItem("fx:usd_rub") || "0");
-      if (cachedRate > 0) {
-        const rub = parsed * cachedRate * 1.03;
-        setPreview({ amountRub: Math.ceil(rub * 100) / 100, rateUsdRub: cachedRate });
-      }
-      setPreviewLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [amountUsd]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const parsed = parseFloat(amountUsd);
+    const parsed = parseFloat(amountUnits);
     if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
-      setError("\u0421\u0443\u043c\u043c\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u043e\u0442 $1 \u0434\u043e $1000");
+      setError("\u0421\u0443\u043c\u043c\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u043e\u0442 1 \u0434\u043e 1000 \u0440\u0430\u0441\u0447\u0451\u0442\u043d\u044b\u0445 \u0435\u0434\u0438\u043d\u0438\u0446");
       return;
     }
     setSubmitting(true);
@@ -157,10 +128,6 @@ function YookassaCheckoutDialog({
         throw new Error(body.detail ?? "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 \u043f\u043b\u0430\u0442\u0435\u0436\u0430");
       }
       const data = await resp.json();
-      // Cache the rate for preview
-      if (data.rate_usd_rub) {
-        localStorage.setItem("fx:usd_rub", String(data.rate_usd_rub));
-      }
       // Redirect to YooKassa
       window.location.href = data.confirmation_url;
     } catch (err) {
@@ -177,7 +144,7 @@ function YookassaCheckoutDialog({
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="yk-amount">\u0421\u0443\u043c\u043c\u0430 (USD)</Label>
+            <Label htmlFor="yk-amount">\u0421\u0443\u043c\u043c\u0430 \u043f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f</Label>
             <Input
               id="yk-amount"
               type="number"
@@ -185,33 +152,12 @@ function YookassaCheckoutDialog({
               max="1000"
               step="1"
               placeholder="10"
-              value={amountUsd}
-              onChange={(e) => setAmountUsd(e.target.value)}
+              value={amountUnits}
+              onChange={(e) => setAmountUnits(e.target.value)}
               required
               autoFocus
             />
           </div>
-
-          {/* Rate preview */}
-          {preview && !previewLoading && (
-            <p className="text-sm text-muted-foreground">
-              {"\u2248"}&nbsp;
-              <span className="font-medium tabular-nums">
-                {preview.amountRub.toLocaleString("ru-RU", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}&nbsp;&#8381;
-              </span>
-              &nbsp;\u043f\u043e \u043a\u0443\u0440\u0441\u0443&nbsp;
-              <span className="tabular-nums">
-                {preview.rateUsdRub.toLocaleString("ru-RU", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </span>
-              &nbsp;(\u0426\u0411 + 3%)
-            </p>
-          )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -219,7 +165,7 @@ function YookassaCheckoutDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               \u041e\u0442\u043c\u0435\u043d\u0430
             </Button>
-            <Button type="submit" disabled={submitting || !amountUsd}>
+            <Button type="submit" disabled={submitting || !amountUnits}>
               {submitting
                 ? "\u041f\u0435\u0440\u0435\u043d\u0430\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435\u2026"
                 : "\u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043a \u043e\u043f\u043b\u0430\u0442\u0435"}
@@ -357,7 +303,7 @@ export default function BillingPage() {
                       <TxAmount type={tx.type} amount={tx.amount_usd} />
                     </TableCell>
                     <TableCell className="tabular-nums text-sm">
-                      {formatUsd(tx.balance_after_usd)}
+                      {formatUnits(tx.balance_after_usd)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs max-w-[180px] truncate">
                       {tx.note ?? tx.reference_type ?? "\u2014"}
