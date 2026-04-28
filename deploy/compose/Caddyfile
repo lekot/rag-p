@@ -1,0 +1,17 @@
+{
+	email {$CADDY_ACME_EMAIL}
+}
+
+lekottt.ru {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+www.lekottt.ru {
+	redir https://lekottt.ru{uri} permanent
+}
+
+api.lekottt.ru {
+	encode zstd gzip
+	reverse_proxy api:8000
+}

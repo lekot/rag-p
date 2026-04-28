@@ -1,0 +1,183 @@
+name: rag-p
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - public
+      - internal
+
+  web:
+    image: ${RAGP_WEB_IMAGE:-ghcr.io/lekot/rag-p-web:staging-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.lekottt.ru}
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks:
+      - internal
+
+  api:
+    image: ${RAGP_API_IMAGE:-ghcr.io/lekot/rag-p-api:staging-latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      RAGP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RAGP_REDIS_HOST: redis
+      RAGP_REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_HOST: http://ollama:11434
+      RAGP_SESSION_COOKIE_SECURE: "true"
+      RAGP_ALLOW_LEGACY_ORG_HEADER: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).read()",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+    expose:
+      - "8000"
+    networks:
+      - internal
+
+  worker:
+    image: ${RAGP_API_IMAGE:-ghcr.io/lekot/rag-p-api:staging-latest}
+    restart: unless-stopped
+    command: ["arq", "ragp_api.workers.main.WorkerSettings"]
+    env_file:
+      - ./.env
+    environment:
+      RAGP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RAGP_REDIS_HOST: redis
+      RAGP_REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    expose:
+      - "9090"
+    networks:
+      - internal
+
+  migrate:
+    image: ${RAGP_API_IMAGE:-ghcr.io/lekot/rag-p-api:staging-latest}
+    profiles:
+      - tools
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    env_file:
+      - ./.env
+    environment:
+      RAGP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    expose:
+      - "5432"
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    expose:
+      - "6379"
+    networks:
+      - internal
+
+  ollama:
+    image: ollama/ollama:0.4.7
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODELS: /root/.ollama/models
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-bge-m3}
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    expose:
+      - "11434"
+    networks:
+      - internal
+
+networks:
+  public:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  ollama_models:

@@ -1,0 +1,248 @@
+name: Deploy to Compose production
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-compose
+  cancel-in-progress: true
+
+env:
+  IMAGE_PREFIX: ghcr.io/lekot
+  COMPOSE_DIR: /opt/rag-p
+  COMPOSE_SSH_PORT: ${{ vars.COMPOSE_SSH_PORT || '22' }}
+
+jobs:
+  build-api:
+    name: Build api image
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && (github.event_name == 'workflow_dispatch' || vars.DEPLOY_TARGET == 'compose') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+      image: ${{ steps.image.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Compute tag
+        id: tag
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "value=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image
+        id: image
+        run: echo "value=${IMAGE_PREFIX}/rag-p-api:${{ steps.tag.outputs.value }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push api
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/api
+          push: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+          tags: |
+            ${{ steps.image.outputs.value }}
+            ${{ env.IMAGE_PREFIX }}/rag-p-api:compose-latest
+
+  build-web:
+    name: Build web image
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && (github.event_name == 'workflow_dispatch' || vars.DEPLOY_TARGET == 'compose') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+      image: ${{ steps.image.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Compute tag
+        id: tag
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "value=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image
+        id: image
+        run: echo "value=${IMAGE_PREFIX}/rag-p-web:${{ steps.tag.outputs.value }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.lekottt.ru
+          tags: |
+            ${{ steps.image.outputs.value }}
+            ${{ env.IMAGE_PREFIX }}/rag-p-web:compose-latest
+
+  deploy:
+    name: Deploy over SSH
+    needs: [build-api, build-web]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      REMOTE: ${{ secrets.COMPOSE_USER }}@${{ secrets.COMPOSE_HOST }}
+      RAGP_API_IMAGE: ${{ needs.build-api.outputs.image }}
+      RAGP_WEB_IMAGE: ${{ needs.build-web.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Prepare SSH
+        env:
+          COMPOSE_SSH_PRIVATE_KEY: ${{ secrets.COMPOSE_SSH_PRIVATE_KEY }}
+          COMPOSE_HOST: ${{ secrets.COMPOSE_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$COMPOSE_HOST"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$COMPOSE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$COMPOSE_SSH_PORT" -H "$COMPOSE_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload compose bundle
+        run: |
+          set -euo pipefail
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "mkdir -p '$COMPOSE_DIR/postgres/initdb'"
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/compose.prod.yml "$REMOTE:$COMPOSE_DIR/compose.prod.yml"
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/Caddyfile "$REMOTE:$COMPOSE_DIR/Caddyfile"
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres/initdb/001-extensions.sql "$REMOTE:$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
+
+      - name: Write remote env
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.COMPOSE_POSTGRES_PASSWORD }}
+          RAGP_SESSION_SECRET: ${{ secrets.RAGP_SESSION_SECRET }}
+          RAGP_SECRET_KEY: ${{ secrets.RAGP_SECRET_KEY }}
+          RAGP_YOOKASSA_SHOP_ID: ${{ secrets.RAGP_YOOKASSA_SHOP_ID }}
+          RAGP_YOOKASSA_SECRET_KEY: ${{ secrets.RAGP_YOOKASSA_SECRET_KEY }}
+          RAGP_YOOKASSA_WEBHOOK_SECRET: ${{ secrets.RAGP_YOOKASSA_WEBHOOK_SECRET }}
+          RAGP_YOOKASSA_INN: ${{ secrets.RAGP_YOOKASSA_INN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > compose.env <<EOF
+          POSTGRES_DB=ragp
+          POSTGRES_USER=ragp
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          RAGP_API_IMAGE=${RAGP_API_IMAGE}
+          RAGP_WEB_IMAGE=${RAGP_WEB_IMAGE}
+          NEXT_PUBLIC_API_URL=https://api.lekottt.ru
+          CADDY_ACME_EMAIL=papanifontov@gmail.com
+          OLLAMA_MODEL=bge-m3
+          RAGP_SESSION_SECRET=${RAGP_SESSION_SECRET}
+          RAGP_SECRET_KEY=${RAGP_SECRET_KEY}
+          RAGP_DEBUG=false
+          RAGP_ENFORCE_SUBSCRIPTION_QUOTAS=true
+          RAGP_YOOKASSA_SHOP_ID=${RAGP_YOOKASSA_SHOP_ID}
+          RAGP_YOOKASSA_SECRET_KEY=${RAGP_YOOKASSA_SECRET_KEY}
+          RAGP_YOOKASSA_WEBHOOK_SECRET=${RAGP_YOOKASSA_WEBHOOK_SECRET}
+          RAGP_YOOKASSA_RETURN_URL=https://lekottt.ru/account/billing
+          RAGP_YOOKASSA_TEST_MODE=true
+          RAGP_YOOKASSA_TAXATION_SYSTEM=6
+          RAGP_YOOKASSA_INN=${RAGP_YOOKASSA_INN}
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+          COHERE_API_KEY=${COHERE_API_KEY}
+          EOF
+          sed -i 's/^          //' compose.env
+          scp -P "$COMPOSE_SSH_PORT" compose.env "$REMOTE:$COMPOSE_DIR/.env"
+          rm -f compose.env
+
+      - name: Pull and migrate
+        env:
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "docker login ghcr.io -u lekot --password-stdin"
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "
+            set -euo pipefail
+            cd '$COMPOSE_DIR'
+            docker compose -f compose.prod.yml --env-file .env pull
+            docker compose -f compose.prod.yml --env-file .env up -d postgres redis ollama
+            ready=0
+            for i in \$(seq 1 60); do
+              if docker compose -f compose.prod.yml --env-file .env exec -T postgres pg_isready -U ragp -d ragp; then ready=1; break; fi
+              sleep 2
+            done
+            test \"\$ready\" = 1
+            ready=0
+            for i in \$(seq 1 60); do
+              if docker compose -f compose.prod.yml --env-file .env exec -T redis redis-cli ping | grep -q PONG; then ready=1; break; fi
+              sleep 2
+            done
+            test \"\$ready\" = 1
+            ready=0
+            for i in \$(seq 1 60); do
+              if docker compose -f compose.prod.yml --env-file .env exec -T ollama ollama list; then ready=1; break; fi
+              sleep 2
+            done
+            test \"\$ready\" = 1
+            docker compose -f compose.prod.yml --env-file .env exec -T ollama sh -lc 'ollama pull \"\$OLLAMA_MODEL\"'
+            docker compose -f compose.prod.yml --env-file .env run --rm migrate
+          "
+
+      - name: Start app
+        run: |
+          set -euo pipefail
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "
+            set -euo pipefail
+            cd '$COMPOSE_DIR'
+            docker compose -f compose.prod.yml --env-file .env up -d --remove-orphans
+            docker compose -f compose.prod.yml --env-file .env ps
+          "
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://api.lekottt.ru/healthz
+          curl -fsS --max-time 20 https://lekottt.ru/signup -o /tmp/signup.html
+          css_path=$(grep -oE 'href="[^"]*/_next/static/css/[^"]+\.css"' /tmp/signup.html | head -1 | sed -E 's/^href="//;s/"$//')
+          test -n "$css_path"
+          case "$css_path" in
+            http*) css_url="$css_path" ;;
+            /*) css_url="https://lekottt.ru$css_path" ;;
+            *) css_url="https://lekottt.ru/$css_path" ;;
+          esac
+          curl -fsS --max-time 20 "$css_url" -o /tmp/signup.css
+          test -s /tmp/signup.css
