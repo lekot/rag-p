@@ -93,6 +93,12 @@ postgres:
     databaseName: ragp
     ownerName: ragp
     secretName: postgres-app-secret
+    backup:
+      enabled: false
+      bucketName: ""
+      endpointURL: "https://s3.ru-1.storage.selcloud.ru"
+      retentionPolicy: "30d"
+      schedule: "0 2 * * *"
 
 # Redis via Bitnami chart
 redis:
