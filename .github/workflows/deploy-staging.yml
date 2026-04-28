@@ -150,7 +150,6 @@ jobs:
             --set crds.enabled=true \
             --set grafana.enabled=true \
             --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-            --set prometheus.prometheusSpec.serviceMonitorNamespaceSelector={} \
             --wait --timeout 10m
 
       - name: Helm upgrade
