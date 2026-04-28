@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.rate_limiter import check_rag_query_limits
 from ragp_api.settings import settings
+from ragp_api.services.audit import log_audit_event
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -116,6 +117,7 @@ async def _resolve_embedder() -> tuple[Embedder | None, str]:
 @router.post("/query", response_model=RagQueryOut)
 async def rag_query(
     body: RagQueryIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: tuple[Organization, ApiKey] | None = Depends(get_api_key_org),
     redis: Any = Depends(get_redis),
@@ -202,6 +204,20 @@ async def rag_query(
         db.add(run_record)
         await db.commit()
 
+        pipeline_latency_ms = int((time.monotonic() - _request_start) * 1000)
+
+        await log_audit_event(
+            db,
+            org_id=org.id,
+            user_id=api_key.user_id,
+            event_type="rag.query",
+            resource_type="api_key",
+            resource_id=api_key.id,
+            metadata={"pipeline_id": body.pipeline_id, "latency_ms": pipeline_latency_ms},
+            request=request,
+        )
+        await db.commit()
+
         if not raw_chunks and not answer:
             answer = "Не нашёл релевантных чанков для ответа."
 
@@ -274,6 +290,36 @@ async def rag_query(
     answer = gen_result.get("answer", "")
     trace_raw: dict[str, Any] = gen_result.get("trace", {})
     usage_raw: dict[str, Any] = trace_raw.get("usage", {})
+
+    default_prompt_tokens = int(usage_raw.get("prompt_tokens", 0))
+    default_completion_tokens = int(usage_raw.get("completion_tokens", 0))
+    default_cost = calculate_cost(default_model, default_prompt_tokens, default_completion_tokens)
+    default_latency_ms = int((time.monotonic() - _request_start) * 1000)
+
+    await log_audit_event(
+        db,
+        org_id=org.id,
+        user_id=api_key.user_id,
+        event_type="rag.query",
+        resource_type="api_key",
+        resource_id=api_key.id,
+        metadata={"pipeline_id": None, "latency_ms": default_latency_ms},
+        request=request,
+    )
+
+    try:
+        await record_usage_event(
+            db,
+            org_id=org.id,
+            api_key_id=api_key.id,
+            pipeline_id=None,
+            model=default_model,
+            prompt_tokens=default_prompt_tokens,
+            completion_tokens=default_completion_tokens,
+            latency_ms=default_latency_ms,
+        )
+    except Exception:
+        logger.warning("Usage recording failed (default path)", exc_info=True)
 
     return RagQueryOut(
         answer=answer,

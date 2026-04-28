@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import jsonschema
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.file_parsers import parse_to_text
 from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
 from ragp_api.services.pipeline_runner import run_pipeline
+from ragp_api.services.audit import log_audit_event
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -87,6 +88,7 @@ class DatasetOut(BaseModel):
 @router.post("", status_code=201, response_model=DatasetOut)
 async def create_dataset(
     body: DatasetCreateIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> DatasetOut:
     dataset = Dataset(
@@ -96,6 +98,17 @@ async def create_dataset(
         source=body.source,
     )
     db.add(dataset)
+    await db.flush()
+    await log_audit_event(
+        db,
+        org_id=body.organization_id,
+        user_id=None,
+        event_type="dataset.create",
+        resource_type="dataset",
+        resource_id=dataset.id,
+        metadata={"name": dataset.name},
+        request=request,
+    )
     await db.commit()
     await db.refresh(dataset)
     return DatasetOut(
@@ -137,6 +150,34 @@ async def get_dataset(
         organization_id=dataset.organization_id,
         source=dataset.source,
     )
+
+
+@router.delete("/{dataset_id}", status_code=204)
+async def delete_dataset(
+    dataset_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_organization_id),
+) -> None:
+    result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    dataset = result.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+    dataset_name = dataset.name
+    await db.delete(dataset)
+    await log_audit_event(
+        db,
+        org_id=organization_id,
+        user_id=None,
+        event_type="dataset.delete",
+        resource_type="dataset",
+        resource_id=dataset_id,
+        metadata={"name": dataset_name},
+        request=request,
+    )
+    await db.commit()
 
 
 @router.post("/{dataset_id}/generate", status_code=202)
@@ -370,6 +411,7 @@ class UploadDocumentResponse(BaseModel):
 @router.post("/{dataset_id}/documents", status_code=201, response_model=UploadDocumentResponse)
 async def upload_document(
     dataset_id: str,
+    request: Request,
     file: UploadFile,
     chunker_name: str = Form(default="recursive-character"),
     chunker_params: str = Form(default="{}"),
@@ -495,8 +537,6 @@ async def upload_document(
             # embedding is optional — proceed without it
             pass
 
-    await db.commit()
-
     # Build preview (first 5 chunks)
     preview = [
         ChunkPreview(
@@ -507,6 +547,18 @@ async def upload_document(
         )
         for i, c in enumerate(chunk_objs[:5])
     ]
+
+    await log_audit_event(
+        db,
+        org_id=organization_id,
+        user_id=None,
+        event_type="dataset.upload",
+        resource_type="document",
+        resource_id=doc.id,
+        metadata={"filename": file.filename or "", "size": len(content_bytes)},
+        request=request,
+    )
+    await db.commit()
 
     return UploadDocumentResponse(
         document_id=doc.id,

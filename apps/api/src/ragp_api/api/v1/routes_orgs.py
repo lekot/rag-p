@@ -11,16 +11,17 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import OrgInvite, OrgMember, OrgRole, User
+from ragp_api.db.models import AuditEvent, OrgInvite, OrgMember, OrgRole, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
+from ragp_api.services.audit import log_audit_event
 from ragp_api.services.permissions import require_role
 
 router = APIRouter(tags=["orgs"])
@@ -66,6 +67,18 @@ class AcceptInviteIn(BaseModel):
 
 class PatchMemberIn(BaseModel):
     role: str
+
+
+class AuditEventOut(BaseModel):
+    id: str
+    user_id: Optional[str]
+    user_email: Optional[str]
+    event_type: str
+    resource_type: Optional[str]
+    resource_id: Optional[str]
+    ip_address: Optional[str]
+    metadata: dict
+    created_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +133,7 @@ async def list_members(
 async def remove_member(
     org_id: str,
     user_id: str,
+    request: Request,
     current_user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -147,6 +161,16 @@ async def remove_member(
             raise HTTPException(status_code=400, detail="Cannot remove the last owner")
 
     await db.delete(member)
+    await log_audit_event(
+        db,
+        org_id=org_id,
+        user_id=current_user.id,
+        event_type="member.remove",
+        resource_type="user",
+        resource_id=user_id,
+        metadata={"removed_user_id": user_id},
+        request=request,
+    )
     await db.commit()
 
 
@@ -208,6 +232,7 @@ async def patch_member(
 async def create_invite(
     org_id: str,
     body: InviteIn,
+    request: Request,
     current_user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -234,6 +259,18 @@ async def create_invite(
         accepted_at=None,
     )
     db.add(invite)
+    await db.flush()
+
+    await log_audit_event(
+        db,
+        org_id=org_id,
+        user_id=current_user.id,
+        event_type="invite.create",
+        resource_type="invite",
+        resource_id=invite.id,
+        metadata={"email": str(body.email), "role": body.role},
+        request=request,
+    )
     await db.commit()
     await db.refresh(invite)
 
@@ -299,6 +336,7 @@ async def revoke_invite(
 @router.post("/api/v1/invites/accept", status_code=200)
 async def accept_invite(
     body: AcceptInviteIn,
+    request: Request,
     current_user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -314,7 +352,7 @@ async def accept_invite(
     if invite.accepted_at is not None:
         raise HTTPException(status_code=409, detail="Invite already accepted")
 
-    # expires_at may be naive (SQLite) or aware (Postgres) — normalise before comparing
+    # expires_at may be naive (SQLite) or aware (Postgres) -- normalise before comparing
     expires_at = invite.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
@@ -340,6 +378,64 @@ async def accept_invite(
     db.add(member)
 
     invite.accepted_at = now
+
+    await log_audit_event(
+        db,
+        org_id=invite.org_id,
+        user_id=current_user.id,
+        event_type="invite.accept",
+        resource_type="invite",
+        resource_id=invite.id,
+        metadata={"invite_id": invite.id},
+        request=request,
+    )
     await db.commit()
 
     return {"org_id": invite.org_id, "role": invite.role}
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v1/orgs/{org_id}/audit", response_model=list[AuditEventOut])
+async def list_audit_events(
+    org_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    event_type: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    current_user: User = Depends(require_session_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """List audit events for the org. Requires admin or owner role."""
+    await require_role(db, current_user.id, org_id, OrgRole.admin)
+
+    q = (
+        select(AuditEvent, User)
+        .outerjoin(User, User.id == AuditEvent.user_id)
+        .where(AuditEvent.org_id == org_id)
+    )
+    if event_type is not None:
+        q = q.where(AuditEvent.event_type == event_type)
+    if user_id is not None:
+        q = q.where(AuditEvent.user_id == user_id)
+
+    q = q.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)
+
+    rows = await db.execute(q)
+    return [
+        AuditEventOut(
+            id=ev.id,
+            user_id=ev.user_id,
+            user_email=u.email if u else None,
+            event_type=ev.event_type,
+            resource_type=ev.resource_type,
+            resource_id=ev.resource_id,
+            ip_address=ev.ip_address,
+            metadata=ev.metadata,
+            created_at=ev.created_at.isoformat(),
+        )
+        for ev, u in rows.all()
+    ]

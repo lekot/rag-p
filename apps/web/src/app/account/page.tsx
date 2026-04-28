@@ -173,6 +173,40 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
+      {/* Usage & Billing */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Usage &amp; Billing</CardTitle>
+          <Link href="/account/usage">
+            <Button size="sm" variant="outline">
+              Посмотреть расходы →
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Статистика потребления токенов, стоимость по моделям и запросам.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Audit Log */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-base font-semibold">Audit Log</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            View security events and actions performed in your organization.
+          </p>
+          <Link href="/account/audit">
+            <Button variant="outline" size="sm">
+              View Audit Log
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
       {/* API Keys */}
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">

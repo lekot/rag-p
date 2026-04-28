@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from ragp_api.api.errors import PluginNotFoundError
 from ragp_api.db.models import Pipeline, PipelineVersion
 from ragp_api.deps import get_db
 from ragp_api.plugins.registry import get_plugin
+from ragp_api.services.audit import log_audit_event
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -34,6 +35,10 @@ class PipelineOut(BaseModel):
     current_version_id: str | None
     dataset_id: str | None = None
     nodes: list[PipelineNodeIn] = []
+
+
+class PromoteIn(BaseModel):
+    experiment_id: str
 
 
 async def _load_nodes(db: AsyncSession, version_id: str | None) -> list[PipelineNodeIn]:
@@ -121,6 +126,42 @@ async def get_pipeline(
     pipeline = result.scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
+    nodes = await _load_nodes(db, pipeline.current_version_id)
+    return PipelineOut(
+        id=pipeline.id,
+        name=pipeline.name,
+        organization_id=pipeline.organization_id,
+        current_version_id=pipeline.current_version_id,
+        dataset_id=pipeline.dataset_id,
+        nodes=nodes,
+    )
+
+
+@router.post("/{pipeline_id}/promote", response_model=PipelineOut)
+async def promote_pipeline(
+    pipeline_id: str,
+    body: PromoteIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PipelineOut:
+    """Promote a pipeline version from an experiment."""
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
+
+    await log_audit_event(
+        db,
+        org_id=pipeline.organization_id,
+        user_id=None,
+        event_type="pipeline.promote",
+        resource_type="pipeline",
+        resource_id=pipeline_id,
+        metadata={"experiment_id": body.experiment_id},
+        request=request,
+    )
+    await db.commit()
+
     nodes = await _load_nodes(db, pipeline.current_version_id)
     return PipelineOut(
         id=pipeline.id,
