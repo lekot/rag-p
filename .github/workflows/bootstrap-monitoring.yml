@@ -1,0 +1,45 @@
+name: Bootstrap monitoring
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: bootstrap-monitoring
+  cancel-in-progress: false
+
+jobs:
+  kube-prometheus-stack:
+    name: Install or upgrade kube-prometheus-stack
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.7
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Install or upgrade kube-prometheus-stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prometheus-stack \
+            prometheus-community/kube-prometheus-stack \
+            -n monitoring --create-namespace \
+            --version 65.5.1 \
+            --set crds.enabled=true \
+            --set grafana.enabled=true \
+            --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+            --wait --timeout 10m

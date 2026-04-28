@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: deploy-staging
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -141,16 +141,12 @@ jobs:
           helm repo update
           helm dependency build ./charts/rag-p
 
-      - name: Install/upgrade cluster prerequisites (kube-prometheus-stack)
+      - name: Verify cluster prerequisites
         run: |
-          helm upgrade --install kube-prometheus-stack \
-            prometheus-community/kube-prometheus-stack \
-            -n monitoring --create-namespace \
-            --version 65.5.1 \
-            --set crds.enabled=true \
-            --set grafana.enabled=true \
-            --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-            --wait --timeout 10m
+          set -e
+          helm -n monitoring status kube-prometheus-stack >/dev/null
+          kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null
+          kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null
 
       - name: Helm upgrade
         id: upgrade
@@ -160,6 +156,8 @@ jobs:
             -f charts/rag-p/values.staging.yaml \
             --set api.image.tag=${{ needs.build-api.outputs.tag }} \
             --set web.image.tag=${{ needs.build-web.outputs.tag }} \
+            --atomic \
+            --cleanup-on-fail \
             --wait \
             --timeout 15m
 
@@ -186,6 +184,28 @@ jobs:
             echo "Runtime error detected in HTML"
             exit 1
           fi
+          echo
+          echo "Signup page and CSS asset:"
+          signup_status=$(curl -s -o /tmp/signup.html -w "%{http_code}" --max-time 15 https://lekottt.ru/signup)
+          echo "Signup HTTP $signup_status"
+          if [ "$signup_status" -ge 500 ]; then
+            echo "Signup returned 5xx — failing smoke"
+            head -50 /tmp/signup.html
+            exit 1
+          fi
+          css_path=$(grep -oE 'href="[^"]*/_next/static/css/[^"]+\.css"' /tmp/signup.html | head -1 | sed -E 's/^href="//;s/"$//')
+          if [ -z "$css_path" ]; then
+            echo "No Next CSS asset found on signup page"
+            head -80 /tmp/signup.html
+            exit 1
+          fi
+          case "$css_path" in
+            http*) css_url="$css_path" ;;
+            /*) css_url="https://lekottt.ru$css_path" ;;
+            *) css_url="https://lekottt.ru/$css_path" ;;
+          esac
+          curl -fsS --max-time 15 "$css_url" -o /tmp/signup.css
+          test -s /tmp/signup.css
 
       - name: Rollback on failure
         if: failure() && steps.upgrade.outcome == 'success'
