@@ -42,10 +42,10 @@ def upgrade() -> None:
               (id, name, price_rub_monthly, included_q, included_storage_bytes,
                max_users, rpm_per_key, allow_overage, is_active, sort_order)
             VALUES
-              ('personal',   'Personal',   100,   1000,    104857600,    1,  60,   false, true, 1),
-              ('pro',        'Pro',        1500,  20000,   2147483648,   5,  300,  false, true, 2),
-              ('corporate',  'Corporate',  5000,  70000,   8589934592,   25, 1000, true,  true, 3),
-              ('enterprise', 'Enterprise', 60000, 1000000, 107374182400, 0,  0,    true,  true, 4)
+              ('personal',   'Personal',   100,   1000,    10485760,    1,  60,   false, true, 1),
+              ('pro',        'Pro',        1500,  20000,   209715200,   5,  300,  false, true, 2),
+              ('corporate',  'Corporate',  5000,  70000,   838860800,   25, 1000, true,  true, 3),
+              ('enterprise', 'Enterprise', 60000, 1000000, 10737418240, 0,  0,    true,  true, 4)
             """
         )
     )

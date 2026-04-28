@@ -98,6 +98,17 @@ base_infra_cost_per_tenant =
 - количество страниц;
 - количество "indexed characters".
 
+Для MVP публичная квота "документы" должна быть в 10 раз меньше внутреннего
+индексного бюджета. То есть тариф, который экономически допускает 2 GB роста
+БД под chunks + embeddings + index overhead, публично показывает 200 MB
+исходных документов. Это не точная физическая конвертация, а защитный
+коэффициент: обычный текстовый корпус после chunking, overlap и embedding
+часто занимает в БД примерно 5-15x от raw bytes.
+
+Мультиплексинг допустим: не все клиенты выбирают всю квоту, поэтому
+capacity planning можно считать по фактическому использованию и headroom.
+Но публичные лимиты не должны исходить из 1:1 raw-to-indexed.
+
 Внутренне считать нужно:
 
 ```text
@@ -276,7 +287,7 @@ overage =
 
 Публичные единицы должны быть простыми:
 
-- documents/pages/GB for corpus;
+- raw documents/pages/GB for corpus, reduced by 10x against internal indexed capacity;
 - questions for live RAG;
 - experiment credits for scoring.
 
