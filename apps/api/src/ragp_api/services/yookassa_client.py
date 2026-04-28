@@ -14,8 +14,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from yookassa import Configuration, Payment
-from yookassa.domain.notification import WebhookNotification
+from yookassa import Configuration, Payment  # type: ignore[import-untyped]
+from yookassa.domain.notification import WebhookNotification  # type: ignore[import-untyped]
 
 from ragp_api.services.fx import get_usd_to_rub_rate
 from ragp_api.settings import settings
