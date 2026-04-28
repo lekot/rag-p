@@ -22,3 +22,7 @@ dependencies:
     version: "2.x.x"
     repository: https://grafana.github.io/helm-charts
     condition: observability.loki.enabled
+  - name: vault
+    version: "0.28.0"
+    repository: https://helm.releases.hashicorp.com
+    condition: vault.enabled
