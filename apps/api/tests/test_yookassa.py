@@ -9,21 +9,18 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
-from httpx import AsyncClient, Response
+from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     BillingTransaction,
     Membership,
-    OrgBalance,
-    OrgMember,
     Organization,
+    OrgMember,
     User,
 )
-from ragp_api.services.billing import topup_balance
 from ragp_api.services.fx import get_usd_to_rub_rate
 
 # ---------------------------------------------------------------------------
@@ -149,7 +146,9 @@ async def test_get_usd_to_rub_rate_falls_back_on_cbr_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_checkout_requires_owner(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_create_checkout_requires_owner(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     """Non-owner (admin) cannot create a checkout session — expects 403."""
     # Create org with admin-role user
     oid = str(uuid.uuid4())
@@ -165,7 +164,9 @@ async def test_create_checkout_requires_owner(client: AsyncClient, db_session: A
 
     # Login
     await client.post("/api/v1/auth/signup", json={"email": email, "password": _PASSWORD})
-    login_resp = await client.post("/api/v1/auth/login", json={"email": email, "password": _PASSWORD})
+    login_resp = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": _PASSWORD}
+    )
     assert login_resp.status_code == 200
 
     resp = await client.post(
@@ -181,7 +182,9 @@ async def test_create_checkout_validates_amount_range(
 ) -> None:
     """Amounts below $1 or above $1000 are rejected with 422."""
     # Signup and login as owner
-    data = await _signup_and_login(client, email="checkout-val@example.com", org_name="checkout-val-org")
+    data = await _signup_and_login(
+        client, email="checkout-val@example.com", org_name="checkout-val-org"
+    )
     org_id = data.get("organization_id") or data.get("organization", {}).get("id", "")
 
     with patch("ragp_api.api.v1.routes_billing.create_payment") as mock_cp:

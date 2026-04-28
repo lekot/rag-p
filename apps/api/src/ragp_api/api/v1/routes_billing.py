@@ -242,8 +242,8 @@ async def yookassa_webhook(
     raw = await request.body()
     try:
         payload = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="invalid JSON")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON") from exc
 
     event = payload.get("event")
     obj = payload.get("object", {})
@@ -274,8 +274,8 @@ async def yookassa_webhook(
 
     try:
         amount_usd = Decimal(amount_usd_str)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid amount_usd in metadata")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid amount_usd in metadata") from exc
 
     new_balance = await topup_balance(
         db,

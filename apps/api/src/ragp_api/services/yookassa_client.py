@@ -57,7 +57,7 @@ async def create_payment(
                 "description": f"RAG-Platform credit ${amount_usd}",
                 "quantity": "1.00",
                 "amount": {"value": str(amount_rub), "currency": "RUB"},
-                "vat_code": 1,          # no VAT (NPD / self-employed)
+                "vat_code": 1,  # no VAT (NPD / self-employed)
                 "payment_subject": "service",
                 "payment_mode": "full_payment",
             }
