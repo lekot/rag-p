@@ -10,7 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
-from ragp_api.services.golden_qa_generator import generate_golden_qa
+from ragp_api.services.golden_qa_generator import GoldenGenerationError, generate_golden_qa
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -149,16 +149,16 @@ async def test_generate_golden_qa_handles_invalid_json(
     bad_resp = MagicMock()
     bad_resp.choices = [bad_choice]
 
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=bad_resp)):
-        pairs = await generate_golden_qa(
+    with (
+        patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=bad_resp)),
+        pytest.raises(GoldenGenerationError),
+    ):
+        await generate_golden_qa(
             dataset_id=ds_id,
             organization_id=organization_id,
             db=db_session,
             sample_size=5,
         )
-
-    # Chunk was skipped — empty result, no exception
-    assert pairs == []
 
 
 # ---------------------------------------------------------------------------
