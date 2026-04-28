@@ -1,0 +1,50 @@
+name: DB migrate (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Alembic target revision (head, 0007, etc.)'
+        default: 'head'
+        required: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.7
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Show current alembic version
+        run: |
+          POD=$(kubectl -n rag-p get pod -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
+          echo "Pod: $POD"
+          kubectl -n rag-p exec "$POD" -- alembic -c /app/alembic.ini current
+
+      - name: Run upgrade
+        run: |
+          POD=$(kubectl -n rag-p get pod -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n rag-p exec "$POD" -- alembic -c /app/alembic.ini upgrade ${{ github.event.inputs.target }}
+
+      - name: Show new alembic version
+        run: |
+          POD=$(kubectl -n rag-p get pod -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n rag-p exec "$POD" -- alembic -c /app/alembic.ini current
+
+      - name: Restart api + worker
+        run: |
+          kubectl -n rag-p rollout restart deploy/rag-p-api
+          kubectl -n rag-p rollout restart deploy/rag-p-worker
+          kubectl -n rag-p rollout status deploy/rag-p-api --timeout=120s
+          kubectl -n rag-p rollout status deploy/rag-p-worker --timeout=120s
