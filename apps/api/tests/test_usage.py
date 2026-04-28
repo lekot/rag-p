@@ -132,9 +132,7 @@ async def test_record_usage_event_creates_row_with_cost(
         latency_ms=123,
     )
 
-    result = await db_session.execute(
-        select(UsageEvent).where(UsageEvent.org_id == org_id)
-    )
+    result = await db_session.execute(select(UsageEvent).where(UsageEvent.org_id == org_id))
     events = result.scalars().all()
     assert len(events) == 1
     ev = events[0]
@@ -162,9 +160,7 @@ async def test_record_usage_event_unknown_model_zero_cost(
         completion_tokens=50,
     )
 
-    result = await db_session.execute(
-        select(UsageEvent).where(UsageEvent.org_id == org_id)
-    )
+    result = await db_session.execute(select(UsageEvent).where(UsageEvent.org_id == org_id))
     events = result.scalars().all()
     assert len(events) == 1
     assert events[0].cost_usd == Decimal("0.000000")
@@ -318,8 +314,7 @@ async def test_get_usage_summary_returns_aggregates(
     day_entries = body["days"]
     assert len(day_entries) >= 1
     assert any(
-        any(m["model"] == "deepseek/deepseek-v4-flash" for m in d["models"])
-        for d in day_entries
+        any(m["model"] == "deepseek/deepseek-v4-flash" for m in d["models"]) for d in day_entries
     )
 
 
@@ -335,9 +330,7 @@ async def test_member_can_view_summary_admin_can_view_events(
 
     # Ensure user is OrgMember (signup might not add to org_members)
     existing = await db_session.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id, OrgMember.user_id == user_id
-        )
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
     )
     if existing.scalar_one_or_none() is None:
         db_session.add(

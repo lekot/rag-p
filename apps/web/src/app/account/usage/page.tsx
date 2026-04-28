@@ -27,7 +27,7 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import type { DayUsage, ModelUsage } from "@/server/routers/usage";
+import type { DayUsage } from "@/server/routers/usage";
 
 const PERIOD_OPTIONS = [
   { label: "7 дней", value: 7 },
