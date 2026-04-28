@@ -6,6 +6,7 @@ import { experimentsRouter } from "./experiments";
 import { datasetsRouter } from "./datasets";
 import { authRouter } from "./auth";
 import { keysRouter } from "./keys";
+import { usageRouter } from "./usage";
 
 export const appRouter = router({
   plugins: pluginsRouter,
@@ -15,6 +16,7 @@ export const appRouter = router({
   datasets: datasetsRouter,
   auth: authRouter,
   keys: keysRouter,
+  usage: usageRouter,
 });
 
 export type AppRouter = typeof appRouter;

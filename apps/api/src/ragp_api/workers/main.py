@@ -7,10 +7,11 @@ Run with:
 from __future__ import annotations
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 from prometheus_client import Counter, Histogram, start_http_server
 
 from ragp_api.settings import settings
-from ragp_api.workers.tasks import run_experiment_task
+from ragp_api.workers.tasks import aggregate_usage_daily, run_experiment_task
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics
@@ -56,7 +57,10 @@ async def on_job_complete(ctx: dict) -> None:  # type: ignore[type-arg]
 class WorkerSettings:
     """ARQ worker configuration."""
 
-    functions = [run_experiment_task]
+    functions = [run_experiment_task, aggregate_usage_daily]
+    cron_jobs = [
+        cron(aggregate_usage_daily, hour=1, minute=0, run_at_startup=False),
+    ]
     redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
     max_jobs = 5
     job_timeout = 600  # 10 minutes per experiment

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -20,7 +22,10 @@ from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.rate_limiter import check_rag_query_limits
+from ragp_api.services.usage import calculate_cost, record_usage_event
 from ragp_api.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -48,6 +53,7 @@ class RagChunkOut(BaseModel):
 class RagUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
+    cost_usd: float = 0.0
 
 
 class RagTrace(BaseModel):
@@ -130,6 +136,8 @@ async def rag_query(
     # 2. Rate limiting (per key + per org)
     await check_rag_query_limits(redis, org.id, api_key.id, settings)
 
+    _request_start = time.monotonic()
+
     # 3. Load and verify dataset ownership
     ds_result = await db.execute(select(Dataset).where(Dataset.id == body.dataset_id))
     dataset = ds_result.scalar_one_or_none()
@@ -205,6 +213,32 @@ async def rag_query(
         if not raw_chunks and not answer:
             answer = "Не нашёл релевантных чанков для ответа."
 
+        # Determine model used by pipeline generator node
+        pipeline_model = next(
+            (
+                n.get("params", {}).get("model", default_model)
+                for n in pipeline_nodes
+                if n.get("plugin_kind") == "generator"
+            ),
+            default_model,
+        )
+        pipeline_cost = calculate_cost(pipeline_model, rag_prompt_tokens, rag_completion_tokens)
+        pipeline_latency_ms = int((time.monotonic() - _request_start) * 1000)
+
+        try:
+            await record_usage_event(
+                db,
+                org_id=org.id,
+                api_key_id=api_key.id,
+                pipeline_id=body.pipeline_id,
+                model=pipeline_model,
+                prompt_tokens=rag_prompt_tokens,
+                completion_tokens=rag_completion_tokens,
+                latency_ms=pipeline_latency_ms,
+            )
+        except Exception:
+            logger.warning("Usage recording failed (pipeline path)", exc_info=True)
+
         return RagQueryOut(
             answer=answer,
             chunks=[
@@ -220,6 +254,7 @@ async def rag_query(
             usage=RagUsage(
                 prompt_tokens=rag_prompt_tokens,
                 completion_tokens=rag_completion_tokens,
+                cost_usd=float(pipeline_cost),
             ),
             trace=RagTrace(
                 embedder="pipeline",
@@ -275,6 +310,25 @@ async def rag_query(
     trace_raw: dict[str, Any] = gen_result.get("trace", {})
     usage_raw: dict[str, Any] = trace_raw.get("usage", {})
 
+    default_prompt_tokens = int(usage_raw.get("prompt_tokens", 0))
+    default_completion_tokens = int(usage_raw.get("completion_tokens", 0))
+    default_cost = calculate_cost(default_model, default_prompt_tokens, default_completion_tokens)
+    default_latency_ms = int((time.monotonic() - _request_start) * 1000)
+
+    try:
+        await record_usage_event(
+            db,
+            org_id=org.id,
+            api_key_id=api_key.id,
+            pipeline_id=None,
+            model=default_model,
+            prompt_tokens=default_prompt_tokens,
+            completion_tokens=default_completion_tokens,
+            latency_ms=default_latency_ms,
+        )
+    except Exception:
+        logger.warning("Usage recording failed (default path)", exc_info=True)
+
     return RagQueryOut(
         answer=answer,
         chunks=[
@@ -288,8 +342,9 @@ async def rag_query(
             for c in raw_chunks
         ],
         usage=RagUsage(
-            prompt_tokens=int(usage_raw.get("prompt_tokens", 0)),
-            completion_tokens=int(usage_raw.get("completion_tokens", 0)),
+            prompt_tokens=default_prompt_tokens,
+            completion_tokens=default_completion_tokens,
+            cost_usd=float(default_cost),
         ),
         trace=RagTrace(
             embedder=embedder_name,

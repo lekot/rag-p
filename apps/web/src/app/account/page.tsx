@@ -173,6 +173,23 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
+      {/* Usage & Billing */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Usage &amp; Billing</CardTitle>
+          <Link href="/account/usage">
+            <Button size="sm" variant="outline">
+              Посмотреть расходы →
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Статистика потребления токенов, стоимость по моделям и запросам.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* API Keys */}
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
