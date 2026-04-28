@@ -57,6 +57,7 @@ async def record_usage_event(
     prompt_tokens: int,
     completion_tokens: int,
     latency_ms: int | None = None,
+    quota_reserved: bool = False,
 ) -> None:
     """Insert a UsageEvent row and increment the subscription quota counter.
 
@@ -91,18 +92,20 @@ async def record_usage_event(
         db.add(event)
         await db.flush()  # get event.id without committing yet
 
-        # Increment subscription quota counter
-        try:
-            await consume_q(db, org_id, count=1)
-        except NoActiveSubscriptionError:
-            # No subscription — still record usage, just skip quota tracking
-            pass
-        except Exception:
-            logger.warning(
-                "consume_q failed for org=%s; usage event still recorded",
-                org_id,
-                exc_info=True,
-            )
+        if not quota_reserved:
+            # Increment subscription quota counter for legacy call sites that
+            # did not reserve quota before doing work.
+            try:
+                await consume_q(db, org_id, count=1)
+            except NoActiveSubscriptionError:
+                # No subscription — still record usage, just skip quota tracking
+                pass
+            except Exception:
+                logger.warning(
+                    "consume_q failed for org=%s; usage event still recorded",
+                    org_id,
+                    exc_info=True,
+                )
 
         # Overage billing for Corp/Enterprise: if quota exceeded, charge balance
         if cost > Decimal("0"):

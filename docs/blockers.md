@@ -70,11 +70,11 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] Atomic Q reservation for live API usage
+## [RESOLVED-2026-04-28] Atomic Q reservation for live API usage
 
 - **Where**: `services/rate_limiter.py`, `services/usage.py`, `routes_rag.py`.
-- **Why blocked**: Сейчас preflight проверяет `q_used`, а списание Q выполняется после генерации в usage tracking. Это лучше прежнего wallet-only gate, но ещё не идеальный enterprise contract: при гонках и fail-open usage recording возможен перерасход сверх hard quota.
-- **Workaround applied**: Подписка и rate limit уже блокируют очевидные no-plan/quota-exceeded кейсы; для YooKassa/subscription lifecycle добавлена DB idempotency.
-- **Decision needed**: Ввести явный `reserve_q` до генерации после проверки dataset/pipeline ownership, а `record_usage_event` оставить только для audit/cost/overage settlement. Нужно одновременно обновить старые billing/rag tests с wallet-model на subscription-model.
+- **Fixed**: Live RAG теперь резервирует один Q атомарно до генерации через subscription row lock, после проверки dataset/pipeline ownership. Reservation коммитится до внешней работы, поэтому fail-open `record_usage_event` больше не превращает запрос в бесплатный.
+- **Contract**: `record_usage_event(..., quota_reserved=True)` пишет usage/cost/overage settlement без повторного списания Q. Если запрос падает до результата, reservation освобождается best-effort через `release_rag_query_quota`.
+- **Regression test**: добавлен сценарий, где `record_usage_event` падает, первый запрос всё равно списывает Q, а второй запрос на тарифе с `included_q=1` получает 402.
 
 <!-- ОТКРЫТЫЕ БЛОКЕРЫ ДОБАВЛЯЮТСЯ ВЫШЕ ЭТОЙ ЛИНИИ -->

@@ -21,6 +21,8 @@ from ragp_api.db.models import (
     Organization,
     OrgBalance,
     OrgMember,
+    OrgSubscription,
+    Plan,
     UsageDaily,
     UsageEvent,
     User,
@@ -413,3 +415,106 @@ async def test_rag_query_failure_does_not_block_response(
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["answer"] == "some answer"
+
+
+@pytest.mark.asyncio
+async def test_rag_query_usage_recording_failure_still_consumes_subscription_quota(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A usage-write failure must not turn a paid query into a free query."""
+    from ragp_api.db.models import Dataset as DatasetModel
+    from ragp_api.settings import settings as _settings
+
+    org_id, raw_key, _user_id = await _seed_org_with_api_key(db_session)
+    now = datetime.now(UTC)
+
+    plan = Plan(
+        id="quota-one",
+        name="Quota One",
+        price_rub_monthly=Decimal("100.00"),
+        included_q=1,
+        included_storage_bytes=1024 * 1024,
+        max_users=1,
+        rpm_per_key=60,
+        allow_overage=False,
+        is_active=True,
+        sort_order=1,
+    )
+    sub = OrgSubscription(
+        id=str(uuid.uuid4()),
+        org_id=org_id,
+        plan_id=plan.id,
+        status="active",
+        current_period_start=now - timedelta(days=1),
+        current_period_end=now + timedelta(days=29),
+        q_used=0,
+        storage_bytes_used=0,
+        auto_renew=False,
+        created_at=now,
+        updated_at=now,
+    )
+    dataset = DatasetModel(
+        id=str(uuid.uuid4()), organization_id=org_id, name="Quota DS", source="uploaded"
+    )
+    db_session.add_all([plan, sub, dataset])
+    await db_session.commit()
+
+    mock_chunks: list[dict[str, Any]] = [
+        {
+            "id": "c1",
+            "text": "answer text",
+            "score": 0.9,
+            "document_id": "doc1",
+            "document_name": "doc.txt",
+        }
+    ]
+    mock_retriever = AsyncMock()
+    mock_retriever.retrieve = AsyncMock(return_value=mock_chunks)
+    mock_generator = AsyncMock()
+    mock_generator.generate = AsyncMock(
+        return_value={
+            "answer": "some answer",
+            "trace": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},
+        }
+    )
+
+    old_enforce = _settings.enforce_subscription_quotas
+    _settings.enforce_subscription_quotas = True
+    try:
+        with (
+            patch(
+                "ragp_api.api.v1.routes_rag.get_plugin",
+                side_effect=lambda kind, name: (
+                    (lambda _params: mock_retriever)
+                    if kind == "retriever"
+                    else (lambda _params: mock_generator)
+                ),
+            ),
+            patch(
+                "ragp_api.api.v1.routes_rag._resolve_embedder",
+                new=AsyncMock(return_value=(None, "none")),
+            ),
+            patch(
+                "ragp_api.api.v1.routes_rag.record_usage_event",
+                new=AsyncMock(side_effect=Exception("usage insert failed")),
+            ),
+        ):
+            first = await client.post(
+                "/api/v1/rag/query",
+                headers={"Authorization": f"Bearer {raw_key}"},
+                json={"dataset_id": dataset.id, "query": "paid query"},
+            )
+            second = await client.post(
+                "/api/v1/rag/query",
+                headers={"Authorization": f"Bearer {raw_key}"},
+                json={"dataset_id": dataset.id, "query": "should hit quota"},
+            )
+    finally:
+        _settings.enforce_subscription_quotas = old_enforce
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 402, second.text
+
+    await db_session.refresh(sub)
+    assert sub.q_used == 1

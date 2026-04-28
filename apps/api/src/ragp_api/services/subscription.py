@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -42,6 +43,15 @@ class StorageQuotaExceededError(Exception):
         self.used = used
         self.limit = limit
         super().__init__(f"Storage quota exceeded: {used}/{limit}")
+
+
+@dataclass(frozen=True)
+class QuotaConsumption:
+    """Result of a successful query quota reservation."""
+
+    q_used: int
+    q_limit: int | None
+    overage: bool
 
 
 async def get_active_subscription(db: AsyncSession, org_id: str) -> OrgSubscription | None:
@@ -102,7 +112,7 @@ def _log_event(
     return ev
 
 
-async def consume_q(db: AsyncSession, org_id: str, count: int = 1) -> None:
+async def consume_q(db: AsyncSession, org_id: str, count: int = 1) -> QuotaConsumption:
     """Atomically increment q_used by *count*.
 
     Raises NoActiveSubscriptionError if no active subscription exists.
@@ -127,10 +137,35 @@ async def consume_q(db: AsyncSession, org_id: str, count: int = 1) -> None:
     plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
     plan = plan_result.scalar_one_or_none()
 
+    q_limit = plan.included_q if plan is not None else None
     if plan is not None and not plan.allow_overage and sub.q_used + count > plan.included_q:
         raise QuotaExceededError(q_used=sub.q_used, q_limit=plan.included_q)
 
     sub.q_used = sub.q_used + count
+    sub.updated_at = datetime.now(UTC)
+    await db.flush()
+    return QuotaConsumption(
+        q_used=sub.q_used,
+        q_limit=q_limit,
+        overage=bool(plan is not None and plan.allow_overage and sub.q_used > plan.included_q),
+    )
+
+
+async def release_q(db: AsyncSession, org_id: str, count: int = 1) -> None:
+    """Release a previously reserved query quota slot.
+
+    This is used when a RAG request reserved quota but failed before producing
+    a billable answer. It is best-effort and never raises if the subscription
+    row disappeared.
+    """
+    result = await db.execute(
+        select(OrgSubscription).where(OrgSubscription.org_id == org_id).with_for_update()
+    )
+    sub = result.scalar_one_or_none()
+    if sub is None:
+        return
+
+    sub.q_used = max(0, sub.q_used - count)
     sub.updated_at = datetime.now(UTC)
     await db.flush()
 

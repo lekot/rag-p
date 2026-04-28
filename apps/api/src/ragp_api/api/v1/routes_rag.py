@@ -22,7 +22,11 @@ from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.pipeline_runner import run_pipeline
-from ragp_api.services.rate_limiter import check_rag_query_limits
+from ragp_api.services.rate_limiter import (
+    QueryQuotaReservation,
+    check_rag_query_limits,
+    release_rag_query_quota,
+)
 from ragp_api.services.usage import calculate_cost, record_usage_event
 from ragp_api.settings import settings
 
@@ -85,6 +89,18 @@ def _build_default_trace(model: str) -> RagTrace:
     )
 
 
+async def _check_limits_and_commit_quota(
+    redis: Any,
+    db: AsyncSession,
+    org_id: str,
+    api_key_id: str,
+) -> QueryQuotaReservation:
+    reservation = await check_rag_query_limits(redis, org_id, api_key_id, settings, db)
+    if reservation.reserved:
+        await db.commit()
+    return reservation
+
+
 async def _resolve_embedder() -> tuple[Embedder | None, str]:
     """Return (embedder, embedder_name) using environment priority."""
     ollama_host = os.environ.get("OLLAMA_HOST", "")
@@ -135,12 +151,9 @@ async def rag_query(
         raise HTTPException(status_code=401, detail="Valid API key required")
     org, api_key = auth
 
-    # 2. Rate limiting (per key + per org) + balance pre-flight
-    await check_rag_query_limits(redis, org.id, api_key.id, settings, db)
-
     _request_start = time.monotonic()
 
-    # 3. Load and verify dataset ownership
+    # 2. Load and verify dataset ownership before consuming paid query quota.
     ds_result = await db.execute(select(Dataset).where(Dataset.id == body.dataset_id))
     dataset = ds_result.scalar_one_or_none()
     if dataset is None or dataset.organization_id != org.id:
@@ -169,29 +182,37 @@ async def rag_query(
             raise HTTPException(status_code=422, detail="Pipeline version not found")
 
         pipeline_nodes: list[dict[str, Any]] = ver.nodes_json
+        quota_reservation = await _check_limits_and_commit_quota(redis, db, org.id, api_key.id)
+        query_completed = False
 
-        # Inject session + context into retriever nodes
-        enriched: list[dict[str, Any]] = []
-        for node in pipeline_nodes:
-            n = dict(node)
-            if n.get("plugin_kind") == "retriever":
-                params = dict(n.get("params", {}))
-                params["session"] = db
-                params["organization_id"] = org.id
-                params["dataset_id"] = body.dataset_id
-                params.setdefault("top_k", body.top_k)
-                n["params"] = params
-            enriched.append(n)
+        try:
+            # Inject session + context into retriever nodes
+            enriched: list[dict[str, Any]] = []
+            for node in pipeline_nodes:
+                n = dict(node)
+                if n.get("plugin_kind") == "retriever":
+                    params = dict(n.get("params", {}))
+                    params["session"] = db
+                    params["organization_id"] = org.id
+                    params["dataset_id"] = body.dataset_id
+                    params.setdefault("top_k", body.top_k)
+                    n["params"] = params
+                enriched.append(n)
 
-        started_at = datetime.now(tz=UTC)
-        result = await run_pipeline(enriched, body.query, db)
-        finished_at = datetime.now(tz=UTC)
+            started_at = datetime.now(tz=UTC)
+            result = await run_pipeline(enriched, body.query, db)
+            query_completed = True
+            finished_at = datetime.now(tz=UTC)
 
-        raw_chunks: list[dict[str, Any]] = result.get("contexts", [])
-        answer: str = result.get("answer", "")
-        rag_usage_dict: dict[str, Any] = result.get("usage", {})
-        rag_prompt_tokens = int(rag_usage_dict.get("prompt_tokens", 0))
-        rag_completion_tokens = int(rag_usage_dict.get("completion_tokens", 0))
+            raw_chunks: list[dict[str, Any]] = result.get("contexts", [])
+            answer: str = result.get("answer", "")
+            rag_usage_dict: dict[str, Any] = result.get("usage", {})
+            rag_prompt_tokens = int(rag_usage_dict.get("prompt_tokens", 0))
+            rag_completion_tokens = int(rag_usage_dict.get("completion_tokens", 0))
+        except Exception:
+            if not query_completed:
+                await release_rag_query_quota(db, quota_reservation)
+            raise
 
         # Persist Run record
         run_record = Run(
@@ -249,6 +270,7 @@ async def rag_query(
                 prompt_tokens=rag_prompt_tokens,
                 completion_tokens=rag_completion_tokens,
                 latency_ms=pipeline_latency_ms,
+                quota_reserved=quota_reservation.reserved,
             )
         except Exception:
             logger.warning("Usage recording failed (pipeline path)", exc_info=True)
@@ -279,46 +301,83 @@ async def rag_query(
         )
 
     # 4. Default path: embed -> retrieve -> generate
-    embedder, embedder_name = await _resolve_embedder()
+    quota_reservation = await _check_limits_and_commit_quota(redis, db, org.id, api_key.id)
+    query_completed = False
+    try:
+        embedder, embedder_name = await _resolve_embedder()
 
-    query_vec: list[float] | None = None
-    if embedder is not None:
-        try:
-            vecs = await embedder.embed([body.query])
-            query_vec = vecs[0]
-        except Exception:
-            pass
+        query_vec: list[float] | None = None
+        if embedder is not None:
+            try:
+                vecs = await embedder.embed([body.query])
+                query_vec = vecs[0]
+            except Exception:
+                pass
 
-    retriever_cls = get_plugin("retriever", "pgvector-hybrid")
-    if retriever_cls is None:
-        raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
+        retriever_cls = get_plugin("retriever", "pgvector-hybrid")
+        if retriever_cls is None:
+            raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
 
-    retriever = cast(Retriever, retriever_cls({"session": db}))
-    raw_chunks = await retriever.retrieve(
-        query=body.query,
-        top_k=body.top_k,
-        organization_id=org.id,
-        dataset_id=body.dataset_id,
-        query_vec=query_vec,
-    )
-
-    if not raw_chunks:
-        return RagQueryOut(
-            answer="Не нашёл релевантных чанков для ответа.",
-            chunks=[],
-            usage=RagUsage(prompt_tokens=0, completion_tokens=0),
-            trace=_build_default_trace(default_model),
+        retriever = cast(Retriever, retriever_cls({"session": db}))
+        raw_chunks = await retriever.retrieve(
+            query=body.query,
+            top_k=body.top_k,
+            organization_id=org.id,
+            dataset_id=body.dataset_id,
+            query_vec=query_vec,
         )
 
-    generator_cls = get_plugin("generator", "litellm-generator")
-    if generator_cls is None:
-        raise HTTPException(status_code=500, detail="litellm-generator not available")
+        if not raw_chunks:
+            query_completed = True
+            empty_latency_ms = int((time.monotonic() - _request_start) * 1000)
+            try:
+                await record_usage_event(
+                    db,
+                    org_id=org.id,
+                    api_key_id=api_key.id,
+                    pipeline_id=None,
+                    model=default_model,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    latency_ms=empty_latency_ms,
+                    quota_reserved=quota_reservation.reserved,
+                )
+            except Exception:
+                logger.warning("Usage recording failed (empty default path)", exc_info=True)
 
-    generator = cast(
-        Generator,
-        generator_cls({"model": default_model, "temperature": 0.0, "max_tokens": 1024}),
-    )
-    gen_result = await generator.generate(body.query, contexts=raw_chunks)
+            await log_audit_event(
+                db,
+                org_id=org.id,
+                user_id=api_key.user_id,
+                event_type="rag.query",
+                resource_type="api_key",
+                resource_id=api_key.id,
+                metadata={"pipeline_id": None},
+                request=request,
+            )
+            await db.commit()
+
+            return RagQueryOut(
+                answer="Не нашёл релевантных чанков для ответа.",
+                chunks=[],
+                usage=RagUsage(prompt_tokens=0, completion_tokens=0),
+                trace=_build_default_trace(default_model),
+            )
+
+        generator_cls = get_plugin("generator", "litellm-generator")
+        if generator_cls is None:
+            raise HTTPException(status_code=500, detail="litellm-generator not available")
+
+        generator = cast(
+            Generator,
+            generator_cls({"model": default_model, "temperature": 0.0, "max_tokens": 1024}),
+        )
+        gen_result = await generator.generate(body.query, contexts=raw_chunks)
+        query_completed = True
+    except Exception:
+        if not query_completed:
+            await release_rag_query_quota(db, quota_reservation)
+        raise
 
     answer = gen_result.get("answer", "")
     trace_raw: dict[str, Any] = gen_result.get("trace", {})
@@ -339,6 +398,7 @@ async def rag_query(
             prompt_tokens=default_prompt_tokens,
             completion_tokens=default_completion_tokens,
             latency_ms=default_latency_ms,
+            quota_reserved=quota_reservation.reserved,
         )
     except Exception:
         logger.warning("Usage recording failed (default path)", exc_info=True)

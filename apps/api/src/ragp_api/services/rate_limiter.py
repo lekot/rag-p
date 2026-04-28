@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
@@ -29,6 +30,14 @@ from ragp_api.settings import Settings
 logger = logging.getLogger(__name__)
 
 _WINDOW_SECONDS = 60
+
+
+@dataclass(frozen=True)
+class QueryQuotaReservation:
+    """Query quota reservation created before expensive RAG work starts."""
+
+    org_id: str
+    reserved: bool = False
 
 
 async def check(
@@ -80,16 +89,19 @@ async def check_rag_query_limits(
     api_key_id: str,
     settings: Settings,
     db: AsyncSession | None = None,
-) -> None:
+) -> QueryQuotaReservation:
     """Check subscription quota, per-key and per-org rate limits.
 
     Raises HTTPException(402) if there is no active subscription or the
     query quota is exhausted (for plans without overage).
     Raises HTTPException(429) if either rate limit is exceeded.
-    Fails open if Redis raises any connection error.
+    Fails open only if Redis raises any connection error.
     db is optional for backward-compat; quota check is skipped if None.
     """
-    # --- Subscription / quota pre-flight check ---
+    reservation = QueryQuotaReservation(org_id=org_id, reserved=False)
+    rpm_limit = settings.rate_limit_per_key_rpm
+
+    # --- Subscription pre-flight for active plan and dynamic RPM ---
     if db is not None and settings.enforce_subscription_quotas:
         from sqlalchemy import select
 
@@ -110,39 +122,26 @@ async def check_rag_query_limits(
             plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
             plan = plan_result.scalar_one_or_none()
 
-            if plan is not None and sub.q_used >= plan.included_q and not plan.allow_overage:
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "code": "quota_exceeded",
-                        "q_used": sub.q_used,
-                        "q_limit": plan.included_q,
-                        "message": (
-                            "Лимит запросов на тариф исчерпан. "
-                            "Дождитесь конца периода или перейдите на старший план."
-                        ),
-                    },
-                )
-                # Corp/Enterprise: allow overage — overage billing happens in record_usage_event
-
             # Dynamic RPM from plan (0 = unlimited)
             if plan is not None and plan.rpm_per_key > 0:
                 rpm_limit = plan.rpm_per_key
-            else:
-                rpm_limit = settings.rate_limit_per_key_rpm
 
         except HTTPException:
             raise
         except Exception as exc:
-            logger.warning(
-                "Subscription check failed for org=%s (%s: %s) — failing open",
+            logger.exception(
+                "Subscription check failed for org=%s (%s: %s)",
                 org_id,
                 type(exc).__name__,
                 exc,
             )
-            rpm_limit = settings.rate_limit_per_key_rpm
-    else:
-        rpm_limit = settings.rate_limit_per_key_rpm
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "quota_check_unavailable",
+                    "message": "Не удалось проверить квоту тарифа. Повторите запрос позже.",
+                },
+            ) from exc
 
     # --- Rate limiting ---
     try:
@@ -192,3 +191,75 @@ async def check_rag_query_limits(
             type(exc).__name__,
             exc,
         )
+
+    # --- Subscription quota reservation ---
+    if db is not None and settings.enforce_subscription_quotas:
+        from ragp_api.services.subscription import (
+            NoActiveSubscriptionError,
+            QuotaExceededError,
+            consume_q,
+        )
+
+        try:
+            await consume_q(db, org_id, count=1)
+            reservation = QueryQuotaReservation(org_id=org_id, reserved=True)
+        except NoActiveSubscriptionError as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "no_active_plan",
+                    "message": "Активной подписки нет. Купите план на /pricing",
+                },
+            ) from exc
+        except QuotaExceededError as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "quota_exceeded",
+                    "q_used": exc.q_used,
+                    "q_limit": exc.q_limit,
+                    "message": (
+                        "Лимит запросов на тариф исчерпан. "
+                        "Дождитесь конца периода или перейдите на старший план."
+                    ),
+                },
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "Subscription quota reservation failed for org=%s (%s: %s)",
+                org_id,
+                type(exc).__name__,
+                exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "quota_reservation_unavailable",
+                    "message": "Не удалось зарезервировать квоту тарифа. Повторите запрос позже.",
+                },
+            ) from exc
+
+    return reservation
+
+
+async def release_rag_query_quota(
+    db: AsyncSession,
+    reservation: QueryQuotaReservation,
+) -> None:
+    """Best-effort release for a reserved query that failed before completion."""
+    if not reservation.reserved:
+        return
+
+    from ragp_api.services.subscription import release_q
+
+    try:
+        await db.rollback()
+        await release_q(db, reservation.org_id, count=1)
+        await db.commit()
+    except Exception:
+        logger.warning(
+            "Failed to release query quota reservation for org=%s",
+            reservation.org_id,
+            exc_info=True,
+        )
+        await db.rollback()
