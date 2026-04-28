@@ -10,23 +10,12 @@ interface Plan {
 
 const PLANS: Plan[] = [
   {
-    name: "Free",
-    price: "0 ₽",
-    tagline: "Для проб и интеграций",
-    features: [
-      "$1 стартовый кредит",
-      "1 пользователь, 1 организация",
-      "До исчерпания кредита",
-      "60 запросов/мин",
-    ],
-  },
-  {
     name: "Personal",
     price: "100 ₽/мес",
-    tagline: "Личное использование",
+    tagline: "Аккаунт «попробовать»",
     features: [
       "≈ 1 000 RAG-запросов",
-      "500 МБ хранения",
+      "100 МБ хранения",
       "1 пользователь",
       "60 запросов/мин",
       "Email-поддержка",
@@ -39,7 +28,7 @@ const PLANS: Plan[] = [
     highlight: true,
     features: [
       "≈ 20 000 RAG-запросов",
-      "5 ГБ хранения",
+      "2 ГБ хранения",
       "До 5 пользователей",
       "300 запросов/мин",
       "Дашборд usage и cost-breakdown",
@@ -52,7 +41,7 @@ const PLANS: Plan[] = [
     tagline: "Компания до 25 человек",
     features: [
       "≈ 70 000 RAG-запросов",
-      "20 ГБ хранения",
+      "8 ГБ хранения",
       "До 25 пользователей",
       "1 000 запросов/мин",
       "Audit log и роли",
@@ -61,11 +50,11 @@ const PLANS: Plan[] = [
   },
   {
     name: "Enterprise",
-    price: "от 50 000 ₽/мес",
+    price: "60 000 ₽/мес",
     tagline: "Большие команды и SLA",
     features: [
-      "От 700 000 RAG-запросов",
-      "От 200 ГБ хранения",
+      "≈ 1 000 000 RAG-запросов",
+      "100 ГБ хранения",
       "Без лимита по пользователям",
       "Без лимита rpm",
       "SLA 99,9%",
@@ -81,12 +70,12 @@ export default function PricingPage() {
       <header className="text-center space-y-2">
         <h1 className="text-3xl font-bold">Тарифы</h1>
         <p className="text-sm text-muted-foreground">
-          Выберите план под объём задач. На пилотной стадии можно начать с Free и пополнять баланс по мере использования —
-          списание идёт по факту потребления токенов.
+          Выберите план под объём задач. Минимальный — Personal за 100 ₽: достаточно, чтобы попробовать платформу
+          на ~1 000 запросов. Бесплатного триала нет — это позволяет держать честные тарифы и не дотировать сервис из маржи платных клиентов.
         </p>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {PLANS.map((plan) => (
           <Card
             key={plan.name}

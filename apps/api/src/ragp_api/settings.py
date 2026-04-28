@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     default_llm_model: str = "openai/gpt-4o-mini"
     default_embedding_model: str = "openai/text-embedding-3-small"
 
-    # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD)
-    starting_balance_usd: Decimal = Decimal("1.00")
+    # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD).
+    # Default 0: every new account must top up via /pricing → ЮKassa to use anything.
+    starting_balance_usd: Decimal = Decimal("0")
 
     # YooKassa payment gateway
     yookassa_shop_id: str = ""  # RAGP_YOOKASSA_SHOP_ID
