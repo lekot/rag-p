@@ -209,18 +209,18 @@ async def test_deduct_balance_insufficient_raises(
 
 
 @pytest.mark.asyncio
-async def test_signup_creates_balance_with_starting_credit(
+async def test_signup_does_not_create_starting_credit_when_disabled(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    """Signup should create org_balances row and starting_credit tx."""
+    """With RAGP_STARTING_BALANCE_USD=0 (default), signup must not create
+    an org_balances row nor a starting_credit transaction."""
     data = await _signup(client, "new-user-billing@example.com", org_name="BillingStartOrg")
     org_id = data["organization"]["id"]
 
     result = await db_session.execute(select(OrgBalance).where(OrgBalance.org_id == org_id))
     balance_row = result.scalar_one_or_none()
-    assert balance_row is not None
-    assert Decimal(str(balance_row.balance_usd)) > Decimal("0")
+    assert balance_row is None
 
     tx_result = await db_session.execute(
         select(BillingTransaction).where(
@@ -229,8 +229,7 @@ async def test_signup_creates_balance_with_starting_credit(
         )
     )
     txs = tx_result.scalars().all()
-    assert len(txs) == 1
-    assert txs[0].note == "Welcome bonus"
+    assert len(txs) == 0
 
 
 # ---------------------------------------------------------------------------
