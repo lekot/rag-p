@@ -173,6 +173,21 @@ jobs:
             --set web.image.tag=${{ needs.build-web.outputs.tag }} \
             --cleanup-on-fail
 
+      - name: Install/upgrade runtime release
+        run: |
+          set -e
+          for resource in deployment/rag-p-ollama service/rag-p-ollama persistentvolumeclaim/rag-p-ollama-models; do
+            owner=$(kubectl -n rag-p get "$resource" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)
+            if [ "$owner" = "rag-p" ]; then
+              echo "Deleting app-owned runtime resource $resource before handing it to rag-p-runtime"
+              kubectl -n rag-p delete "$resource" --ignore-not-found=true
+              kubectl -n rag-p wait --for=delete "$resource" --timeout=180s
+            fi
+          done
+          helm upgrade --install rag-p-runtime ./charts/rag-p-runtime \
+            -n rag-p \
+            -f charts/rag-p-runtime/values.staging.yaml
+
       - name: Wait for rollouts
         run: |
           kubectl -n rag-p rollout status deploy/rag-p-api --timeout=180s

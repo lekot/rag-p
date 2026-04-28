@@ -77,4 +77,13 @@
 - **Contract**: `record_usage_event(..., quota_reserved=True)` пишет usage/cost/overage settlement без повторного списания Q. Если запрос падает до результата, reservation освобождается best-effort через `release_rag_query_quota`.
 - **Regression test**: добавлен сценарий, где `record_usage_event` падает, первый запрос всё равно списывает Q, а второй запрос на тарифе с `included_q=1` получает 402.
 
+---
+
+## [RESOLVED-2026-04-28] Ollama runtime отделён от app release
+
+- **Where**: `charts/rag-p`, `charts/rag-p-runtime`, `.github/workflows/deploy-staging.yml`.
+- **Fixed**: app chart больше не рендерит Ollama PVC/Deployment/Service на staging (`ollama.managed=false`), но продолжает пробрасывать `OLLAMA_HOST`.
+- **Contract**: Ollama живёт в отдельном Helm release `rag-p-runtime` с тем же service name `rag-p-ollama`, чтобы API/worker не меняли DNS. CD делает одноразовую миграцию только для ресурсов, которые ещё помечены как owned by `rag-p`, затем управляет runtime отдельным release.
+- **Operational note**: модельный PVC/cache считается noncritical runtime state; при первой миграции возможен повторный pull модели.
+
 <!-- ОТКРЫТЫЕ БЛОКЕРЫ ДОБАВЛЯЮТСЯ ВЫШЕ ЭТОЙ ЛИНИИ -->

@@ -1,0 +1,19 @@
+global:
+  storageClass: ""
+
+ollama:
+  enabled: true
+  name: rag-p-ollama
+  pvcName: rag-p-ollama-models
+  image: ollama/ollama:0.4.7
+  model: bge-m3
+  storage:
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi

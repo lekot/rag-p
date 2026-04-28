@@ -1,12 +1,12 @@
-{{- if and .Values.ollama.enabled .Values.ollama.managed }}
+{{- if .Values.ollama.enabled }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "rag-p.fullname" . }}-ollama-models
+  name: {{ .Values.ollama.pvcName }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "rag-p.componentLabels" (dict "root" . "component" "ollama") | nindent 4 }}
+    {{- include "rag-p-runtime.ollamaLabels" . | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
@@ -19,21 +19,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "rag-p.fullname" . }}-ollama
+  name: {{ .Values.ollama.name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "rag-p.componentLabels" (dict "root" . "component" "ollama") | nindent 4 }}
+    {{- include "rag-p-runtime.ollamaLabels" . | nindent 4 }}
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "rag-p.componentSelectorLabels" (dict "root" . "component" "ollama") | nindent 6 }}
+      {{- include "rag-p-runtime.ollamaSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "rag-p.componentLabels" (dict "root" . "component" "ollama") | nindent 8 }}
+        {{- include "rag-p-runtime.ollamaLabels" . | nindent 8 }}
     spec:
       initContainers:
         - name: pull-model
@@ -106,15 +106,15 @@ spec:
       volumes:
         - name: models
           persistentVolumeClaim:
-            claimName: {{ include "rag-p.fullname" . }}-ollama-models
+            claimName: {{ .Values.ollama.pvcName }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "rag-p.fullname" . }}-ollama
+  name: {{ .Values.ollama.name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "rag-p.componentLabels" (dict "root" . "component" "ollama") | nindent 4 }}
+    {{- include "rag-p-runtime.ollamaLabels" . | nindent 4 }}
 spec:
   type: ClusterIP
   ports:
@@ -122,5 +122,5 @@ spec:
       port: 11434
       targetPort: http
   selector:
-    {{- include "rag-p.componentSelectorLabels" (dict "root" . "component" "ollama") | nindent 4 }}
+    {{- include "rag-p-runtime.ollamaSelectorLabels" . | nindent 4 }}
 {{- end }}

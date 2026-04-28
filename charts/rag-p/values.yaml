@@ -222,6 +222,10 @@ yookassaSecretName: "yookassa-credentials"
 # Self-hosted embedding service. Pulls model on first start and caches in PVC.
 ollama:
   enabled: false
+  # managed=false means the app chart only injects OLLAMA_HOST and does not
+  # create or mutate Ollama runtime resources. Use a separate runtime release.
+  managed: true
+  host: ""
   image: ollama/ollama:0.4.7
   model: bge-m3
   storage:

@@ -58,7 +58,7 @@ spec:
               value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "rag-p.fullname" . }}-postgres-rw:5432/{{ .Values.postgres.cnpg.databaseName }}"
             {{- if .Values.ollama.enabled }}
             - name: OLLAMA_HOST
-              value: "http://{{ include "rag-p.fullname" . }}-ollama:11434"
+              value: {{ .Values.ollama.host | default (printf "http://%s-ollama:11434" (include "rag-p.fullname" .)) | quote }}
             {{- end }}
             {{- end }}
             {{- if .Values.redis.enabled }}
