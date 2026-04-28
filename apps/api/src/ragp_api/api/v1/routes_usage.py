@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import OrgRole, UsageDaily, UsageEvent, User
@@ -27,13 +28,12 @@ async def get_usage_summary(
     """Usage summary by day and model (requires member+)."""
     await require_role(db, current_user.id, org_id, OrgRole.member)
 
-    # SQLite-compatible: cast day to text for comparison
-    # For Postgres the date arithmetic works natively; for SQLite we use a workaround
+    cutoff = date.today() - timedelta(days=days)
     result = await db.execute(
         select(UsageDaily)
         .where(
             UsageDaily.org_id == org_id,
-            UsageDaily.day >= func.date(func.now(), f"-{days} days"),
+            UsageDaily.day >= cutoff,
         )
         .order_by(UsageDaily.day.desc(), UsageDaily.model)
     )
