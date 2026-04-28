@@ -14,7 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import BillingTransaction, OrgRole, Plan, SubscriptionEvent, User
+from ragp_api.db.models import (
+    BillingTransaction,
+    OrgRole,
+    OrgSubscription,
+    Plan,
+    SubscriptionEvent,
+    User,
+)
 from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
@@ -267,6 +274,22 @@ async def subscription_checkout(
     plan = plan_result.scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Plan '{body.plan_id}' not found")
+
+    sub_result = await db.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    sub = sub_result.scalar_one_or_none()
+    if sub is not None and sub.storage_bytes_used > plan.included_storage_bytes:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "storage_quota_exceeds_plan",
+                "storage_used": sub.storage_bytes_used,
+                "storage_limit": plan.included_storage_bytes,
+                "message": (
+                    "Текущий объём документов больше лимита выбранного тарифа. "
+                    "Удалите часть датасетов или выберите старший тариф."
+                ),
+            },
+        )
 
     payment_id, confirmation_url, amount_rub = await create_payment_rub(
         org_id=UUID(org_id),

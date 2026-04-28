@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     BillingTransaction,
+    OrgSubscription,
+    Plan,
 )
 from ragp_api.services.fx import get_usd_to_rub_rate
 
@@ -213,6 +216,58 @@ async def test_create_checkout_validates_amount_range(
             json={"amount_usd": "2000.00"},
         )
         assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_subscription_checkout_rejects_plan_below_used_storage(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    data = await _signup_and_login(
+        client, email="subscription-storage@example.com", org_name="subscription-storage-org"
+    )
+    org_id = data.get("organization_id") or data.get("organization", {}).get("id", "")
+    now = datetime.now(UTC)
+    db_session.add(
+        Plan(
+            id="tiny-storage",
+            name="Tiny Storage",
+            price_rub_monthly=Decimal("100"),
+            included_q=1000,
+            included_storage_bytes=100,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    db_session.add(
+        OrgSubscription(
+            id=str(uuid.uuid4()),
+            org_id=org_id,
+            plan_id="tiny-storage",
+            status="active",
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            q_used=0,
+            storage_bytes_used=200,
+            auto_renew=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
+
+    with patch("ragp_api.api.v1.routes_billing.create_payment_rub") as mock_cp:
+        resp = await client.post(
+            f"/api/v1/orgs/{org_id}/subscription/checkout",
+            json={"plan_id": "tiny-storage"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "storage_quota_exceeds_plan"
+    mock_cp.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
