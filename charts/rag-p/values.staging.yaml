@@ -112,12 +112,6 @@ minio:
 litellm:
   enabled: false
 
-vault:
-  enabled: false  # set to true after manual init/unseal — see docs/vault-eso-setup.md
-
-externalSecrets:
-  enabled: false
-
 networkPolicy:
   enabled: false
 

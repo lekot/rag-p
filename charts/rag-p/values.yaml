@@ -203,46 +203,6 @@ litellm:
   env:
     LITELLM_MASTER_KEY: "changeme"
 
-# HashiCorp Vault (deployed as sub-chart; disabled by default)
-# Initial unseal + auth configuration is a manual one-time procedure — see docs/vault-eso-setup.md
-vault:
-  enabled: false
-  server:
-    dev:
-      enabled: false
-    standalone:
-      enabled: true
-      config: |
-        ui = true
-        listener "tcp" {
-          tls_disable = 1
-          address = "[::]:8200"
-          cluster_address = "[::]:8201"
-        }
-        storage "file" {
-          path = "/vault/data"
-        }
-    dataStorage:
-      enabled: true
-      size: 5Gi
-      storageClass: fast.ru-3b
-  injector:
-    enabled: false  # ESO is preferred over sidecar-injector for this use-case
-  # ExternalSecret resources are created per-secret when vault.enabled=true and the flag below is true.
-  # Each flag is independent — enables gradual migration from manual kubectl secrets.
-  externalSecrets:
-    llmKeys: false   # creates ExternalSecret for llmKeysSecret (rag-p/llm)
-    s3: false        # creates ExternalSecret for cnpg-s3-credentials (rag-p/s3)
-    session: false   # creates ExternalSecret for api-secrets sessionSecret (rag-p/session)
-
-# External Secrets Operator integration (cluster-wide operator required)
-externalSecrets:
-  enabled: false
-  refreshInterval: "1h"
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
-
 # NetworkPolicy (default deny + per-service allow)
 networkPolicy:
   enabled: false
