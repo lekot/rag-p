@@ -16,7 +16,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Membership, OrgMember, Organization, User
+from ragp_api.db.models import ApiKey, Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.services.sessions import COOKIE_NAME as _COOKIE_NAME
 from ragp_api.services.sessions import read_session_cookie
