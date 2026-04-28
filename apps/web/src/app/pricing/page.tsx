@@ -28,19 +28,20 @@ export default function PricingPage() {
             <tbody>
               <tr className="border-b">
                 <td className="py-2">Input (вопрос + контекст из RAG)</td>
-                <td className="text-right py-2 font-mono">0,02 ₽</td>
-                <td className="text-right py-2 font-mono">20 ₽</td>
+                <td className="text-right py-2 font-mono">0,022 ₽</td>
+                <td className="text-right py-2 font-mono">22 ₽</td>
               </tr>
               <tr>
                 <td className="py-2">Output (ответ модели)</td>
-                <td className="text-right py-2 font-mono">0,05 ₽</td>
-                <td className="text-right py-2 font-mono">50 ₽</td>
+                <td className="text-right py-2 font-mono">0,055 ₽</td>
+                <td className="text-right py-2 font-mono">55 ₽</td>
               </tr>
             </tbody>
           </table>
           <p className="text-xs text-muted-foreground">
-            Цены включают комиссии платёжного шлюза, налог самозанятого и операционную маржу.
-            Типичный RAG-запрос имеет соотношение input:output примерно 2:1 — это даёт смешанный тариф ~30&nbsp;₽ за 1&nbsp;млн токенов.
+            В цену уже включены: оптовая стоимость DeepSeek, 6%&nbsp;VAT при покупке валюты, 6%&nbsp;НПД самозанятого,
+            3,5%&nbsp;комиссия ЮKassa и операционная маржа. Типичный RAG-запрос имеет соотношение input:output ≈ 2:1 — это даёт смешанный тариф ~33&nbsp;₽ за 1&nbsp;млн токенов
+            (порог окупаемости ≈ 21&nbsp;₽).
           </p>
         </CardContent>
       </Card>
@@ -51,15 +52,15 @@ export default function PricingPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="font-mono bg-muted p-3 rounded text-xs">
-            Q_cost = input_tokens × 0,02 ₽ / 1K&nbsp;&nbsp;+&nbsp;&nbsp;output_tokens × 0,05 ₽ / 1K
+            Q_cost = input_tokens × 0,022 ₽ / 1K&nbsp;&nbsp;+&nbsp;&nbsp;output_tokens × 0,055 ₽ / 1K
           </p>
           <p>Чем больше контекста модель прочитала и чем длиннее ответ — тем дороже запрос. Сам поиск (retrieval, rerank) на пилотной стадии не тарифицируется.</p>
           <div>
             <p className="text-muted-foreground mb-1">Примеры:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>300 input + 100 output ≈ <strong>0,011 ₽</strong> (~$0.00012)</li>
-              <li>1500 input + 400 output ≈ <strong>0,050 ₽</strong> (~$0.00053)</li>
-              <li>4000 input + 800 output ≈ <strong>0,12 ₽</strong> (~$0.00126)</li>
+              <li>300 input + 100 output ≈ <strong>0,012 ₽</strong></li>
+              <li>1500 input + 400 output ≈ <strong>0,055 ₽</strong></li>
+              <li>4000 input + 800 output ≈ <strong>0,13 ₽</strong></li>
             </ul>
           </div>
         </CardContent>
@@ -79,11 +80,11 @@ export default function PricingPage() {
             Эксперимент — это batch-прогон вопросов через несколько конфигураций pipeline и метрик. Стоимость складывается из всех Q-запросов, которые он порождает. Перед запуском UI показывает preflight estimate — сколько units и примерную сумму.
           </p>
           <div>
-            <p className="text-muted-foreground mb-1">Примеры (средняя Q ≈ 0,05 ₽):</p>
+            <p className="text-muted-foreground mb-1">Примеры (средняя Q ≈ 0,055 ₽):</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>20 вопросов × 3 варианта × 1 метрика = 60 units ≈ <strong>3 ₽</strong></li>
-              <li>100 × 12 × 4 = 4 800 units ≈ <strong>240 ₽</strong></li>
-              <li>500 × 40 × 4 = 80 000 units ≈ <strong>4 000 ₽</strong></li>
+              <li>20 вопросов × 3 варианта × 1 метрика = 60 units ≈ <strong>3,3 ₽</strong></li>
+              <li>100 × 12 × 4 = 4 800 units ≈ <strong>265 ₽</strong></li>
+              <li>500 × 40 × 4 = 80 000 units ≈ <strong>4 400 ₽</strong></li>
             </ul>
           </div>
         </CardContent>
@@ -107,10 +108,15 @@ export default function PricingPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="font-mono bg-muted p-3 rounded text-xs">
-            storage_cost = max(0, GB − 0,1) × 2 ₽ / GB / месяц
+            storage_cost = max(0, GB − 0,1) × 60 ₽ / GB / месяц
           </p>
-          <p>Первые 100 МБ на организацию — бесплатно. Дальше — 2 ₽ за 1 ГБ в месяц (≈ цена Selectel S3 + операционная маржа).</p>
-          <p className="text-xs text-muted-foreground">На пилотной стадии тариф не взимается. Тариф введён в прайс, чтобы система не использовалась как облачный бэкап без RAG-нагрузки.</p>
+          <p>
+            Первые 100&nbsp;МБ на организацию — бесплатно. Дальше — 60&nbsp;₽ за 1&nbsp;ГБ в месяц.
+            Закладка: Selectel SSD (быстрый) ≈ 41,6&nbsp;₽/GB c учётом VAT, плюс 6%&nbsp;НПД, плюс 3,5%&nbsp;ЮKassa, плюс маржа.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            На пилотной стадии тариф не списывается, но он есть в прайсе явно — чтобы система не использовалась как облачный бэкап без RAG-нагрузки.
+          </p>
         </CardContent>
       </Card>
 

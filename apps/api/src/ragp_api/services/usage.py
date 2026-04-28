@@ -22,18 +22,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 #
-# Client-facing prices (USD per 1 000 tokens) — already include:
-#   - DeepSeek wholesale cost (cache-miss): input $0.14/1M, output $0.28/1M
+# Client-facing prices (USD per 1 000 tokens) already include:
+#   - DeepSeek wholesale cost-miss: input $0.14/1M, output $0.28/1M
 #   - 6% VAT on the upstream payment
-#   - 6% NPD tax on incoming revenue (effective gross-up 1/0.94 ≈ 1.064)
-#   - margin to cover compute, storage, idle and ops
+#   - 6% NPD tax on incoming revenue (1/0.94 ≈ 1.064)
+#   - 3.5% YooKassa acquiring fee (1/0.965 ≈ 1.036)
+#   - ~50% margin for compute, storage, idle, ops, free starting credit
 #
-# Equivalent in RUB at $1 ≈ ₽95:  ₽20/1M input  /  ₽50/1M output  ≈  ₽30/1M for a 2:1 mix.
-# When the wholesale list price changes, update wholesale_*_per_1m_usd below
-# and re-derive the per-1K client number.
+# At $1 ≈ ₽95:
+#   input  $0.00023 / 1K  ≈  ₽22 / 1M
+#   output $0.00058 / 1K  ≈  ₽55 / 1M
+#   mixed (2:1)            ≈  ₽33 / 1M  (wholesale-floor ≈ ₽21)
+#
 MODEL_PRICING_USD_PER_1K: dict[str, dict[str, float]] = {
-    "deepseek/deepseek-v4-flash": {"prompt": 0.00021, "completion": 0.00053},
-    "deepseek/deepseek-chat": {"prompt": 0.00021, "completion": 0.00053},
+    "deepseek/deepseek-v4-flash": {"prompt": 0.00023, "completion": 0.00058},
+    "deepseek/deepseek-chat": {"prompt": 0.00023, "completion": 0.00058},
 }
 
 
