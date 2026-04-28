@@ -81,7 +81,7 @@ async def test_plan_switch_updates_existing_subscription_row(
     assert switched.plan_id == "pro"
     assert switched.status == "active"
     assert switched.q_used == 0
-    assert switched.storage_bytes_used == 0
+    assert switched.storage_bytes_used == 512
 
     rows = (
         (await db_session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id)))

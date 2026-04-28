@@ -231,7 +231,8 @@ async def start_subscription(
     - No existing active → create new with 30d period.
     - Same plan, active → renewal: period_end += 30d, q_used = 0,
       storage_bytes_used preserved, period_end = max(now, period_end) + 30d.
-    - Different plan (upgrade or downgrade) → terminate current, start fresh.
+    - Different plan (upgrade or downgrade) → switch plan in-place, reset query usage,
+      preserve storage usage.
     """
     # Verify plan exists
     plan_result = await db.execute(select(Plan).where(Plan.id == plan_id))
@@ -293,7 +294,6 @@ async def start_subscription(
             sub.current_period_start = now
             sub.current_period_end = period_end
             sub.q_used = 0
-            sub.storage_bytes_used = 0
             sub.auto_renew = False
             sub.updated_at = now
             _log_event(
@@ -316,7 +316,6 @@ async def start_subscription(
             sub.current_period_start = now
             sub.current_period_end = period_end
             sub.q_used = 0
-            sub.storage_bytes_used = 0
             sub.auto_renew = False
             sub.updated_at = now
         else:

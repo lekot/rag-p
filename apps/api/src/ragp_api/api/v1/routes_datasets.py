@@ -8,7 +8,7 @@ from typing import Any, cast
 import jsonschema
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
@@ -192,6 +192,17 @@ async def delete_dataset(
     )
     total_bytes = int(storage_result.scalar_one() or 0)
 
+    document_ids = select(Document.id).where(
+        Document.dataset_id == dataset_id,
+        Document.organization_id == organization_id,
+    )
+    await db.execute(delete(Chunk).where(Chunk.document_id.in_(document_ids)))
+    await db.execute(
+        delete(Document).where(
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+        )
+    )
     await db.delete(dataset)
     await log_audit_event(
         db,
