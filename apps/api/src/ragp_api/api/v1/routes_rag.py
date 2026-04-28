@@ -1,7 +1,8 @@
-"""Public RAG query endpoint — authenticated via API key (Bearer token)."""
+"""Public RAG query endpoint -- authenticated via API key (Bearer token)."""
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
@@ -18,10 +19,12 @@ from ragp_api.deps import get_db
 from ragp_api.deps_auth import get_api_key_org
 from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
+from ragp_api.services.audit import log_audit_event
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.rate_limiter import check_rag_query_limits
 from ragp_api.settings import settings
-from ragp_api.services.audit import log_audit_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -49,6 +52,7 @@ class RagChunkOut(BaseModel):
 class RagUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
+    cost_usd: float = 0.0
 
 
 class RagTrace(BaseModel):
@@ -204,7 +208,8 @@ async def rag_query(
         db.add(run_record)
         await db.commit()
 
-        pipeline_latency_ms = int((time.monotonic() - _request_start) * 1000)
+        if not raw_chunks and not answer:
+            answer = "Не нашёл релевантных чанков для ответа."
 
         await log_audit_event(
             db,
@@ -213,13 +218,20 @@ async def rag_query(
             event_type="rag.query",
             resource_type="api_key",
             resource_id=api_key.id,
-            metadata={"pipeline_id": body.pipeline_id, "latency_ms": pipeline_latency_ms},
+            metadata={"pipeline_id": body.pipeline_id},
             request=request,
         )
         await db.commit()
 
-        if not raw_chunks and not answer:
-            answer = "Не нашёл релевантных чанков для ответа."
+        # Determine model used by pipeline generator node
+        pipeline_model = next(
+            (
+                n.get("params", {}).get("model", default_model)
+                for n in pipeline_nodes
+                if n.get("plugin_kind") == "generator"
+            ),
+            default_model,
+        )
 
         return RagQueryOut(
             answer=answer,
@@ -236,16 +248,17 @@ async def rag_query(
             usage=RagUsage(
                 prompt_tokens=rag_prompt_tokens,
                 completion_tokens=rag_completion_tokens,
+                cost_usd=0.0,
             ),
             trace=RagTrace(
                 embedder="pipeline",
                 retriever="pipeline",
                 generator="pipeline",
-                model="pipeline",
+                model=pipeline_model,
             ),
         )
 
-    # 4. Default path: embed → retrieve → generate
+    # 4. Default path: embed -> retrieve -> generate
     embedder, embedder_name = await _resolve_embedder()
 
     query_vec: list[float] | None = None
@@ -293,8 +306,6 @@ async def rag_query(
 
     default_prompt_tokens = int(usage_raw.get("prompt_tokens", 0))
     default_completion_tokens = int(usage_raw.get("completion_tokens", 0))
-    default_cost = calculate_cost(default_model, default_prompt_tokens, default_completion_tokens)
-    default_latency_ms = int((time.monotonic() - _request_start) * 1000)
 
     await log_audit_event(
         db,
@@ -303,23 +314,9 @@ async def rag_query(
         event_type="rag.query",
         resource_type="api_key",
         resource_id=api_key.id,
-        metadata={"pipeline_id": None, "latency_ms": default_latency_ms},
+        metadata={"pipeline_id": None},
         request=request,
     )
-
-    try:
-        await record_usage_event(
-            db,
-            org_id=org.id,
-            api_key_id=api_key.id,
-            pipeline_id=None,
-            model=default_model,
-            prompt_tokens=default_prompt_tokens,
-            completion_tokens=default_completion_tokens,
-            latency_ms=default_latency_ms,
-        )
-    except Exception:
-        logger.warning("Usage recording failed (default path)", exc_info=True)
 
     return RagQueryOut(
         answer=answer,
@@ -334,8 +331,9 @@ async def rag_query(
             for c in raw_chunks
         ],
         usage=RagUsage(
-            prompt_tokens=int(usage_raw.get("prompt_tokens", 0)),
-            completion_tokens=int(usage_raw.get("completion_tokens", 0)),
+            prompt_tokens=default_prompt_tokens,
+            completion_tokens=default_completion_tokens,
+            cost_usd=0.0,
         ),
         trace=RagTrace(
             embedder=embedder_name,

@@ -11,7 +11,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
@@ -71,12 +71,12 @@ class PatchMemberIn(BaseModel):
 
 class AuditEventOut(BaseModel):
     id: str
-    user_id: Optional[str]
-    user_email: Optional[str]
+    user_id: str | None
+    user_email: str | None
     event_type: str
-    resource_type: Optional[str]
-    resource_id: Optional[str]
-    ip_address: Optional[str]
+    resource_type: str | None
+    resource_id: str | None
+    ip_address: str | None
     metadata: dict
     created_at: str
 
@@ -404,8 +404,8 @@ async def list_audit_events(
     org_id: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    event_type: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
+    event_type: str | None = Query(None),
+    user_id: str | None = Query(None),
     current_user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:

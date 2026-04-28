@@ -22,10 +22,10 @@ from ragp_api.db.models import (
 from ragp_api.deps import get_db, get_organization_id
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
+from ragp_api.services.audit import log_audit_event
 from ragp_api.services.file_parsers import parse_to_text
 from ragp_api.services.golden_qa_generator import generate_golden_qa, save_golden_items
 from ragp_api.services.pipeline_runner import run_pipeline
-from ragp_api.services.audit import log_audit_event
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -555,7 +555,7 @@ async def upload_document(
         event_type="dataset.upload",
         resource_type="document",
         resource_id=doc.id,
-        metadata={"filename": file.filename or "", "size": len(content_bytes)},
+        metadata={"filename": file.filename or "", "size": len(raw)},
         request=request,
     )
     await db.commit()
