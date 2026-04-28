@@ -9,9 +9,6 @@ const PUBLIC_PATHS = [
   "/api",
   "/favicon.ico",
   "/pricing",
-  "/terms",
-  "/contacts",
-  "/delivery",
 ];
 
 const API_BASE =
