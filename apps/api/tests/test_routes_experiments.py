@@ -9,6 +9,7 @@ from httpx import AsyncClient
 async def _create_dataset(client: AsyncClient, organization_id: str) -> str:
     resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "Test Dataset", "organization_id": organization_id},
     )
     assert resp.status_code == 201
@@ -287,11 +288,13 @@ async def test_pipeline_list_filter_by_dataset(
     # Create two datasets
     ds1_resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "DS1", "organization_id": organization_id},
     )
     ds1_id = ds1_resp.json()["id"]
     ds2_resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "DS2", "organization_id": organization_id},
     )
     ds2_id = ds2_resp.json()["id"]

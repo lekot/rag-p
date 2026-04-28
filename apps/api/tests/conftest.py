@@ -25,11 +25,14 @@ _IS_POSTGRES = _TEST_DB_URL.startswith("postgresql")
 async def reset_registry():
     """Clear plugin registry before each test to avoid cross-test pollution."""
     old_enforce_subscription_quotas = settings.enforce_subscription_quotas
+    old_allow_legacy_org_header = settings.allow_legacy_org_header
     settings.enforce_subscription_quotas = False
+    settings.allow_legacy_org_header = True
     _registry.clear()
     bootstrap()
     yield
     settings.enforce_subscription_quotas = old_enforce_subscription_quotas
+    settings.allow_legacy_org_header = old_allow_legacy_org_header
     _registry.clear()
 
 

@@ -3,7 +3,7 @@
 Priority order for require_organization:
   1. Session cookie (ragp_session)
   2. Authorization: Bearer <api-key>
-  3. X-Organization-Id header (legacy fallback — TODO: remove after UI migration)
+  3. X-Organization-Id header (legacy fallback, disabled unless explicitly configured)
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from ragp_api.db.models import ApiKey, Membership, Organization, User
 from ragp_api.deps import get_db
 from ragp_api.services.sessions import COOKIE_NAME as _COOKIE_NAME
 from ragp_api.services.sessions import read_session_cookie
+from ragp_api.settings import settings
 
 # Re-export for convenience (used by routes_auth)
 COOKIE_NAME = _COOKIE_NAME
@@ -127,8 +128,9 @@ async def require_organization(
             if bearer_org:
                 return bearer_org
 
-    # 3. Legacy X-Organization-Id header fallback
-    if x_organization_id:
+    # 3. Legacy X-Organization-Id header fallback. Disabled in production:
+    # client-supplied tenant ids are not an auth boundary.
+    if x_organization_id and settings.allow_legacy_org_header:
         legacy_result = await db.execute(
             select(Organization).where(Organization.id == x_organization_id)
         )

@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { apiClient } from "../api-client";
+import type { Context } from "../context";
+
+function authHeaders(ctx: Pick<Context, "cookieHeader">): Record<string, string> {
+  return ctx.cookieHeader ? { cookie: ctx.cookieHeader } : {};
+}
 
 const DatasetSchema = z.object({
   id: z.string(),
@@ -88,17 +93,13 @@ export type DocumentDetail = z.infer<typeof DocumentDetailSchema>;
 
 export const datasetsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    return apiClient.get<Dataset[]>(
-      `/api/v1/datasets?organization_id=${ctx.organization_id}`
-    );
+    return apiClient.get<Dataset[]>("/api/v1/datasets", authHeaders(ctx));
   }),
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input, ctx }) => {
-      return apiClient.get<Dataset>(`/api/v1/datasets/${input.id}`, {
-        "x-organization-id": ctx.organization_id,
-      });
+      return apiClient.get<Dataset>(`/api/v1/datasets/${input.id}`, authHeaders(ctx));
     }),
 
   create: protectedProcedure
@@ -109,18 +110,16 @@ export const datasetsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      return apiClient.post<Dataset>("/api/v1/datasets", {
-        ...input,
-        organization_id: ctx.organization_id,
-      });
+      return apiClient.post<Dataset>("/api/v1/datasets", input, authHeaders(ctx));
     }),
 
   generate: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       return apiClient.post<{ status: string }>(
         `/api/v1/datasets/${input.id}/generate`,
-        {}
+        {},
+        authHeaders(ctx)
       );
     }),
 
@@ -136,7 +135,7 @@ export const datasetsRouter = router({
       return apiClient.post<z.infer<typeof SearchResultSchema>>(
         `/api/v1/datasets/${input.datasetId}/search`,
         { query: input.query, top_k: input.top_k },
-        { "x-organization-id": ctx.organization_id }
+        authHeaders(ctx)
       );
     }),
 
@@ -159,24 +158,26 @@ export const datasetsRouter = router({
           model: input.model,
           pipeline_id: input.pipeline_id ?? null,
         },
-        { "x-organization-id": ctx.organization_id }
+        authHeaders(ctx)
       );
     }),
 
   documents: router({
     list: protectedProcedure
       .input(z.object({ datasetId: z.string() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         return apiClient.get<DocumentSummary[]>(
-          `/api/v1/datasets/${input.datasetId}/documents`
+          `/api/v1/datasets/${input.datasetId}/documents`,
+          authHeaders(ctx)
         );
       }),
 
     byId: protectedProcedure
       .input(z.object({ datasetId: z.string(), docId: z.string() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         return apiClient.get<DocumentDetail>(
-          `/api/v1/datasets/${input.datasetId}/documents/${input.docId}`
+          `/api/v1/datasets/${input.datasetId}/documents/${input.docId}`,
+          authHeaders(ctx)
         );
       }),
   }),
@@ -192,7 +193,7 @@ export const datasetsRouter = router({
       return apiClient.post<z.infer<typeof GenerateGoldenResultSchema>>(
         `/api/v1/datasets/${input.datasetId}/golden`,
         { sample_size: input.sample_size },
-        { "x-organization-id": ctx.organization_id }
+        authHeaders(ctx)
       );
     }),
 
@@ -202,7 +203,7 @@ export const datasetsRouter = router({
       .query(async ({ input, ctx }) => {
         return apiClient.get<GoldenItem[]>(
           `/api/v1/datasets/${input.datasetId}/golden`,
-          { "x-organization-id": ctx.organization_id }
+          authHeaders(ctx)
         );
       }),
   }),

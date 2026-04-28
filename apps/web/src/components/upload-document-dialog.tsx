@@ -112,16 +112,6 @@ export function UploadDocumentDialog({
     if (f) pickFile(f);
   };
 
-  const apiUrl =
-    typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000")
-      : "http://localhost:8000";
-
-  const orgId =
-    typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_ORG_ID ?? "00000000-0000-0000-0000-000000000001")
-      : "00000000-0000-0000-0000-000000000001";
-
   const handleSubmit = async () => {
     if (!file) {
       toast({ title: "No file selected", variant: "destructive" });
@@ -151,11 +141,10 @@ export function UploadDocumentDialog({
       }
 
       const res = await fetch(
-        `${apiUrl}/api/v1/datasets/${targetDatasetId}/documents`,
+        `/api/datasets/${targetDatasetId}/documents`,
         {
           method: "POST",
           body: formData,
-          headers: { "X-Organization-Id": orgId },
         }
       );
 

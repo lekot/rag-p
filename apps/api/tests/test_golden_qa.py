@@ -22,6 +22,7 @@ _PATCH_ACOMPLETION = "ragp_api.services.golden_qa_generator.litellm.acompletion"
 async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "GoldenDS") -> str:
     resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": organization_id},
         json={"name": name, "organization_id": organization_id},
     )
     assert resp.status_code == 201

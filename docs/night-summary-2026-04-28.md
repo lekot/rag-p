@@ -49,13 +49,13 @@ flowchart TD
 см. [docs/blockers.md](./blockers.md)
 
 Актуальные (нерешённые / частичные):
-- **P0 tenant isolation** — зарегистрированный пользователь видит shared/default datasets. Нужно убрать `NEXT_PUBLIC_ORG_ID` как authority, брать org из session/API key и закрыть negative tests на cross-tenant access.
 - **ARQ queue contract** — ARQ/Redis worker path уже появился, но experiment/live/ingest/score/maintenance SLA, fairness и idempotency ещё не сведены в контракт реализации.
 - **Subscription enforcement** — pricing/subscription слой появился, но требует ревью атомарности quota, YooKassa idempotency, plan switch и тестов.
 - **n8n community node** — нужен как zero-code вход для пользователей n8n поверх `POST /api/v1/rag/query` и будущих upload/index/status actions.
 
 Закрыто после старой записи:
 - **Pytest в CI gate** — `.github/workflows/ci.yml` теперь содержит pytest job с Postgres/pgvector service.
+- **P0 tenant isolation для datasets** — `NEXT_PUBLIC_ORG_ID` удалён из web authority, API datasets/documents/search/ask/golden/generate scoped через session/API key, добавлен negative cross-tenant test.
 
 ## Что НЕ сделано (бэклог)
 

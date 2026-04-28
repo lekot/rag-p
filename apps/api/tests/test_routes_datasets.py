@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from ragp_api.settings import settings
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -14,16 +16,76 @@ from httpx import AsyncClient
 async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "Test DS") -> str:
     resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": organization_id},
         json={"name": name, "organization_id": organization_id, "source": "uploaded"},
     )
     assert resp.status_code == 201
     return resp.json()["id"]
 
 
+async def _signup(client: AsyncClient, org_name: str) -> dict:
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": f"{org_name}-{uuid.uuid4().hex}@example.com",
+            "password": "s3cr3t!",
+            "organization_name": org_name,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
 def _txt_upload(content: str, filename: str = "hello.txt") -> dict:
     return {
         "file": (filename, io.BytesIO(content.encode()), "text/plain"),
     }
+
+
+@pytest.mark.asyncio
+async def test_dataset_routes_scope_to_session_org_not_client_supplied_org(
+    client: AsyncClient,
+) -> None:
+    old_allow_legacy_org_header = settings.allow_legacy_org_header
+    settings.allow_legacy_org_header = False
+    try:
+        tenant_a = await _signup(client, "tenant-a")
+        tenant_a_org_id = tenant_a["organization"]["id"]
+        create_a = await client.post(
+            "/api/v1/datasets",
+            headers={"X-Organization-Id": "other-org"},
+            json={"name": "Tenant A DS", "organization_id": "other-org"},
+        )
+        assert create_a.status_code == 201, create_a.text
+        tenant_a_dataset_id = create_a.json()["id"]
+        assert create_a.json()["organization_id"] == tenant_a_org_id
+
+        await client.post("/api/v1/auth/logout")
+
+        tenant_b = await _signup(client, "tenant-b")
+        tenant_b_org_id = tenant_b["organization"]["id"]
+        list_b = await client.get(
+            f"/api/v1/datasets?organization_id={tenant_a_org_id}",
+            headers={"X-Organization-Id": tenant_a_org_id},
+        )
+        assert list_b.status_code == 200, list_b.text
+        assert list_b.json() == []
+
+        create_b = await client.post(
+            "/api/v1/datasets",
+            headers={"X-Organization-Id": tenant_a_org_id},
+            json={"name": "Tenant B DS", "organization_id": tenant_a_org_id},
+        )
+        assert create_b.status_code == 201, create_b.text
+        assert create_b.json()["organization_id"] == tenant_b_org_id
+
+        get_a_as_b = await client.get(
+            f"/api/v1/datasets/{tenant_a_dataset_id}",
+            headers={"X-Organization-Id": tenant_a_org_id},
+        )
+        assert get_a_as_b.status_code == 404
+    finally:
+        settings.allow_legacy_org_header = old_allow_legacy_org_header
 
 
 # ---------------------------------------------------------------------------
@@ -113,16 +175,20 @@ async def test_upload_unsupported_type_returns_415(client: AsyncClient, organiza
 
 
 @pytest.mark.asyncio
-async def test_upload_without_org_header_returns_422(client: AsyncClient, organization_id: str):
+async def test_upload_without_auth_returns_401(client: AsyncClient, organization_id: str):
     dataset_id = await _create_dataset(client, organization_id)
 
-    # No X-Organization-Id header → FastAPI returns 422 (missing required header)
-    resp = await client.post(
-        f"/api/v1/datasets/{dataset_id}/documents",
-        files={"file": ("doc.txt", io.BytesIO(b"hello"), "text/plain")},
-        data={"chunker_name": "recursive-character"},
-    )
-    assert resp.status_code == 422
+    old_allow_legacy_org_header = settings.allow_legacy_org_header
+    settings.allow_legacy_org_header = False
+    try:
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/documents",
+            files={"file": ("doc.txt", io.BytesIO(b"hello"), "text/plain")},
+            data={"chunker_name": "recursive-character"},
+        )
+    finally:
+        settings.allow_legacy_org_header = old_allow_legacy_org_header
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -331,13 +397,18 @@ async def test_search_dataset_not_found_returns_404(client: AsyncClient, organiz
 
 
 @pytest.mark.asyncio
-async def test_search_without_org_header_returns_422(client: AsyncClient, organization_id: str):
+async def test_search_without_auth_returns_401(client: AsyncClient, organization_id: str):
     dataset_id = await _create_dataset(client, organization_id)
-    resp = await client.post(
-        f"/api/v1/datasets/{dataset_id}/search",
-        json={"query": "hello", "top_k": 5},
-    )
-    assert resp.status_code == 422
+    old_allow_legacy_org_header = settings.allow_legacy_org_header
+    settings.allow_legacy_org_header = False
+    try:
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/search",
+            json={"query": "hello", "top_k": 5},
+        )
+    finally:
+        settings.allow_legacy_org_header = old_allow_legacy_org_header
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

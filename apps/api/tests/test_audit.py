@@ -110,6 +110,7 @@ async def test_dataset_upload_creates_audit_event_with_filename(
     # Create dataset first
     create_resp = await client.post(
         "/api/v1/datasets",
+        headers={"X-Organization-Id": org_id},
         json={"name": "audit-ds", "organization_id": org_id},
     )
     assert create_resp.status_code == 201, create_resp.text

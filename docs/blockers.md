@@ -14,17 +14,11 @@
 
 ---
 
-## [BLOCKED-NIGHT-RUN] P0 tenant isolation: UI использует shared/default org
+## ~~[BLOCKED-NIGHT-RUN] P0 tenant isolation: UI использует shared/default org~~ RESOLVED
 
 - **Where**: `apps/web/src/server/context.ts`, `apps/web/src/server/routers/datasets.ts`, `apps/api/src/ragp_api/api/v1/routes_datasets.py`, `apps/api/src/ragp_api/deps_auth.py`.
 - **Observed 2026-04-28**: после регистрации новый пользователь видит существующие datasets. Это не похоже на админский email; текущий web context подставляет `NEXT_PUBLIC_ORG_ID` / `00000000-0000-0000-0000-000000000001`, а API `GET /datasets?organization_id=...` доверяет org id из query.
-- **Why blocked**: это P0 security/product blocker. Tenant boundary сейчас не является server-side invariant: часть endpoints принимает `organization_id` из body/query/header, а web/tRPC слой может использовать shared org вместо org из session cookie.
-- **Workaround applied**: нет. Дальше нельзя считать UI multi-tenant безопасным, пока org scope не берётся из authenticated session/API key на API side.
-- **Decision needed**: Зафиксировать единый контракт tenant scope:
-  - browser UI: org id только из `ragp_session` через `/auth/me`/server context, без `NEXT_PUBLIC_ORG_ID`;
-  - public API: org id только из API key/session, legacy `X-Organization-Id` максимум для внутренних тестов/dev;
-  - create/list/update/delete datasets/documents/search/ask/golden/generate должны проверять ownership server-side;
-  - добавить negative tests: пользователь B не видит datasets пользователя A, query/body/header не могут подменить org.
+- **Resolved 2026-04-28**: datasets API теперь берёт org scope из session/API key (`require_organization`), legacy `X-Organization-Id` выключен по умолчанию и включается только в test/dev config. Web context больше не использует `NEXT_PUBLIC_ORG_ID`, а получает org через `/auth/me`; upload идёт через Next same-origin proxy с cookie. Добавлен negative test: пользователь B не видит dataset пользователя A, query/body/header не могут подменить org.
 
 ---
 

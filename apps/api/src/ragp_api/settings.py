@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # Auth cookies. Keep false for local HTTP; enable in TLS deployments.
     session_cookie_secure: bool = False
+    allow_legacy_org_header: bool = False
 
     # Permify
     permify_url: str = "http://localhost:3476"

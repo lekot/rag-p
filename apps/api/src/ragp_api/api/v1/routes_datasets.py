@@ -15,11 +15,13 @@ from ragp_api.db.models import (
     Dataset,
     DatasetGoldenItem,
     Document,
+    Organization,
     Pipeline,
     PipelineVersion,
     Run,
 )
-from ragp_api.deps import get_db, get_organization_id
+from ragp_api.deps import get_db
+from ragp_api.deps_auth import require_organization
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
@@ -79,9 +81,15 @@ _ALLOWED_EXTENSIONS = {
 }
 
 
+async def get_current_organization_id(
+    org: Organization = Depends(require_organization),
+) -> str:
+    return org.id
+
+
 class DatasetCreateIn(BaseModel):
     name: str
-    organization_id: str
+    organization_id: str | None = None
     source: str = "uploaded"
 
 
@@ -97,10 +105,11 @@ async def create_dataset(
     body: DatasetCreateIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
 ) -> DatasetOut:
     dataset = Dataset(
         id=str(uuid.uuid4()),
-        organization_id=body.organization_id,
+        organization_id=org.id,
         name=body.name,
         source=body.source,
     )
@@ -108,7 +117,7 @@ async def create_dataset(
     await db.flush()
     await log_audit_event(
         db,
-        org_id=body.organization_id,
+        org_id=org.id,
         user_id=None,
         event_type="dataset.create",
         resource_type="dataset",
@@ -128,10 +137,10 @@ async def create_dataset(
 
 @router.get("", response_model=list[DatasetOut])
 async def list_datasets(
-    organization_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
 ) -> list[DatasetOut]:
-    result = await db.execute(select(Dataset).where(Dataset.organization_id == organization_id))
+    result = await db.execute(select(Dataset).where(Dataset.organization_id == org.id))
     datasets = result.scalars().all()
     return [
         DatasetOut(id=d.id, name=d.name, organization_id=d.organization_id, source=d.source)
@@ -143,7 +152,7 @@ async def list_datasets(
 async def get_dataset(
     dataset_id: str,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> DatasetOut:
     result = await db.execute(
         select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
@@ -164,7 +173,7 @@ async def delete_dataset(
     dataset_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> None:
     result = await db.execute(
         select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
@@ -210,8 +219,14 @@ async def delete_dataset(
 
 
 @router.post("/{dataset_id}/generate", status_code=202)
-async def generate_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
+async def generate_dataset(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_current_organization_id),
+) -> dict[str, Any]:
+    result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
     dataset = result.scalar_one_or_none()
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
@@ -245,7 +260,7 @@ async def generate_golden(
     dataset_id: str,
     body: GenerateGoldenIn,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> GenerateGoldenOut:
     """Generate golden Q&A pairs for a dataset using DeepSeek."""
     ds_result = await db.execute(
@@ -280,7 +295,7 @@ async def generate_golden(
 async def list_golden(
     dataset_id: str,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> list[GoldenItemOut]:
     """List all golden Q&A items for a dataset."""
     ds_result = await db.execute(
@@ -324,7 +339,7 @@ class DocumentListItem(BaseModel):
 async def list_documents(
     dataset_id: str,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> list[DocumentListItem]:
     ds_result = await db.execute(
         select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
@@ -379,7 +394,7 @@ async def get_document(
     dataset_id: str,
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> DocumentDetail:
     doc_result = await db.execute(
         select(Document).where(
@@ -445,7 +460,7 @@ async def upload_document(
     chunker_name: str = Form(default="recursive-character"),
     chunker_params: str = Form(default="{}"),
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> UploadDocumentResponse:
     # Verify dataset ownership
     ds_result = await db.execute(
@@ -651,7 +666,7 @@ async def search_dataset(
     dataset_id: str,
     body: SearchIn,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> SearchOut:
     # Verify dataset ownership
     ds_result = await db.execute(
@@ -777,7 +792,7 @@ async def ask_dataset(
     dataset_id: str,
     body: AskIn,
     db: AsyncSession = Depends(get_db),
-    organization_id: str = Depends(get_organization_id),
+    organization_id: str = Depends(get_current_organization_id),
 ) -> AskOut:
     # Verify dataset ownership
     ds_result = await db.execute(

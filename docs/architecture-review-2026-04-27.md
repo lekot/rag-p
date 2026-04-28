@@ -15,10 +15,10 @@
 - Ollama добавлен как embedder/runtime path; Cohere остаётся в реестре, но больше не должен считаться обязательной опорой продукта.
 - Pricing UI и тарифные уровни появились, но экономика ещё требует проверки замерами и связки с billing/subscription enforcement.
 - ARQ/Redis worker path появился в зависимостях, Helm и worker deployment. Это не равно завершённому queue contract: orchestration, fairness, priorities и quota/backpressure ещё надо довести.
+- P0 tenant isolation для datasets закрыт: org scope идёт из session/API key, web больше не использует `NEXT_PUBLIC_ORG_ID`, legacy org header выключен по умолчанию.
 
 Открыто / частично:
 
-- P0 tenant isolation: после регистрации пользователь видит datasets shared/default org. Root cause: web context использует `NEXT_PUBLIC_ORG_ID` / `000...001`, а API datasets list/create принимает `organization_id` от клиента. Это нужно закрыть до любых новых фич.
 - Subscription/billing код сейчас выглядит как незавершённый слой: нужны idempotency, корректный plan switch, атомарные quota checks и тесты на webhooks.
 - Account/billing UX ещё смешивает старую wallet/top-up модель и новую subscription модель.
 - Customer journey "загрузил RAG -> подключил свой продукт" есть через API key и docs, но нет SDK/n8n/готовых workflow-интеграций.
