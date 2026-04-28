@@ -6,7 +6,6 @@ export default function ContactsPage() {
       <p><strong>Исполнитель:</strong> Самозанятый Нифонтов Максим Вячеславович</p>
       <p><strong>ИНН:</strong> 592061500220</p>
       <p><strong>Email:</strong> <a href="mailto:kotvomne@ya.ru">kotvomne@ya.ru</a></p>
-      <p><strong>Регион регистрации:</strong> Пермский край, РФ</p>
 
       <p>
         Для технической поддержки, запросов на возврат средств и общих вопросов

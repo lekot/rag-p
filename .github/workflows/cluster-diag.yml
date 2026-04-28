@@ -1,0 +1,68 @@
+name: Cluster diag (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Helm history
+        run: |
+          echo "===== helm history ====="
+          helm -n rag-p history rag-p | tail -10
+          echo
+          echo "===== current values (image tags) ====="
+          helm -n rag-p get values rag-p 2>/dev/null | grep -E "image|tag" | head -20
+
+      - name: Pods + PVC
+        run: |
+          echo "===== pods ====="
+          kubectl -n rag-p get pods
+          echo
+          echo "===== PVCs ====="
+          kubectl -n rag-p get pvc
+
+      - name: API logs
+        run: |
+          echo "===== api logs (last 200 lines) ====="
+          kubectl -n rag-p logs deploy/rag-p-api --tail 200 || true
+
+      - name: Worker logs
+        run: |
+          echo "===== worker logs (last 100 lines) ====="
+          kubectl -n rag-p logs deploy/rag-p-worker --tail 100 || true
+
+      - name: Alembic current
+        run: |
+          echo "===== alembic current ====="
+          POD=$(kubectl -n rag-p get pod -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
+          if [ -n "$POD" ]; then
+            kubectl -n rag-p exec "$POD" -- alembic -c /app/alembic.ini current 2>&1 | tail -5 || true
+          else
+            echo "no api pod"
+          fi
+
+      - name: Recent events (warning + error)
+        run: |
+          echo "===== events (sorted by time) ====="
+          kubectl -n rag-p get events --sort-by='.lastTimestamp' | tail -30
