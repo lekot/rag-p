@@ -28,6 +28,7 @@ from ragp_api.services.billing import (
     get_balance,
     topup_balance,
 )
+from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -293,7 +294,8 @@ async def test_rag_query_402_when_balance_zero(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    """RAG query returns 402 when org balance is zero."""
+    """RAG query returns 402 when no active subscription exists."""
+    settings.enforce_subscription_quotas = True
     org_id, raw_key, _user_id = await _seed_org_with_api_key(db_session, balance_usd=Decimal("0"))
 
     from ragp_api.db.models import Dataset as DatasetModel
@@ -311,7 +313,7 @@ async def test_rag_query_402_when_balance_zero(
     )
     assert resp.status_code == 402, resp.text
     body = resp.json()
-    assert body["detail"]["code"] == "insufficient_balance"
+    assert body["detail"]["code"] == "no_active_plan"
 
 
 @pytest.mark.asyncio
