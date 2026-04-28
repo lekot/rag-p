@@ -172,15 +172,15 @@ jobs:
             -f charts/rag-p/values.staging.yaml \
             --set api.image.tag=${{ needs.build-api.outputs.tag }} \
             --set web.image.tag=${{ needs.build-web.outputs.tag }} \
-            --atomic \
-            --cleanup-on-fail \
-            --wait \
-            --timeout 15m
+            --cleanup-on-fail
 
       - name: Wait for rollouts
         run: |
           kubectl -n rag-p rollout status deploy/rag-p-api --timeout=180s
           kubectl -n rag-p rollout status deploy/rag-p-web --timeout=180s
+          if kubectl -n rag-p get deploy/rag-p-worker >/dev/null 2>&1; then
+            kubectl -n rag-p rollout status deploy/rag-p-worker --timeout=180s
+          fi
 
       - name: Smoke test
         run: |
