@@ -334,6 +334,9 @@ async def test_delete_dataset_cleans_runtime_dependents(
         pipeline_id=pipeline.id,
         nodes_json=[],
     )
+    db_session.add_all([pipeline, version])
+    await db_session.flush()
+
     run = Run(
         id=str(uuid.uuid4()),
         organization_id=organization_id,
@@ -365,8 +368,6 @@ async def test_delete_dataset_cleans_runtime_dependents(
                 plugin_grid_json={},
                 status="completed",
             ),
-            pipeline,
-            version,
             run,
         ]
     )
