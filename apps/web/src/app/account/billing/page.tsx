@@ -239,7 +239,8 @@ export default function BillingPage() {
   const user = useUser();
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
-  const paidParam = searchParams.get("paid");
+  // useSearchParams() may return null before hydration — guard with optional chaining
+  const paidParam = searchParams?.get("paid") ?? null;
 
   const orgId = user?.organization?.id ?? "";
   const isOwner = user?.organization?.role === "owner";
