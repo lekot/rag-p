@@ -84,19 +84,21 @@ async def test_plan_switch_updates_existing_subscription_row(
     assert switched.storage_bytes_used == 0
 
     rows = (
-        await db_session.execute(
-            select(OrgSubscription).where(OrgSubscription.org_id == org_id)
-        )
-    ).scalars().all()
+        (await db_session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
 
     events = (
-        await db_session.execute(
-            select(SubscriptionEvent.event_type).where(
-                SubscriptionEvent.org_id == org_id
+        (
+            await db_session.execute(
+                select(SubscriptionEvent.event_type).where(SubscriptionEvent.org_id == org_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert events == ["cancelled", "upgraded"]
 
 

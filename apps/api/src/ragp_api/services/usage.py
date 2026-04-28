@@ -109,9 +109,7 @@ async def record_usage_event(
             try:
                 sub = await get_active_subscription(db, org_id)
                 if sub is not None:
-                    plan_result = await db.execute(
-                        select(Plan).where(Plan.id == sub.plan_id)
-                    )
+                    plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
                     plan = plan_result.scalar_one_or_none()
                     if plan is not None and plan.allow_overage and sub.q_used > plan.included_q:
                         await deduct_balance(

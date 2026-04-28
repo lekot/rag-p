@@ -464,9 +464,7 @@ async def yookassa_webhook(
 
         # Idempotency: backed by a DB unique constraint on yookassa_payment_id.
         existing = await db.scalar(
-            select(SubscriptionEvent).where(
-                SubscriptionEvent.yookassa_payment_id == payment_id
-            )
+            select(SubscriptionEvent).where(SubscriptionEvent.yookassa_payment_id == payment_id)
         )
         if existing:
             return {"status": "already_processed"}

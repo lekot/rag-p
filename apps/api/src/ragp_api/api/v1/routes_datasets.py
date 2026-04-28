@@ -180,7 +180,9 @@ async def delete_dataset(
     # is what we tracked, so we release by document count * avg.
     # Simpler: release all chunk text bytes as a best-effort approximation.
     chunks_result = await db.execute(
-        select(Chunk).join(Document, Chunk.document_id == Document.id).where(
+        select(Chunk)
+        .join(Document, Chunk.document_id == Document.id)
+        .where(
             Document.dataset_id == dataset_id,
             Document.organization_id == organization_id,
         )
@@ -473,14 +475,14 @@ async def upload_document(
     # Storage quota check — must happen before any DB writes
     try:
         await consume_storage(db, organization_id, len(raw))
-    except NoActiveSubscriptionError:
+    except NoActiveSubscriptionError as exc:
         raise HTTPException(
             status_code=402,
             detail={
                 "code": "no_active_plan",
                 "message": "Активной подписки нет. Купите план на /pricing",
             },
-        )
+        ) from exc
     except StorageQuotaExceededError as exc:
         raise HTTPException(
             status_code=402,
@@ -488,9 +490,11 @@ async def upload_document(
                 "code": "storage_quota_exceeded",
                 "storage_used": exc.used,
                 "storage_limit": exc.limit,
-                "message": "Лимит хранилища исчерпан. Удалите датасеты или перейдите на старший план.",
+                "message": (
+                    "Лимит хранилища исчерпан. " "Удалите датасеты или перейдите на старший план."
+                ),
             },
-        )
+        ) from exc
 
     text = parse_to_text(filename, content_type, raw)
 

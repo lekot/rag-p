@@ -86,9 +86,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index("idx_org_sub_org_id", "org_subscriptions", ["org_id"])
-    op.create_index(
-        "idx_org_sub_period_end", "org_subscriptions", ["current_period_end"]
-    )
+    op.create_index("idx_org_sub_period_end", "org_subscriptions", ["current_period_end"])
 
     # -----------------------------------------------------------
     # subscription_events — audit history

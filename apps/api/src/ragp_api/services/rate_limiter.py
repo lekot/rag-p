@@ -91,9 +91,10 @@ async def check_rag_query_limits(
     """
     # --- Subscription / quota pre-flight check ---
     if db is not None:
+        from sqlalchemy import select
+
         from ragp_api.db.models import Plan
         from ragp_api.services.subscription import get_active_subscription
-        from sqlalchemy import select
 
         try:
             sub = await get_active_subscription(db, org_id)
@@ -102,29 +103,26 @@ async def check_rag_query_limits(
                     status_code=402,
                     detail={
                         "code": "no_active_plan",
-                        "message": (
-                            "Активной подписки нет. Купите план на /pricing"
-                        ),
+                        "message": ("Активной подписки нет. Купите план на /pricing"),
                     },
                 )
 
             plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
             plan = plan_result.scalar_one_or_none()
 
-            if plan is not None and sub.q_used >= plan.included_q:
-                if not plan.allow_overage:
-                    raise HTTPException(
-                        status_code=402,
-                        detail={
-                            "code": "quota_exceeded",
-                            "q_used": sub.q_used,
-                            "q_limit": plan.included_q,
-                            "message": (
-                                "Лимит запросов на тариф исчерпан. "
-                                "Дождитесь конца периода или перейдите на старший план."
-                            ),
-                        },
-                    )
+            if plan is not None and sub.q_used >= plan.included_q and not plan.allow_overage:
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "code": "quota_exceeded",
+                        "q_used": sub.q_used,
+                        "q_limit": plan.included_q,
+                        "message": (
+                            "Лимит запросов на тариф исчерпан. "
+                            "Дождитесь конца периода или перейдите на старший план."
+                        ),
+                    },
+                )
                 # Corp/Enterprise: allow overage — overage billing happens in record_usage_event
 
             # Dynamic RPM from plan (0 = unlimited)

@@ -44,16 +44,12 @@ class StorageQuotaExceededError(Exception):
         super().__init__(f"Storage quota exceeded: {used}/{limit}")
 
 
-async def get_active_subscription(
-    db: AsyncSession, org_id: str
-) -> OrgSubscription | None:
+async def get_active_subscription(db: AsyncSession, org_id: str) -> OrgSubscription | None:
     """Return the active subscription for *org_id*.
 
     Lazily expires the row if current_period_end < now() and returns None.
     """
-    result = await db.execute(
-        select(OrgSubscription).where(OrgSubscription.org_id == org_id)
-    )
+    result = await db.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     sub = result.scalar_one_or_none()
     if sub is None:
         return None
@@ -114,9 +110,7 @@ async def consume_q(db: AsyncSession, org_id: str, count: int = 1) -> None:
     does not allow overage.
     """
     result = await db.execute(
-        select(OrgSubscription)
-        .where(OrgSubscription.org_id == org_id)
-        .with_for_update()
+        select(OrgSubscription).where(OrgSubscription.org_id == org_id).with_for_update()
     )
     sub = result.scalar_one_or_none()
 
@@ -148,9 +142,7 @@ async def consume_storage(db: AsyncSession, org_id: str, bytes_count: int) -> No
     Raises StorageQuotaExceededError if would exceed included_storage_bytes.
     """
     result = await db.execute(
-        select(OrgSubscription)
-        .where(OrgSubscription.org_id == org_id)
-        .with_for_update()
+        select(OrgSubscription).where(OrgSubscription.org_id == org_id).with_for_update()
     )
     sub = result.scalar_one_or_none()
 
@@ -166,10 +158,7 @@ async def consume_storage(db: AsyncSession, org_id: str, bytes_count: int) -> No
     plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
     plan = plan_result.scalar_one_or_none()
 
-    if (
-        plan is not None
-        and sub.storage_bytes_used + bytes_count > plan.included_storage_bytes
-    ):
+    if plan is not None and sub.storage_bytes_used + bytes_count > plan.included_storage_bytes:
         raise StorageQuotaExceededError(
             used=sub.storage_bytes_used, limit=plan.included_storage_bytes
         )
@@ -182,9 +171,7 @@ async def consume_storage(db: AsyncSession, org_id: str, bytes_count: int) -> No
 async def release_storage(db: AsyncSession, org_id: str, bytes_count: int) -> None:
     """Decrement storage_bytes_used by *bytes_count* (called on dataset deletion)."""
     result = await db.execute(
-        select(OrgSubscription)
-        .where(OrgSubscription.org_id == org_id)
-        .with_for_update()
+        select(OrgSubscription).where(OrgSubscription.org_id == org_id).with_for_update()
     )
     sub = result.scalar_one_or_none()
     if sub is None:
@@ -221,9 +208,7 @@ async def start_subscription(
 
     # Check existing subscription
     result = await db.execute(
-        select(OrgSubscription)
-        .where(OrgSubscription.org_id == org_id)
-        .with_for_update()
+        select(OrgSubscription).where(OrgSubscription.org_id == org_id).with_for_update()
     )
     sub = result.scalar_one_or_none()
 
@@ -246,9 +231,7 @@ async def start_subscription(
             )
         else:
             # ---- Upgrade / downgrade ----
-            old_plan_result = await db.execute(
-                select(Plan).where(Plan.id == sub.plan_id)
-            )
+            old_plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
             old_plan = old_plan_result.scalar_one_or_none()
             event_type = (
                 "upgraded"
