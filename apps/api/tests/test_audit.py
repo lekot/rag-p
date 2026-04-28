@@ -76,7 +76,7 @@ async def test_signup_creates_audit_event(client: AsyncClient, db_session: Async
     event = result.scalar_one_or_none()
     assert event is not None, "user.signup audit event not found"
     assert event.resource_type == "user"
-    assert "email" in event.metadata
+    assert "email" in event.metadata_json
 
 
 @pytest.mark.asyncio
@@ -132,8 +132,8 @@ async def test_dataset_upload_creates_audit_event_with_filename(
     )
     event = result.scalar_one_or_none()
     assert event is not None, "dataset.upload audit event not found"
-    assert event.metadata.get("filename") == "hello.txt"
-    assert event.metadata.get("size") == len(file_content)
+    assert event.metadata_json.get("filename") == "hello.txt"
+    assert event.metadata_json.get("size") == len(file_content)
 
 
 @pytest.mark.asyncio
