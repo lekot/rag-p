@@ -138,8 +138,28 @@ jobs:
           helm repo add bitnami https://charts.bitnami.com/bitnami
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add external-secrets https://charts.external-secrets.io
           helm repo update
           helm dependency build ./charts/rag-p
+
+      - name: Install/upgrade cluster prerequisites (kube-prometheus-stack + ESO)
+        run: |
+          helm upgrade --install kube-prometheus-stack \
+            prometheus-community/kube-prometheus-stack \
+            -n monitoring --create-namespace \
+            --version 65.5.1 \
+            --set crds.enabled=true \
+            --set grafana.enabled=true \
+            --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+            --set prometheus.prometheusSpec.serviceMonitorNamespaceSelector={} \
+            --wait --timeout 10m
+
+          helm upgrade --install external-secrets \
+            external-secrets/external-secrets \
+            -n external-secrets --create-namespace \
+            --version 0.10.4 \
+            --set installCRDs=true \
+            --wait --timeout 5m
 
       - name: Helm upgrade
         id: upgrade

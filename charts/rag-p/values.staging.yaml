@@ -124,9 +124,8 @@ networkPolicy:
 observability:
   enabled: true
   serviceMonitor:
-    # ServiceMonitor CRD требует kube-prometheus-stack в кластере.
-    # Включить после `helm install kube-prometheus-stack` в namespace monitoring.
-    enabled: false
+    # CRDs ставит CD-пайплайн (deploy-staging.yml → step "Install/upgrade cluster prerequisites").
+    enabled: true
   workerMetricsPort: 9090
   prometheus:
     enabled: false  # kube-prometheus-stack установлен на кластере отдельно
