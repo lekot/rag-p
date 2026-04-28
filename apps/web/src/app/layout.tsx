@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { NavUser } from "@/components/nav-user";
+import { Footer } from "@/components/footer";
 import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -24,7 +25,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <Providers>
-          <div className="min-h-screen bg-background">
+          <div className="flex flex-col min-h-screen bg-background">
             <nav className="border-b px-6 py-3 flex items-center gap-6">
               <span className="font-semibold text-lg">RAG Platform</span>
               <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
@@ -45,9 +46,13 @@ export default function RootLayout({
               <a href="/docs" className="text-sm text-muted-foreground hover:text-foreground">
                 Docs
               </a>
+              <a href="/pricing" className="text-sm text-muted-foreground hover:text-foreground">
+                Тарифы
+              </a>
               <NavUser />
             </nav>
-            <main className="px-6 py-6">{children}</main>
+            <main className="flex-1 px-6 py-6">{children}</main>
+            <Footer />
           </div>
           <Toaster />
         </Providers>
