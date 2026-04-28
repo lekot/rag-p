@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from decimal import Decimal as _Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -18,6 +19,7 @@ from ragp_api.db.models import (
     ApiKey,
     Membership,
     Organization,
+    OrgBalance,
     OrgMember,
     UsageDaily,
     UsageEvent,
@@ -78,7 +80,9 @@ async def _seed_org_with_api_key(
         key_hash=key_hash,
     )
 
-    db.add_all([org, user, membership, org_member, api_key])
+    # Seed positive balance so billing pre-flight does not block RAG requests
+    balance = OrgBalance(org_id=org_id, balance_usd=_Decimal("100.00"))
+    db.add_all([org, user, membership, org_member, api_key, balance])
     await db.commit()
     return org_id, raw_key, user_id
 

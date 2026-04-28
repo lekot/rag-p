@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,7 +12,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Dataset, Membership, Organization, User
+from ragp_api.db.models import ApiKey, Dataset, Membership, Organization, OrgBalance, User
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,8 +42,10 @@ async def _create_org_with_key(db: AsyncSession) -> tuple[str, str, str]:
     dataset = Dataset(
         id=str(uuid.uuid4()), organization_id=org_id, name="Test DS", source="uploaded"
     )
+    # Seed positive balance so billing pre-flight does not block RAG requests
+    balance = OrgBalance(org_id=org_id, balance_usd=Decimal("100.00"))
 
-    db.add_all([org, user, membership, api_key, dataset])
+    db.add_all([org, user, membership, api_key, dataset, balance])
     await db.commit()
 
     return org_id, raw_key, dataset.id

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import AsyncIterator
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -13,7 +14,7 @@ from fakeredis.aioredis import FakeRedis
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Dataset, Membership, Organization, User
+from ragp_api.db.models import ApiKey, Dataset, Membership, Organization, OrgBalance, User
 from ragp_api.db.redis import get_redis
 from ragp_api.main import app
 
@@ -49,8 +50,10 @@ async def _create_org_with_key(
     )
 
     dataset = Dataset(id=str(uuid.uuid4()), organization_id=org_id, name="RL DS", source="uploaded")
+    # Seed a positive balance so the billing pre-flight does not block requests
+    balance = OrgBalance(org_id=org_id, balance_usd=Decimal("100.00"))
 
-    db.add_all([org, user, membership, api_key, dataset])
+    db.add_all([org, user, membership, api_key, dataset, balance])
     await db.commit()
 
     return org_id, raw_key, api_key_id, dataset.id
@@ -188,8 +191,10 @@ async def test_rate_limit_per_org_blocks_when_multiple_keys_exhaust(
     dataset = Dataset(
         id=str(uuid.uuid4()), organization_id=org_id, name="RL DS2", source="uploaded"
     )
+    # Seed a positive balance so the billing pre-flight does not block requests
+    balance = OrgBalance(org_id=org_id, balance_usd=Decimal("100.00"))
 
-    db_session.add_all([org, user, membership, api_key_a, api_key_b, dataset])
+    db_session.add_all([org, user, membership, api_key_a, api_key_b, dataset, balance])
     await db_session.commit()
 
     fake_redis = FakeRedis()
