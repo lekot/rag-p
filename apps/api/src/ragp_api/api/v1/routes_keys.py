@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import ApiKey, Membership, User
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import require_session_user
+from ragp_api.deps_auth import COOKIE_NAME, require_session_user
 from ragp_api.services.audit import log_audit_event
+from ragp_api.services.sessions import read_session_cookie
 
 router = APIRouter(prefix="/keys", tags=["keys"])
 
@@ -50,8 +51,22 @@ class KeyCreatedOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _get_user_org_id(user: User, db: AsyncSession) -> str:
-    """Return the first organization_id for the user."""
+async def _get_user_org_id(user: User, db: AsyncSession, request: Request) -> str:
+    """Return the active session organization_id for the user."""
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        parsed = read_session_cookie(token)
+        if parsed and parsed[0] == user.id:
+            _, org_id = parsed
+            session_result = await db.execute(
+                select(Membership.organization_id).where(
+                    Membership.user_id == user.id,
+                    Membership.organization_id == org_id,
+                )
+            )
+            if session_result.scalar_one_or_none() is not None:
+                return org_id
+
     result = await db.execute(
         select(Membership.organization_id).where(Membership.user_id == user.id).limit(1)
     )
@@ -68,10 +83,11 @@ async def _get_user_org_id(user: User, db: AsyncSession) -> str:
 
 @router.get("", response_model=list[KeyOut])
 async def list_keys(
+    request: Request,
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    org_id = await _get_user_org_id(user, db)
+    org_id = await _get_user_org_id(user, db, request)
     result = await db.execute(
         select(ApiKey).where(ApiKey.organization_id == org_id).order_by(ApiKey.created_at.desc())
     )
@@ -95,7 +111,7 @@ async def create_key(
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    org_id = await _get_user_org_id(user, db)
+    org_id = await _get_user_org_id(user, db, request)
 
     # Generate: rgp_ + 32 random hex chars
     raw_secret = "rgp_" + os.urandom(16).hex()
@@ -141,7 +157,7 @@ async def delete_key(
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    org_id = await _get_user_org_id(user, db)
+    org_id = await _get_user_org_id(user, db, request)
     result = await db.execute(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.organization_id == org_id)
     )

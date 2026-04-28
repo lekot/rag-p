@@ -13,16 +13,18 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import AuditEvent, OrgInvite, OrgMember, OrgRole, User
+from ragp_api.db.models import AuditEvent, Membership, OrgInvite, OrgMember, OrgRole, User
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import require_session_user
+from ragp_api.deps_auth import COOKIE_NAME, require_session_user
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.permissions import require_role
+from ragp_api.services.sessions import make_session_cookie
+from ragp_api.settings import settings
 
 router = APIRouter(tags=["orgs"])
 
@@ -97,6 +99,21 @@ def _validate_invite_role(role: str) -> None:
 def _validate_org_role(role: str) -> None:
     if role not in (OrgRole.owner, OrgRole.admin, OrgRole.member):
         raise HTTPException(status_code=422, detail="Invalid role")
+
+
+def _membership_role_for_org_role(role: str) -> str:
+    return "admin" if role == OrgRole.admin else "editor"
+
+
+def _set_session_cookie(response: Response, user_id: str, org_id: str) -> None:
+    response.set_cookie(
+        COOKIE_NAME,
+        make_session_cookie(user_id, org_id),
+        max_age=30 * 24 * 60 * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.session_cookie_secure,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +354,7 @@ async def revoke_invite(
 async def accept_invite(
     body: AcceptInviteIn,
     request: Request,
+    response: Response,
     current_user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -377,6 +395,21 @@ async def accept_invite(
     )
     db.add(member)
 
+    membership_result = await db.execute(
+        select(Membership).where(
+            Membership.organization_id == invite.org_id,
+            Membership.user_id == current_user.id,
+        )
+    )
+    if membership_result.scalar_one_or_none() is None:
+        db.add(
+            Membership(
+                organization_id=invite.org_id,
+                user_id=current_user.id,
+                role=_membership_role_for_org_role(invite.role),
+            )
+        )
+
     invite.accepted_at = now
 
     await log_audit_event(
@@ -390,6 +423,7 @@ async def accept_invite(
         request=request,
     )
     await db.commit()
+    _set_session_cookie(response, current_user.id, invite.org_id)
 
     return {"org_id": invite.org_id, "role": invite.role}
 

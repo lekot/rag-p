@@ -16,7 +16,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Membership, Organization, User
+from ragp_api.db.models import ApiKey, Membership, OrgMember, Organization, User
 from ragp_api.deps import get_db
 from ragp_api.services.sessions import COOKIE_NAME as _COOKIE_NAME
 from ragp_api.services.sessions import read_session_cookie
@@ -101,12 +101,12 @@ async def require_organization(
     if token:
         parsed = read_session_cookie(token)
         if parsed:
-            _user_id, org_id = parsed
+            user_id, org_id = parsed
             session_org_result = await db.execute(
                 select(Organization).where(Organization.id == org_id)
             )
             session_org = session_org_result.scalar_one_or_none()
-            if session_org:
+            if session_org and await _user_has_org_access(db, user_id, org_id):
                 return session_org
 
     # 2. API key Bearer token
@@ -162,8 +162,41 @@ async def require_session_user(
 async def _get_user_org(
     user: User,
     db: AsyncSession,
+    preferred_org_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    """Return user+org dicts for the user's first (owner) membership."""
+    """Return user+org dicts, preferring the org selected in the session cookie."""
+    if preferred_org_id is not None:
+        org_member_result = await db.execute(
+            select(OrgMember, Organization)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(OrgMember.user_id == user.id, OrgMember.org_id == preferred_org_id)
+            .limit(1)
+        )
+        org_member_row = org_member_result.first()
+        if org_member_row is not None:
+            org_member, org = org_member_row
+            return (
+                {"id": user.id, "email": user.email},
+                {"id": org.id, "name": org.name, "slug": org.slug, "role": org_member.role},
+            )
+
+        membership_result = await db.execute(
+            select(Membership, Organization)
+            .join(Organization, Organization.id == Membership.organization_id)
+            .where(
+                Membership.user_id == user.id,
+                Membership.organization_id == preferred_org_id,
+            )
+            .limit(1)
+        )
+        membership_row = membership_result.first()
+        if membership_row is not None:
+            membership, org = membership_row
+            return (
+                {"id": user.id, "email": user.email},
+                {"id": org.id, "name": org.name, "slug": org.slug, "role": membership.role},
+            )
+
     uo_result = await db.execute(
         select(Membership, Organization)
         .join(Organization, Organization.id == Membership.organization_id)
@@ -179,3 +212,22 @@ async def _get_user_org(
         {"id": user.id, "email": user.email},
         {"id": org.id, "name": org.name, "slug": org.slug, "role": membership.role},
     )
+
+
+async def _user_has_org_access(db: AsyncSession, user_id: str, org_id: str) -> bool:
+    membership_result = await db.execute(
+        select(Membership.organization_id).where(
+            Membership.user_id == user_id,
+            Membership.organization_id == org_id,
+        )
+    )
+    if membership_result.scalar_one_or_none() is not None:
+        return True
+
+    org_member_result = await db.execute(
+        select(OrgMember.id).where(
+            OrgMember.user_id == user_id,
+            OrgMember.org_id == org_id,
+        )
+    )
+    return org_member_result.scalar_one_or_none() is not None

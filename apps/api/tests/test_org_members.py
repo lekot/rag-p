@@ -97,6 +97,13 @@ async def test_accept_invite_adds_member_with_role(
     invite_url = invite_resp.json()["invite_url"]
     raw_token = invite_url.split("/invite/")[-1]
 
+    dataset_resp = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Shared Corp Dataset"},
+    )
+    assert dataset_resp.status_code == 201, dataset_resp.text
+    dataset_id = dataset_resp.json()["id"]
+
     # Sign up as the invitee (creates their own org, but we'll accept the invite)
     await client.post("/api/v1/auth/logout")
 
@@ -109,6 +116,14 @@ async def test_accept_invite_adds_member_with_role(
     assert body["org_id"] == org_id
     assert body["role"] == "member"
 
+    me_resp = await client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200, me_resp.text
+    assert me_resp.json()["organization"]["id"] == org_id
+
+    datasets_resp = await client.get("/api/v1/datasets")
+    assert datasets_resp.status_code == 200, datasets_resp.text
+    assert [d["id"] for d in datasets_resp.json()] == [dataset_id]
+
     # Verify via list members (need to log back as owner)
     await client.post("/api/v1/auth/logout")
     await _login(client, "owner2@example.com")
@@ -117,6 +132,33 @@ async def test_accept_invite_adds_member_with_role(
     assert members_resp.status_code == 200, members_resp.text
     emails = [m["email"] for m in members_resp.json()]
     assert "joiner@example.com" in emails
+
+
+@pytest.mark.asyncio
+async def test_same_named_signup_creates_separate_organizations(
+    client: AsyncClient,
+) -> None:
+    """Same organization display names do not imply shared tenant scope."""
+    first = await _signup(client, "same-name-a@example.com", org_name="Same Name LLC")
+    first_org_id = first["organization"]["id"]
+
+    dataset_resp = await client.post(
+        "/api/v1/datasets",
+        json={"name": "First tenant dataset"},
+    )
+    assert dataset_resp.status_code == 201, dataset_resp.text
+
+    await client.post("/api/v1/auth/logout")
+
+    second = await _signup(client, "same-name-b@example.com", org_name="Same Name LLC")
+    second_org_id = second["organization"]["id"]
+
+    assert second_org_id != first_org_id
+    assert second["organization"]["slug"] != first["organization"]["slug"]
+
+    datasets_resp = await client.get("/api/v1/datasets")
+    assert datasets_resp.status_code == 200, datasets_resp.text
+    assert datasets_resp.json() == []
 
 
 @pytest.mark.asyncio

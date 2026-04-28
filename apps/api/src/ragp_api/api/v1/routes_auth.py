@@ -250,10 +250,18 @@ async def logout(
 
 @router.get("/me", response_model=AuthOut)
 async def me(
+    request: Request,
     user: User = Depends(require_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    result = await _get_user_org(user, db)
+    preferred_org_id: str | None = None
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        parsed = read_session_cookie(token)
+        if parsed and parsed[0] == user.id:
+            preferred_org_id = parsed[1]
+
+    result = await _get_user_org(user, db, preferred_org_id=preferred_org_id)
     if result is None:
         raise HTTPException(status_code=401, detail="No organization found")
     user_dict, org_dict = result
