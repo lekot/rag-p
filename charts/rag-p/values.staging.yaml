@@ -124,7 +124,9 @@ networkPolicy:
 observability:
   enabled: true
   serviceMonitor:
-    enabled: true
+    # ServiceMonitor CRD требует kube-prometheus-stack в кластере.
+    # Включить после `helm install kube-prometheus-stack` в namespace monitoring.
+    enabled: false
   workerMetricsPort: 9090
   prometheus:
     enabled: false  # kube-prometheus-stack установлен на кластере отдельно
