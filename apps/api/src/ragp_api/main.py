@@ -14,6 +14,7 @@ from ragp_api.api.errors import (
 )
 from ragp_api.api.v1 import (
     routes_auth,
+    routes_billing,
     routes_datasets,
     routes_experiments,
     routes_keys,
@@ -61,6 +62,7 @@ app.add_exception_handler(PluginNotFoundError, plugin_not_found_handler)  # type
 _v1_prefix = "/api/v1"
 
 app.include_router(routes_auth.router, prefix=_v1_prefix)
+app.include_router(routes_billing.router)
 app.include_router(routes_orgs.router)
 app.include_router(routes_keys.router, prefix=_v1_prefix)
 app.include_router(routes_pipelines.router, prefix=_v1_prefix)

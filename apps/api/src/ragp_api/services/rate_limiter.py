@@ -19,9 +19,11 @@ from __future__ import annotations
 import logging
 import math
 import time
+from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.settings import Settings
 
@@ -78,12 +80,41 @@ async def check_rag_query_limits(
     org_id: str,
     api_key_id: str,
     settings: Settings,
+    db: AsyncSession | None = None,
 ) -> None:
-    """Check both per-key and per-org rate limits.
+    """Check balance, per-key and per-org rate limits.
 
-    Raises HTTPException(429) if either limit is exceeded.
+    Raises HTTPException(402) if balance is zero or negative.
+    Raises HTTPException(429) if either rate limit is exceeded.
     Fails open if Redis raises any connection error.
+    db is optional for backward-compat; balance check is skipped if None.
     """
+    # --- Balance pre-flight check ---
+    if db is not None:
+        from ragp_api.services.billing import get_balance
+
+        try:
+            balance = await get_balance(db, org_id)
+            if balance <= Decimal("0"):
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "code": "insufficient_balance",
+                        "balance_usd": float(balance),
+                        "message": "Top up your balance at /account/billing",
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Balance check failed for org=%s (%s: %s) — failing open",
+                org_id,
+                type(exc).__name__,
+                exc,
+            )
+
+    # --- Rate limiting ---
     try:
         key_redis_key = f"rl:key:{api_key_id}"
         ok_key, retry_key = await check(

@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ApiKey } from "@/server/routers/keys";
+import type { BillingData } from "@/server/routers/billing";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -46,6 +47,13 @@ export default function AccountPage() {
   const keysQuery = trpc.keys.list.useQuery(undefined, {
     enabled: user !== null && user !== undefined,
   });
+
+  // Billing balance
+  const billingQuery = trpc.billing.get.useQuery(
+    { orgId: user?.organization?.id ?? "" },
+    { enabled: Boolean(user?.organization?.id) }
+  );
+  const billingBalance = (billingQuery.data as BillingData | null | undefined)?.balance_usd;
   const deleteMutation = trpc.keys.delete.useMutation({
     onSuccess: () => void utils.keys.list.invalidate(),
   });
@@ -187,6 +195,36 @@ export default function AccountPage() {
           <p className="text-sm text-muted-foreground">
             Статистика потребления токенов, стоимость по моделям и запросам.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* Billing balance card */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Биллинг</CardTitle>
+          <Link href="/account/billing">
+            <Button size="sm" variant="outline">
+              Управление балансом →
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent className="space-y-1">
+          <div className="text-sm text-muted-foreground">Текущий баланс</div>
+          {billingBalance === undefined ? (
+            <div className="text-muted-foreground text-sm">Загрузка…</div>
+          ) : (
+            <div
+              className={`text-2xl font-bold tabular-nums ${
+                billingBalance > 1
+                  ? "text-green-600"
+                  : billingBalance > 0.1
+                  ? "text-yellow-600"
+                  : "text-red-600"
+              }`}
+            >
+              ${billingBalance.toFixed(2)}
+            </div>
+          )}
         </CardContent>
       </Card>
 
