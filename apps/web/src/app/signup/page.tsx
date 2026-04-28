@@ -13,7 +13,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const inviteToken = searchParams.get("invite");
+  const inviteToken = searchParams?.get("invite") ?? null;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

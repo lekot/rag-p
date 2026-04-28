@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Membership, OrgMember, Organization, User
+from ragp_api.db.models import Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
 from ragp_api.services.passwords import hash_password, verify_password

@@ -172,11 +172,7 @@ async def patch_member(
         raise HTTPException(status_code=404, detail="Member not found")
 
     # Cannot demote self if last owner
-    if (
-        user_id == current_user.id
-        and member.role == OrgRole.owner
-        and body.role != OrgRole.owner
-    ):
+    if user_id == current_user.id and member.role == OrgRole.owner and body.role != OrgRole.owner:
         owners_result = await db.execute(
             select(OrgMember).where(
                 OrgMember.org_id == org_id,
@@ -309,9 +305,7 @@ async def accept_invite(
     token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     now = datetime.now(UTC)
 
-    result = await db.execute(
-        select(OrgInvite).where(OrgInvite.token_hash == token_hash)
-    )
+    result = await db.execute(select(OrgInvite).where(OrgInvite.token_hash == token_hash))
     invite = result.scalar_one_or_none()
 
     if invite is None:

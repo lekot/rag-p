@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import OrgInvite, OrgMember
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -188,9 +187,7 @@ async def test_owner_cannot_remove_self_if_last_owner(
 
 
 @pytest.mark.asyncio
-async def test_invite_expires_after_7_days(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_invite_expires_after_7_days(client: AsyncClient, db_session: AsyncSession) -> None:
     """An expired invite cannot be accepted."""
     owner_data = await _signup(client, "owner6@example.com", org_name="firm6")
     org_id = owner_data["organization"]["id"]

@@ -128,9 +128,7 @@ class OrgInvite(Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="org_invites")
-    inviter: Mapped["User"] = relationship(
-        back_populates="sent_invites", foreign_keys=[invited_by]
-    )
+    inviter: Mapped["User"] = relationship(back_populates="sent_invites", foreign_keys=[invited_by])
 
 
 class Pipeline(Base):

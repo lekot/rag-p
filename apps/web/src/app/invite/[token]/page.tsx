@@ -11,7 +11,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export default function InviteAcceptPage() {
   const router = useRouter();
   const params = useParams();
-  const token = params.token as string;
+  const token = (params?.token ?? "") as string;
   const user = useUser();
 
   const [accepting, setAccepting] = useState(false);
