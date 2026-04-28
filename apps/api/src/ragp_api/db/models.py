@@ -449,7 +449,7 @@ class SubscriptionEvent(Base):
 
 
 class OrgBalance(Base):
-    """Overage wallet for an organization — used by Corp/Enterprise for pay-as-you-go.
+    """Overage wallet for an organization — used by Corp/Enterprise for agreed overages.
 
     For subscription-based billing this is only charged when q_used exceeds
     included_q on a plan with allow_overage=True.

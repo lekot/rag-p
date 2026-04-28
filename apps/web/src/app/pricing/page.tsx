@@ -45,7 +45,7 @@ const PLANS: Plan[] = [
       "До 25 пользователей",
       "1 000 запросов/мин",
       "Audit log и роли",
-      "Pay-as-you-go при перерасходе",
+      "Индивидуальные лимиты перерасхода",
     ],
   },
   {
@@ -117,7 +117,7 @@ export default function PricingPage() {
             <ul className="list-disc list-inside text-xs space-y-1">
               <li>Input: 0,022 ₽ за 1 000 токенов (22 ₽/млн)</li>
               <li>Output: 0,055 ₽ за 1 000 токенов (55 ₽/млн)</li>
-              <li>Смешанный (2:1) ≈ 33 ₽/млн, порог окупаемости ≈ 21 ₽/млн</li>
+              <li>Смешанный (2:1) ≈ 33 ₽/млн</li>
             </ul>
             <p className="text-xs text-muted-foreground mt-2">
               В цену уже входят: оптовая стоимость DeepSeek, 6% VAT, 6% НПД самозанятого, 3,5% ЮKassa и операционная маржа.
@@ -144,7 +144,7 @@ export default function PricingPage() {
             <p className="text-xs text-muted-foreground mt-1">
               На пилотной стадии compute не списывается с баланса. Документы превращаются в чанки,
               эмбеддинги и индексы в БД; на 1 МБ исходных файлов мы резервируем до 10 МБ индексного
-              хранилища. Storage сверх включённого в тариф — pay-as-you-go.
+              хранилища. Storage сверх включённого в тариф согласуется отдельно.
             </p>
           </div>
 
@@ -153,7 +153,7 @@ export default function PricingPage() {
             <ul className="list-disc list-inside text-xs space-y-1">
               <li>При балансе ≤ 0 запросы возвращают 402 Payment Required</li>
               <li>При превышении rpm — 429 Too Many Requests с заголовком Retry-After</li>
-              <li>На Personal/Pro перерасход бакета блокирует запросы; на Corporate/Enterprise — pay-as-you-go</li>
+              <li>На Personal/Pro перерасход бакета блокирует запросы; на Corporate/Enterprise лимиты согласуются отдельно</li>
             </ul>
           </div>
 
