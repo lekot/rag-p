@@ -77,7 +77,7 @@ class AuditEventOut(BaseModel):
     resource_type: str | None
     resource_id: str | None
     ip_address: str | None
-    metadata: dict
+    metadata: dict[str, Any]
     created_at: str
 
 
@@ -434,7 +434,7 @@ async def list_audit_events(
             resource_type=ev.resource_type,
             resource_id=ev.resource_id,
             ip_address=ev.ip_address,
-            metadata=ev.metadata,
+            metadata=ev.metadata_json,
             created_at=ev.created_at.isoformat(),
         )
         for ev, u in rows.all()

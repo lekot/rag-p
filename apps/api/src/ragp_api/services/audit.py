@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +27,7 @@ async def log_audit_event(
     event_type: str,
     resource_type: str | None = None,
     resource_id: str | None = None,
-    metadata: dict | None = None,
+    metadata: dict[str, Any] | None = None,
     request: Request | None = None,
 ) -> None:
     """Insert an audit record.
@@ -50,7 +51,7 @@ async def log_audit_event(
             resource_id=resource_id,
             ip_address=ip,
             user_agent=ua,
-            metadata=metadata or {},
+            metadata_json=metadata or {},
         )
         db.add(event)
         await db.flush()
