@@ -55,10 +55,16 @@ Production environment secrets:
 - `RAGP_YOOKASSA_WEBHOOK_SECRET`: YooKassa webhook secret.
 - `RAGP_YOOKASSA_INN`: receipt INN.
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `COHERE_API_KEY`: optional provider keys.
+- `RAGP_S3_ACCESS_KEY_ID`, `RAGP_S3_SECRET_ACCESS_KEY`: Selectel S3 keys.
+- `RAGP_S3_SERVICE_PASSWORD`: optional Selectel service-user password.
 
 Optional repository variable:
 
 - `COMPOSE_SSH_PORT`: SSH port, default `22`.
+- `RAGP_S3_ENDPOINT_URL`: S3 endpoint, default
+  `https://s3.ru-1.storage.selcloud.ru`.
+- `RAGP_S3_BUCKET`: document/backups bucket name.
+- `RAGP_S3_SERVICE_USER`: Selectel service-user name.
 
 ## Cutover
 
