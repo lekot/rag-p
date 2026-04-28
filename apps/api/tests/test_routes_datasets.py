@@ -329,6 +329,7 @@ async def test_delete_dataset_cleans_runtime_dependents(
         name="Runtime pipeline",
         dataset_id=dataset_id,
     )
+    pipeline_id = pipeline.id
     version = PipelineVersion(
         id=str(uuid.uuid4()),
         pipeline_id=pipeline.id,
@@ -344,6 +345,7 @@ async def test_delete_dataset_cleans_runtime_dependents(
         dataset_id=dataset_id,
         status="completed",
     )
+    run_id = run.id
     db_session.add_all(
         [
             DatasetItem(
@@ -401,10 +403,10 @@ async def test_delete_dataset_cleans_runtime_dependents(
         await db_session.execute(select(Experiment).where(Experiment.dataset_id == dataset_id))
     ).scalar_one_or_none() is None
     assert (
-        await db_session.execute(select(Pipeline).where(Pipeline.id == pipeline.id))
+        await db_session.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
     ).scalar_one().dataset_id is None
     assert (
-        await db_session.execute(select(Run).where(Run.id == run.id))
+        await db_session.execute(select(Run).where(Run.id == run_id))
     ).scalar_one().dataset_id is None
 
 
