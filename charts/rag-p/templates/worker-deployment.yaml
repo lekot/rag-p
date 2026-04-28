@@ -25,6 +25,12 @@ spec:
           image: {{ include "rag-p.image" (dict "root" . "image" .Values.api.image) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           command: ["arq", "ragp_api.workers.main.WorkerSettings"]
+          {{- if .Values.observability.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.observability.workerMetricsPort }}
+              protocol: TCP
+          {{- end }}
           envFrom:
             {{- if .Values.llmKeysSecret }}
             - secretRef:

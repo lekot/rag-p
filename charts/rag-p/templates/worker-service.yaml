@@ -1,0 +1,18 @@
+{{- if and .Values.worker.enabled .Values.observability.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rag-p.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rag-p.componentLabels" (dict "root" . "component" "worker") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.observability.workerMetricsPort }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "rag-p.componentSelectorLabels" (dict "root" . "component" "worker") | nindent 4 }}
+{{- end }}
