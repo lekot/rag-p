@@ -251,8 +251,20 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 https://api.lekottt.ru/healthz
-          curl -fsS --max-time 20 https://lekottt.ru/signup -o /tmp/signup.html
+          retry_curl() {
+            local output="$1"
+            local url="$2"
+            for i in $(seq 1 20); do
+              if curl -fsS --max-time 20 "$url" -o "$output"; then
+                return 0
+              fi
+              sleep 5
+            done
+            curl -fsS --max-time 20 "$url" -o "$output"
+          }
+          retry_curl /tmp/healthz.json https://api.lekottt.ru/healthz
+          grep -q '"status":"ok"' /tmp/healthz.json
+          retry_curl /tmp/signup.html https://lekottt.ru/signup
           css_path=$(grep -oE 'href="[^"]*/_next/static/css/[^"]+\.css"' /tmp/signup.html | head -1 | sed -E 's/^href="//;s/"$//')
           test -n "$css_path"
           case "$css_path" in
@@ -260,5 +272,5 @@ jobs:
             /*) css_url="https://lekottt.ru$css_path" ;;
             *) css_url="https://lekottt.ru/$css_path" ;;
           esac
-          curl -fsS --max-time 20 "$css_url" -o /tmp/signup.css
+          retry_curl /tmp/signup.css "$css_url"
           test -s /tmp/signup.css
