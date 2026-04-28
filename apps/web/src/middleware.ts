@@ -8,6 +8,10 @@ const PUBLIC_PATHS = [
   "/_next",
   "/api",
   "/favicon.ico",
+  "/pricing",
+  "/terms",
+  "/contacts",
+  "/delivery",
 ];
 
 const API_BASE =
