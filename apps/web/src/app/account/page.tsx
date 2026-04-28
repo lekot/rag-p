@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ApiKey } from "@/server/routers/keys";
-import type { BillingData } from "@/server/routers/billing";
+import type { BillingData, SubscriptionData } from "@/server/routers/billing";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -36,6 +36,23 @@ function formatDate(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 Б";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function usagePercent(used: number, limit: number): number {
+  if (limit <= 0) return 0;
+  return Math.min(100, Math.round((used / limit) * 100));
 }
 
 export default function AccountPage() {
@@ -53,7 +70,19 @@ export default function AccountPage() {
     { orgId: user?.organization?.id ?? "" },
     { enabled: Boolean(user?.organization?.id) }
   );
-  const billingBalance = (billingQuery.data as BillingData | null | undefined)?.balance_usd;
+  const subscriptionQuery = trpc.billing.subscription.useQuery(
+    { orgId: user?.organization?.id ?? "" },
+    { enabled: Boolean(user?.organization?.id) }
+  );
+  const billingData = billingQuery.data as BillingData | null | undefined;
+  const subscriptionData = subscriptionQuery.data as SubscriptionData | null | undefined;
+  const billingBalance = billingData?.balance_usd ?? 0;
+  const balanceTone =
+    billingBalance > 1
+      ? "text-green-600"
+      : billingBalance > 0.1
+      ? "text-yellow-600"
+      : "text-red-600";
   const deleteMutation = trpc.keys.delete.useMutation({
     onSuccess: () => void utils.keys.list.invalidate(),
   });
@@ -192,9 +221,72 @@ export default function AccountPage() {
           </Link>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Статистика потребления токенов, стоимость по моделям и запросам.
-          </p>
+          {subscriptionQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Загрузка квот…</p>
+          ) : subscriptionData ? (
+            <div className="grid gap-4 text-sm sm:grid-cols-2">
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Тариф</div>
+                <div className="font-medium">{subscriptionData.plan.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  Действует до {formatDate(subscriptionData.current_period_end)}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-muted-foreground">Статус</div>
+                <div className="font-medium">{subscriptionData.status}</div>
+                <div className="text-xs text-muted-foreground">
+                  {subscriptionData.plan.allow_overage
+                    ? "Перерасход разрешён"
+                    : "Перерасход блокируется"}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">RAG-запросы</span>
+                  <span className="font-mono text-xs">
+                    {subscriptionData.q_used.toLocaleString("ru-RU")} /{" "}
+                    {subscriptionData.q_limit.toLocaleString("ru-RU")}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded bg-muted">
+                  <div
+                    className="h-full bg-primary"
+                    style={{
+                      width: `${usagePercent(subscriptionData.q_used, subscriptionData.q_limit)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Документы</span>
+                  <span className="font-mono text-xs">
+                    {formatBytes(subscriptionData.storage_bytes_used)} /{" "}
+                    {formatBytes(subscriptionData.storage_bytes_limit)}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded bg-muted">
+                  <div
+                    className="h-full bg-primary"
+                    style={{
+                      width: `${usagePercent(
+                        subscriptionData.storage_bytes_used,
+                        subscriptionData.storage_bytes_limit
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">Активного тарифа нет.</p>
+              <Link href="/pricing">
+                <Button size="sm">Выбрать тариф</Button>
+              </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -210,20 +302,15 @@ export default function AccountPage() {
         </CardHeader>
         <CardContent className="space-y-1">
           <div className="text-sm text-muted-foreground">Текущий баланс</div>
-          {billingBalance === undefined ? (
+          {billingQuery.isLoading ? (
             <div className="text-muted-foreground text-sm">Загрузка…</div>
           ) : (
-            <div
-              className={`text-2xl font-bold tabular-nums ${
-                billingBalance > 1
-                  ? "text-green-600"
-                  : billingBalance > 0.1
-                  ? "text-yellow-600"
-                  : "text-red-600"
-              }`}
-            >
+            <div className={`text-2xl font-bold tabular-nums ${balanceTone}`}>
               {billingBalance.toFixed(2)} ед.
             </div>
+          )}
+          {billingQuery.isError && (
+            <div className="text-xs text-destructive">Не удалось загрузить баланс</div>
           )}
         </CardContent>
       </Card>

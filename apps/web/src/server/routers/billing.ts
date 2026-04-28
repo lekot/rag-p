@@ -35,8 +35,31 @@ const BillingSchema = z.object({
   transactions: z.array(TransactionSchema),
 });
 
+const PlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price_rub_monthly: z.number(),
+  included_q: z.number(),
+  included_storage_bytes: z.number(),
+  max_users: z.number(),
+  rpm_per_key: z.number(),
+  allow_overage: z.boolean(),
+});
+
+const SubscriptionSchema = z.object({
+  plan: PlanSchema,
+  status: z.string(),
+  current_period_start: z.string(),
+  current_period_end: z.string(),
+  q_used: z.number(),
+  q_limit: z.number(),
+  storage_bytes_used: z.number(),
+  storage_bytes_limit: z.number(),
+});
+
 export type BillingTransaction = z.infer<typeof TransactionSchema>;
 export type BillingData = z.infer<typeof BillingSchema>;
+export type SubscriptionData = z.infer<typeof SubscriptionSchema>;
 
 export const billingRouter = router({
   get: publicProcedure
@@ -50,6 +73,20 @@ export const billingRouter = router({
       if (!res.ok) throw new Error(`API ${res.status}`);
       const data = BillingSchema.parse(await res.json());
       return data;
+    }),
+
+  subscription: publicProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const res = await authedFetch(
+        `/api/v1/orgs/${input.orgId}/subscription`,
+        ctx.cookieHeader
+      );
+      if (res.status === 401) return null;
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await res.json();
+      if (data === null) return null;
+      return SubscriptionSchema.parse(data);
     }),
 
   topup: publicProcedure
