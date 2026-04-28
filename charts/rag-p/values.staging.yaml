@@ -129,13 +129,3 @@ observability:
     enabled: true
   grafana:
     enabled: false  # grafana входит в kube-prometheus-stack
-
-loki-stack:
-  loki:
-    enabled: true
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClass: "universal.ru-3b"
-  promtail:
-    enabled: true
