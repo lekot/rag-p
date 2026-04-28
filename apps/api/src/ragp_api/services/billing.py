@@ -106,10 +106,15 @@ async def topup_balance(
     tx_type: str = "topup",
     created_by: str | None,
     note: str | None = None,
+    reference_type: str | None = None,
+    reference_id: str | None = None,
 ) -> Decimal:
     """Increase org balance by *amount*.
 
     Inserts a billing_transactions row.  Returns the new balance.
+
+    ``reference_type`` and ``reference_id`` are optional; when omitted the
+    defaults are derived from ``tx_type`` for backwards compatibility.
     """
     result = await db.execute(
         select(OrgBalance).where(OrgBalance.org_id == org_id).with_for_update()
@@ -130,14 +135,18 @@ async def topup_balance(
         balance_row.balance_usd = new_balance
         balance_row.updated_at = datetime.now(UTC)
 
+    # Derive defaults for backwards compatibility
+    if reference_type is None:
+        reference_type = "system" if tx_type == "starting_credit" else "manual_topup"
+
     tx = BillingTransaction(
         id=str(uuid.uuid4()),
         org_id=org_id,
         type=tx_type,
         amount_usd=amount,
         balance_after_usd=new_balance,
-        reference_type="system" if tx_type == "starting_credit" else "manual_topup",
-        reference_id=None,
+        reference_type=reference_type,
+        reference_id=reference_id,
         created_by=created_by,
         note=note,
     )

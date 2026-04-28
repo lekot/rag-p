@@ -37,6 +37,9 @@ spec:
                 name: {{ .Values.llmKeysSecret }}
                 optional: true
             {{- end }}
+            - secretRef:
+                name: {{ .Values.yookassaSecretName | default "yookassa-credentials" }}
+                optional: true
           env:
             {{- if .Values.postgres.enabled }}
             - name: POSTGRES_USER

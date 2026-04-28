@@ -63,24 +63,18 @@ function TxTypeBadge({ type }: { type: string }) {
   const map: Record<string, { label: string; className: string }> = {
     topup: {
       label: "\u041f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435",
-      className:
-        "text-green-700 bg-green-50 px-1.5 py-0.5 rounded text-xs font-medium",
+      className: "text-green-700 bg-green-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
     starting_credit: {
       label: "\u0411\u043e\u043d\u0443\u0441",
-      className:
-        "text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-xs font-medium",
+      className: "text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
     deduction: {
       label: "\u0421\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
-      className:
-        "text-red-700 bg-red-50 px-1.5 py-0.5 rounded text-xs font-medium",
+      className: "text-red-700 bg-red-50 px-1.5 py-0.5 rounded text-xs font-medium",
     },
   };
-  const entry = map[type] ?? {
-    label: type,
-    className: "text-muted-foreground text-xs",
-  };
+  const entry = map[type] ?? { label: type, className: "text-muted-foreground text-xs" };
   return <span className={entry.className}>{entry.label}</span>;
 }
 
@@ -120,7 +114,7 @@ function YookassaCheckoutDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Debounced preview from cached rate
+  // Debounced preview fetch
   useEffect(() => {
     const parsed = parseFloat(amountUsd);
     if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
@@ -129,15 +123,13 @@ function YookassaCheckoutDialog({
     }
     setPreviewLoading(true);
     const timer = setTimeout(() => {
-      const cachedRate = parseFloat(
-        localStorage.getItem("fx:usd_rub") ?? "0",
-      );
+      // Fetch rate preview from checkout endpoint (dry-run not available,
+      // so we call a dedicated fx endpoint if it exists, or compute client-side)
+      // For now we use a simple estimate from the last known rate stored in localStorage
+      const cachedRate = parseFloat(localStorage.getItem("fx:usd_rub") || "0");
       if (cachedRate > 0) {
         const rub = parsed * cachedRate * 1.03;
-        setPreview({
-          amountRub: Math.ceil(rub * 100) / 100,
-          rateUsdRub: cachedRate,
-        });
+        setPreview({ amountRub: Math.ceil(rub * 100) / 100, rateUsdRub: cachedRate });
       }
       setPreviewLoading(false);
     }, 400);
@@ -149,61 +141,39 @@ function YookassaCheckoutDialog({
     setError(null);
     const parsed = parseFloat(amountUsd);
     if (isNaN(parsed) || parsed < 1 || parsed > 1000) {
-      setError(
-        "\u0421\u0443\u043c\u043c\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u043e\u0442 $1 \u0434\u043e $1000",
-      );
+      setError("\u0421\u0443\u043c\u043c\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u043e\u0442 $1 \u0434\u043e $1000");
       return;
     }
     setSubmitting(true);
     try {
-      const resp = await fetch(
-        `/api/proxy/v1/orgs/${orgId}/billing/checkout`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ amount_usd: parsed.toFixed(2) }),
-        },
-      );
+      const resp = await fetch(`/api/proxy/v1/orgs/${orgId}/billing/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ amount_usd: parsed.toFixed(2) }),
+      });
       if (!resp.ok) {
-        const body = (await resp.json().catch(() => ({}))) as {
-          detail?: string;
-        };
-        throw new Error(
-          body.detail ??
-            "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 \u043f\u043b\u0430\u0442\u0435\u0436\u0430",
-        );
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail ?? "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 \u043f\u043b\u0430\u0442\u0435\u0436\u0430");
       }
-      const data = (await resp.json()) as {
-        confirmation_url: string;
-        rate_usd_rub?: number;
-      };
+      const data = await resp.json();
+      // Cache the rate for preview
       if (data.rate_usd_rub) {
         localStorage.setItem("fx:usd_rub", String(data.rate_usd_rub));
       }
+      // Redirect to YooKassa
       window.location.href = data.confirmation_url;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "\u041e\u0448\u0438\u0431\u043a\u0430",
-      );
+      setError(err instanceof Error ? err.message : "\u041e\u0448\u0438\u0431\u043a\u0430");
       setSubmitting(false);
     }
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            \u041f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435
-            \u0447\u0435\u0440\u0435\u0437
-            \u042e\u041a\u0430\u0441\u0441\u0430
-          </DialogTitle>
+          <DialogTitle>\u041f\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 \u042e\u041a\u0430\u0441\u0441\u0430</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-1">
@@ -222,6 +192,7 @@ function YookassaCheckoutDialog({
             />
           </div>
 
+          {/* Rate preview */}
           {preview && !previewLoading && (
             <p className="text-sm text-muted-foreground">
               {"\u2248"}&nbsp;
@@ -229,11 +200,9 @@ function YookassaCheckoutDialog({
                 {preview.amountRub.toLocaleString("ru-RU", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
-                })}
-                &nbsp;&#8381;
+                })}&nbsp;&#8381;
               </span>
-              &nbsp;\u043f\u043e
-              \u043a\u0443\u0440\u0441\u0443&nbsp;
+              &nbsp;\u043f\u043e \u043a\u0443\u0440\u0441\u0443&nbsp;
               <span className="tabular-nums">
                 {preview.rateUsdRub.toLocaleString("ru-RU", {
                   minimumFractionDigits: 2,
@@ -270,7 +239,7 @@ export default function BillingPage() {
   const user = useUser();
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
-  // useSearchParams() can return null before hydration; guard with optional chaining
+  // useSearchParams() may return null before hydration — guard with optional chaining
   const paidParam = searchParams?.get("paid") ?? null;
 
   const orgId = user?.organization?.id ?? "";
@@ -278,7 +247,7 @@ export default function BillingPage() {
 
   const billingQuery = trpc.billing.get.useQuery(
     { orgId },
-    { enabled: Boolean(orgId) },
+    { enabled: Boolean(orgId) }
   );
 
   // Invalidate billing data when returning from payment gateway
@@ -325,11 +294,7 @@ export default function BillingPage() {
       {/* Payment processing banner */}
       {paidParam === "1" && (
         <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          \u041f\u043b\u0430\u0442\u0451\u0436
-          \u043e\u0431\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f.
-          \u0411\u0430\u043b\u0430\u043d\u0441 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u0441\u044f
-          \u0432 \u0442\u0435\u0447\u0435\u043d\u0438\u0435
-          \u043c\u0438\u043d\u0443\u0442\u044b.
+          \u041f\u043b\u0430\u0442\u0451\u0436 \u043e\u0431\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f. \u0411\u0430\u043b\u0430\u043d\u0441 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0432 \u0442\u0435\u0447\u0435\u043d\u0438\u0435 \u043c\u0438\u043d\u0443\u0442\u044b.
         </div>
       )}
 
@@ -347,19 +312,12 @@ export default function BillingPage() {
           <BalanceDisplay balance={balance} />
           {balance <= 0 && (
             <p className="mt-2 text-sm text-red-600">
-              \u0411\u0430\u043b\u0430\u043d\u0441
-              \u0438\u0441\u0447\u0435\u0440\u043f\u0430\u043d.
-              API-\u0437\u0430\u043f\u0440\u043e\u0441\u044b
-              \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b.
+              \u0411\u0430\u043b\u0430\u043d\u0441 \u0438\u0441\u0447\u0435\u0440\u043f\u0430\u043d. API-\u0437\u0430\u043f\u0440\u043e\u0441\u044b \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b.
             </p>
           )}
           {!isOwner && (
             <p className="mt-2 text-sm text-muted-foreground">
-              \u041f\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c
-              \u0431\u0430\u043b\u0430\u043d\u0441 \u043c\u043e\u0436\u0435\u0442
-              \u0442\u043e\u043b\u044c\u043a\u043e
-              \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446
-              \u043e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u0438.
+              \u041f\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0431\u0430\u043b\u0430\u043d\u0441 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u043e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u0438.
             </p>
           )}
         </CardContent>
@@ -368,16 +326,12 @@ export default function BillingPage() {
       {/* Transactions */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            \u0418\u0441\u0442\u043e\u0440\u0438\u044f
-            \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439
-          </CardTitle>
+          <CardTitle>\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439</CardTitle>
         </CardHeader>
         <CardContent>
           {transactions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              \u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439
-              \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.
+              \u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.
             </p>
           ) : (
             <Table>
@@ -386,13 +340,8 @@ export default function BillingPage() {
                   <TableHead>\u0414\u0430\u0442\u0430</TableHead>
                   <TableHead>\u0422\u0438\u043f</TableHead>
                   <TableHead>\u0421\u0443\u043c\u043c\u0430</TableHead>
-                  <TableHead>
-                    \u0411\u0430\u043b\u0430\u043d\u0441
-                    \u043f\u043e\u0441\u043b\u0435
-                  </TableHead>
-                  <TableHead>
-                    \u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435
-                  </TableHead>
+                  <TableHead>\u0411\u0430\u043b\u0430\u043d\u0441 \u043f\u043e\u0441\u043b\u0435</TableHead>
+                  <TableHead>\u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
