@@ -106,10 +106,10 @@ def test_calculate_cost_unknown_model_zero_cost() -> None:
     assert cost == Decimal("0.000000")
 
 
-def test_calculate_cost_gpt4o_mini() -> None:
+def test_calculate_cost_unpriced_external_model_zero_cost() -> None:
+    """External models without configured pricing should not accrue usage cost."""
     cost = calculate_cost("openai/gpt-4o-mini", 2000, 500)
-    # (2000 * 0.00015 + 500 * 0.0006) / 1000 = (0.3 + 0.3) / 1000 = 0.0006
-    assert cost == Decimal("0.000600")
+    assert cost == Decimal("0.000000")
 
 
 # ---------------------------------------------------------------------------
