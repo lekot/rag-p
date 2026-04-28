@@ -94,9 +94,8 @@ jobs:
           helm upgrade rag-p ./charts/rag-p \
             -n rag-p \
             -f charts/rag-p/values.staging.yaml \
-            --reuse-values \
             --wait \
-            --timeout 6m
+            --timeout 15m
 
       - name: Show new PVCs
         run: kubectl -n rag-p get pvc

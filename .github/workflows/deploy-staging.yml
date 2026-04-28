@@ -162,7 +162,7 @@ jobs:
             --set api.image.tag=${{ needs.build-api.outputs.tag }} \
             --set web.image.tag=${{ needs.build-web.outputs.tag }} \
             --wait \
-            --timeout 6m
+            --timeout 15m
 
       - name: Wait for rollouts
         run: |
