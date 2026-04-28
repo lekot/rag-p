@@ -5,15 +5,14 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import BillingTransaction, OrgRole
+from ragp_api.db.models import BillingTransaction, OrgRole, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
-from ragp_api.db.models import User
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.billing import get_balance, topup_balance
 from ragp_api.services.permissions import require_role

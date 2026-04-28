@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import uuid
 from decimal import Decimal
@@ -18,9 +17,9 @@ from ragp_api.db.models import (
     ApiKey,
     BillingTransaction,
     Membership,
+    Organization,
     OrgBalance,
     OrgMember,
-    Organization,
     User,
 )
 from ragp_api.services.billing import (
@@ -264,15 +263,12 @@ async def test_owner_can_topup_admin_cannot(
     admin_user = User(id=admin_id, email="topup-admin@example.com", password_hash="x")
     db_session.add(admin_user)
     db_session.add(Membership(organization_id=org_id, user_id=admin_id, role="admin"))
-    db_session.add(
-        OrgMember(id=str(uuid.uuid4()), org_id=org_id, user_id=admin_id, role="admin")
-    )
+    db_session.add(OrgMember(id=str(uuid.uuid4()), org_id=org_id, user_id=admin_id, role="admin"))
     await db_session.commit()
 
     # Admin login via direct cookie hack — signup as admin with own org, then
     # change their org_member to point to org_id
-    admin_data = await _signup(client, "topup-admin@example.com", password="s3cr3t!", org_name="AdminOrg")
-    admin_org_id = admin_data["organization"]["id"]
+    await _signup(client, "topup-admin@example.com", password="s3cr3t!", org_name="AdminOrg")
     await _login(client, "topup-admin@example.com")
 
     # Admin tries to topup original org — 403
@@ -307,9 +303,7 @@ async def test_rag_query_402_when_balance_zero(
     db_session: AsyncSession,
 ) -> None:
     """RAG query returns 402 when org balance is zero."""
-    org_id, raw_key, _user_id = await _seed_org_with_api_key(
-        db_session, balance_usd=Decimal("0")
-    )
+    org_id, raw_key, _user_id = await _seed_org_with_api_key(db_session, balance_usd=Decimal("0"))
 
     from ragp_api.db.models import Dataset as DatasetModel
 

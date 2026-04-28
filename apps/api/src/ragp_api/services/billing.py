@@ -27,16 +27,12 @@ class InsufficientBalanceError(Exception):
     def __init__(self, balance: Decimal, required: Decimal) -> None:
         self.balance = balance
         self.required = required
-        super().__init__(
-            f"Insufficient balance: have {balance}, need {required}"
-        )
+        super().__init__(f"Insufficient balance: have {balance}, need {required}")
 
 
 async def get_balance(db: AsyncSession, org_id: str) -> Decimal:
     """Return current balance for org_id.  Returns Decimal('0') if no record."""
-    result = await db.execute(
-        select(OrgBalance).where(OrgBalance.org_id == org_id)
-    )
+    result = await db.execute(select(OrgBalance).where(OrgBalance.org_id == org_id))
     row = result.scalar_one_or_none()
     if row is None:
         return Decimal("0")
@@ -63,9 +59,7 @@ async def deduct_balance(
     # SELECT FOR UPDATE — locks the row for the duration of this transaction.
     # with_for_update() is a no-op on SQLite (tests), harmless on Postgres.
     result = await db.execute(
-        select(OrgBalance)
-        .where(OrgBalance.org_id == org_id)
-        .with_for_update()
+        select(OrgBalance).where(OrgBalance.org_id == org_id).with_for_update()
     )
     balance_row = result.scalar_one_or_none()
 
@@ -118,9 +112,7 @@ async def topup_balance(
     Inserts a billing_transactions row.  Returns the new balance.
     """
     result = await db.execute(
-        select(OrgBalance)
-        .where(OrgBalance.org_id == org_id)
-        .with_for_update()
+        select(OrgBalance).where(OrgBalance.org_id == org_id).with_for_update()
     )
     balance_row = result.scalar_one_or_none()
 
