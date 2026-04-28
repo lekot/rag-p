@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from ragp_api.services.experiment_runner import build_combinations
+
 
 async def _create_dataset(client: AsyncClient, organization_id: str) -> str:
     resp = await client.post(
@@ -27,6 +29,30 @@ PLUGIN_GRID = {
         }
     ],
 }
+
+
+def test_build_combinations_accepts_frontend_name_alias() -> None:
+    combinations = build_combinations(
+        {
+            "retrievers": [{"name": "pgvector-hybrid", "params": {"top_k": 3}}],
+            "generators": [{"name": "litellm-generator", "params": {"max_tokens": 256}}],
+        }
+    )
+
+    assert combinations == [
+        [
+            {
+                "plugin_kind": "retriever",
+                "plugin_name": "pgvector-hybrid",
+                "params": {"top_k": 3},
+            },
+            {
+                "plugin_kind": "generator",
+                "plugin_name": "litellm-generator",
+                "params": {"max_tokens": 256},
+            },
+        ]
+    ]
 
 
 def _make_redis_pool_mock() -> MagicMock:

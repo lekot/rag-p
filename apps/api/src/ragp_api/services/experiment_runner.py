@@ -32,10 +32,13 @@ def build_combinations(plugin_grid: dict[str, list[dict[str, Any]]]) -> list[lis
     for combo in combinations:
         nodes = []
         for _slot, variant in zip(slots, combo, strict=False):
+            plugin_name = variant.get("plugin_name") or variant.get("name")
+            if not plugin_name:
+                raise ValueError(f"Plugin variant in slot {_slot} has no plugin_name")
             nodes.append(
                 {
                     "plugin_kind": variant.get("plugin_kind", _slot.rstrip("s")),
-                    "plugin_name": variant["plugin_name"],
+                    "plugin_name": plugin_name,
                     "params": variant.get("params", {}),
                 }
             )
