@@ -154,7 +154,10 @@ export function UploadDocumentDialog({
       }
 
       toast({ title: "Document uploaded successfully" });
+      void utils.datasets.byId.invalidate({ id: targetDatasetId });
+      void utils.datasets.documents.list.invalidate({ datasetId: targetDatasetId });
       handleOpenChange(false);
+      router.refresh();
       router.push(`/datasets/${targetDatasetId}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

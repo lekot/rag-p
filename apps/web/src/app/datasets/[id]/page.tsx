@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { notFound } from "next/navigation";
-import { useParams } from "next/navigation";
+import { notFound, useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +32,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 import type { Chunk, GoldenItem, SearchChunk } from "@/server/routers/datasets";
+import { useToast } from "@/hooks/use-toast";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   ready: "default",
@@ -320,10 +320,11 @@ function AskSection({ datasetId }: { datasetId: string }) {
 // Golden Q&A section
 // ---------------------------------------------------------------------------
 
-function GoldenQASection({ datasetId }: { datasetId: string }) {
+function GoldenQASection({ datasetId, chunkCount }: { datasetId: string; chunkCount: number }) {
   const [open, setOpen] = useState(false);
   const [sampleSize, setSampleSize] = useState(10);
   const [expanded, setExpanded] = useState(false);
+  const { toast } = useToast();
 
   const utils = trpc.useUtils();
 
@@ -331,8 +332,16 @@ function GoldenQASection({ datasetId }: { datasetId: string }) {
     trpc.datasets.golden.list.useQuery({ datasetId });
 
   const generateMutation = trpc.datasets.generateGolden.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       setOpen(false);
+      setExpanded(true);
+      toast({
+        title: result.count > 0 ? "Golden Q&A generated" : "No chunks available",
+        description:
+          result.count > 0
+            ? `${result.count} items created`
+            : "Upload and index a document before generating golden Q&A.",
+      });
       void utils.datasets.golden.list.invalidate({ datasetId });
     },
   });
@@ -405,7 +414,7 @@ function GoldenQASection({ datasetId }: { datasetId: string }) {
                 )}
               </CardTitle>
             </button>
-            <Button size="sm" onClick={() => setOpen(true)}>
+            <Button size="sm" onClick={() => setOpen(true)} disabled={chunkCount === 0}>
               Generate Golden Q&amp;A
             </Button>
           </div>
@@ -417,7 +426,9 @@ function GoldenQASection({ datasetId }: { datasetId: string }) {
             )}
             {!goldenLoading && count === 0 && (
               <p className="text-sm text-muted-foreground">
-                No golden Q&amp;A yet. Click &ldquo;Generate&rdquo; to create pairs from your chunks.
+                {chunkCount === 0
+                  ? "No chunks yet. Upload a document before generating golden Q&A."
+                  : "No golden Q&A yet. Click “Generate” to create pairs from your chunks."}
               </p>
             )}
             {!goldenLoading && count > 0 && (
@@ -526,7 +537,10 @@ function DocumentRow({ datasetId, docId, sourceUri, parsedAt, chunkCount, status
 export default function DatasetDetailPage() {
   const params = useParams<{ id: string }>();
   if (!params) notFound();
+  const router = useRouter();
+  const { toast } = useToast();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const utils = trpc.useUtils();
 
   const { data: dataset, isLoading: dsLoading } = trpc.datasets.byId.useQuery(
     { id: params.id }
@@ -534,6 +548,25 @@ export default function DatasetDetailPage() {
 
   const { data: documents, isLoading: docsLoading } =
     trpc.datasets.documents.list.useQuery({ datasetId: params.id });
+  const deleteMutation = trpc.datasets.delete.useMutation({
+    onSuccess: () => {
+      toast({ title: "Dataset deleted" });
+      void utils.datasets.list.invalidate();
+      router.push("/datasets");
+    },
+    onError: (err) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const chunkCount = (documents ?? []).reduce((total, doc) => total + doc.chunk_count, 0);
+
+  const handleDelete = () => {
+    if (!window.confirm(`Удалить датасет «${dataset?.name ?? ""}» вместе с документами и чанками?`)) {
+      return;
+    }
+    deleteMutation.mutate({ id: params.id });
+  };
 
   if (dsLoading) return <div className="text-muted-foreground">Loading…</div>;
   if (!dataset) return <div className="text-muted-foreground">Dataset not found.</div>;
@@ -549,7 +582,16 @@ export default function DatasetDetailPage() {
             </p>
           )}
         </div>
-        <Button onClick={() => setUploadOpen(true)}>Upload more</Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setUploadOpen(true)}>Upload more</Button>
+          <Button
+            variant="destructive"
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending}
+          >
+            Delete
+          </Button>
+        </div>
       </div>
 
       <UploadDocumentDialog
@@ -562,7 +604,7 @@ export default function DatasetDetailPage() {
 
       <AskSection datasetId={params.id} />
 
-      <GoldenQASection datasetId={params.id} />
+      <GoldenQASection datasetId={params.id} chunkCount={chunkCount} />
 
       <Card>
         <CardHeader>

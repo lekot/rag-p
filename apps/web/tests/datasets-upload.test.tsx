@@ -3,13 +3,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 
 const mockPush = vi.fn();
+const mockRefresh = vi.fn();
 const mockToast = vi.fn();
 const mockInvalidate = vi.fn();
 const mockMutateAsync = vi.fn();
 
 // Mock next/navigation — must be before any import that transitively uses it
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
 }));
 
 // Mock useToast
@@ -51,6 +52,10 @@ vi.mock("@/lib/trpc", () => {
       useUtils: () => ({
         datasets: {
           list: { invalidate: _invalidate },
+          byId: { invalidate: _invalidate },
+          documents: {
+            list: { invalidate: _invalidate },
+          },
         },
       }),
     },
@@ -124,7 +129,7 @@ describe("UploadDocumentDialog", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining(`/api/v1/datasets/${targetId}/documents`),
+        expect.stringContaining(`/api/datasets/${targetId}/documents`),
         expect.objectContaining({ method: "POST" })
       );
     });
@@ -132,6 +137,7 @@ describe("UploadDocumentDialog", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(`/datasets/${targetId}`);
     });
+    expect(mockRefresh).toHaveBeenCalled();
   });
 
   it("shows error toast when upload fails", async () => {

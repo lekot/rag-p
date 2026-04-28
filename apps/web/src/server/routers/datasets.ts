@@ -113,6 +113,12 @@ export const datasetsRouter = router({
       return apiClient.post<Dataset>("/api/v1/datasets", input, authHeaders(ctx));
     }),
 
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.delete<void>(`/api/v1/datasets/${input.id}`, authHeaders(ctx));
+    }),
+
   generate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {

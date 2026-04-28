@@ -15,6 +15,9 @@ async function apiFetch<T>(
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${text}`);
   }
+  if (res.status === 204) {
+    return { data: undefined as T, rawResponse: res };
+  }
   const data = (await res.json()) as T;
   return { data, rawResponse: res };
 }

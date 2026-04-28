@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,27 @@ export default function NewExperimentPage() {
       return { ...prev, [gridKey]: current };
     });
   };
+
+  useEffect(() => {
+    if (!plugins) return;
+
+    setSelectedPlugins((prev) => {
+      let changed = false;
+      const next: Record<string, Set<string>> = { ...prev };
+
+      for (const stage of STAGE_KEYS) {
+        if (!stage.required) continue;
+        const stagePlugins = plugins.filter((p) => p.kind === stage.kind);
+        if (stagePlugins.length !== 1) continue;
+        const current = next[stage.gridKey] ?? new Set<string>();
+        if (current.size > 0) continue;
+        next[stage.gridKey] = new Set([stagePlugins[0].name]);
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [plugins]);
 
   const isFormValid = () => {
     if (!name.trim() || !datasetId) return false;

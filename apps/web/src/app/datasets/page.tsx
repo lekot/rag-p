@@ -25,6 +25,22 @@ export default function DatasetsPage() {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
+  const deleteMutation = trpc.datasets.delete.useMutation({
+    onSuccess: () => {
+      toast({ title: "Dataset deleted" });
+      void utils.datasets.list.invalidate();
+    },
+    onError: (err) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleDelete = (id: string, name: string) => {
+    if (!window.confirm(`Удалить датасет «${name}» вместе с документами и чанками?`)) {
+      return;
+    }
+    deleteMutation.mutate({ id });
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -47,7 +63,7 @@ export default function DatasetsPage() {
                 </Link>
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex items-center justify-between">
+            <CardContent className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 {ds.source && (
                   <Badge variant="outline" className="font-mono text-xs">
@@ -60,14 +76,24 @@ export default function DatasetsPage() {
                   </span>
                 )}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => generateMutation.mutate({ id: ds.id })}
-                disabled={generateMutation.isPending}
-              >
-                Auto-generate (RAGAS)
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => generateMutation.mutate({ id: ds.id })}
+                  disabled={generateMutation.isPending}
+                >
+                  Auto-generate (RAGAS)
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDelete(ds.id, ds.name)}
+                  disabled={deleteMutation.isPending}
+                >
+                  Delete
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
