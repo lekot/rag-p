@@ -1,12 +1,15 @@
 import os
+from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from fakeredis.aioredis import FakeRedis
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ragp_api.db import models  # noqa: F401 — ensure models are registered
 from ragp_api.db.base import Base
+from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.main import app
 from ragp_api.plugins.registry import _registry, bootstrap
@@ -28,6 +31,8 @@ async def reset_registry():
 
 @pytest_asyncio.fixture
 async def db_engine():
+    from sqlalchemy import text
+
     engine = create_async_engine(_TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         if _IS_POSTGRES:
@@ -37,6 +42,32 @@ async def db_engine():
                 __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
             )
         await conn.run_sync(Base.metadata.create_all)
+        # Seed the canonical test organisations that tests reference via
+        # X-Organization-Id or the `organization_id` fixture.  PostgreSQL
+        # enforces FK constraints (SQLite does not), so the rows must exist
+        # before any Dataset / Document / Experiment can reference them.
+        if _IS_POSTGRES:
+            await conn.execute(
+                text(
+                    "INSERT INTO organizations (id, name, slug) VALUES "
+                    "('org-test-001', 'Test Org', 'test-org'), "
+                    "('other-org', 'Other Org', 'other-org') "
+                    "ON CONFLICT (id) DO NOTHING"
+                )
+            )
+        else:
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO organizations (id, name, slug) VALUES "
+                    "('org-test-001', 'Test Org', 'test-org')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO organizations (id, name, slug) VALUES "
+                    "('other-org', 'Other Org', 'other-org')"
+                )
+            )
     yield engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -53,16 +84,22 @@ async def db_session(db_engine):
 @pytest_asyncio.fixture
 async def client(db_engine):
     session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    fake_redis = FakeRedis()
 
     async def override_get_db():
         async with session_factory() as session:
             yield session
 
+    async def override_get_redis() -> AsyncIterator[FakeRedis]:
+        yield fake_redis
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_redis] = override_get_redis
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+    await fake_redis.aclose()
 
 
 @pytest.fixture
