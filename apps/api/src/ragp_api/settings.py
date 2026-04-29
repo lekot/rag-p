@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     experiment_stale_timeout_seconds: int = 900
     experiment_watchdog_interval_minutes: int = 2
 
+    # Cohere selective VPN routing (AmneziaWG sidecar).
+    # Empty (default) -> direct connect; from RU IPs api.cohere.com / api.cohere.ai may be blocked.
+    # Production value: http://cohere-egress:8888 — HTTP forward proxy in the sidecar.
+    cohere_http_proxy: str = ""
+
     # S3-compatible object storage for raw uploaded documents.
     s3_endpoint_url: str = ""
     s3_region: str = ""
