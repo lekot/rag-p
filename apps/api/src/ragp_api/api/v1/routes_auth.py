@@ -232,6 +232,8 @@ async def login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.deletion_requested_at is not None:
+        raise HTTPException(status_code=403, detail="account_pending_deletion")
 
     # Get user's primary membership (prefer owner role)
     mem_result = await db.execute(

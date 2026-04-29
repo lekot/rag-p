@@ -24,6 +24,7 @@ from ragp_api.api.v1 import (
     routes_rag,
     routes_runs,
     routes_usage,
+    routes_users,
 )
 from ragp_api.db.redis import close_redis_pool, create_redis_pool
 from ragp_api.plugins.registry import bootstrap
@@ -72,6 +73,7 @@ app.include_router(routes_experiments.router, prefix=_v1_prefix)
 app.include_router(routes_plugins.router, prefix=_v1_prefix)
 app.include_router(routes_rag.router, prefix=_v1_prefix)
 app.include_router(routes_usage.router)
+app.include_router(routes_users.router, prefix=_v1_prefix)
 
 
 @app.get("/health")
