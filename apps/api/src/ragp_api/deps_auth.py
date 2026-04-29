@@ -9,6 +9,7 @@ Priority order for require_organization:
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,9 +31,29 @@ __all__ = [
     "get_api_key_org",
     "get_session_user",
     "require_organization",
+    "require_scope",
     "require_session_user",
     "_get_user_org",
 ]
+
+
+# Scope hierarchy: admin > write > read.
+_SCOPE_RANK: dict[str, int] = {"read": 1, "write": 2, "admin": 3}
+
+
+def _scope_satisfies(have: str, need: str) -> bool:
+    """Return True if `have` is at least as privileged as `need`."""
+    return _SCOPE_RANK.get(have, 0) >= _SCOPE_RANK.get(need, 0)
+
+
+def _is_key_expired(api_key: ApiKey) -> bool:
+    """Return True if the api key has reached its expiration moment."""
+    expires_at = api_key.expires_at
+    if expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)
 
 
 async def get_session_user(
@@ -65,7 +86,10 @@ async def get_api_key_org(
 ) -> tuple[Organization, ApiKey] | None:
     """Read Authorization: Bearer header, validate API key, update last_used_at.
 
-    Returns (Organization, ApiKey) or None.
+    Returns (Organization, ApiKey) or None when no/invalid bearer was supplied.
+
+    Raises 401 with detail=key_expired/key_revoked if the key matches but is
+    no longer usable, so callers cannot silently fall back to anonymous access.
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -80,6 +104,11 @@ async def get_api_key_org(
     if api_key is None:
         return None
 
+    if api_key.revoked_at is not None:
+        raise HTTPException(status_code=401, detail="key_revoked")
+    if _is_key_expired(api_key):
+        raise HTTPException(status_code=401, detail="key_expired")
+
     # Update last_used_at
     api_key.last_used_at = datetime.now(UTC)
     await db.commit()
@@ -90,6 +119,9 @@ async def get_api_key_org(
     org = org_result.scalar_one_or_none()
     if org is None:
         return None
+
+    # Stash for downstream require_scope dependency
+    request.state.api_key = api_key
 
     return org, api_key
 
@@ -134,6 +166,10 @@ async def require_organization(
         )
         bearer_api_key = bearer_key_result.scalar_one_or_none()
         if bearer_api_key is not None:
+            if bearer_api_key.revoked_at is not None:
+                raise HTTPException(status_code=401, detail="key_revoked")
+            if _is_key_expired(bearer_api_key):
+                raise HTTPException(status_code=401, detail="key_expired")
             bearer_api_key.last_used_at = datetime.now(UTC)
             await db.commit()
             bearer_org_result = await db.execute(
@@ -143,6 +179,8 @@ async def require_organization(
             if bearer_org is not None and bearer_org.deletion_requested_at is not None:
                 raise HTTPException(status_code=403, detail="account_pending_deletion")
             if bearer_org:
+                # Stash for downstream require_scope dependency
+                request.state.api_key = bearer_api_key
                 return bearer_org
 
     # 3. Legacy X-Organization-Id header fallback. Disabled in production:
@@ -174,6 +212,75 @@ async def require_session_user(
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
+
+
+def require_scope(min_scope: str) -> Callable[..., Any]:
+    """Dependency factory enforcing API-key scope hierarchy (admin > write > read).
+
+    Session-cookie callers (UI users) bypass this check — UI always has full
+    permissions and is governed by org membership/role instead.
+
+    Behaviour:
+      - If the request carries a session cookie that resolves to a real user,
+        the scope check is skipped.
+      - If a Bearer API key is supplied, look it up and require the key's
+        `scope` to satisfy `min_scope`; otherwise 403 ``insufficient_scope``.
+      - If neither is present, the request remains anonymous from this
+        dependency's perspective; it is up to other deps in the route
+        signature (e.g. `require_organization`) to issue 401.
+    """
+    if min_scope not in _SCOPE_RANK:
+        raise ValueError(f"Unknown scope: {min_scope!r}")
+
+    async def _checker(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        # Cached api_key on request.state (populated by get_api_key_org /
+        # require_organization) — fast path.
+        api_key: ApiKey | None = getattr(request.state, "api_key", None)
+
+        if api_key is None:
+            # If a session cookie is attached, skip scope check (UI users).
+            cookie = request.cookies.get(COOKIE_NAME)
+            if cookie:
+                parsed = read_session_cookie(cookie)
+                if parsed:
+                    return
+
+            # Look up the bearer key directly so endpoints that don't
+            # otherwise depend on get_api_key_org still get scope enforcement.
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                raw = auth_header.removeprefix("Bearer ").strip()
+                if raw:
+                    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+                    res = await db.execute(
+                        select(ApiKey).where(ApiKey.key_hash == key_hash)
+                    )
+                    api_key = res.scalar_one_or_none()
+                    if api_key is not None:
+                        if api_key.revoked_at is not None:
+                            raise HTTPException(status_code=401, detail="key_revoked")
+                        if _is_key_expired(api_key):
+                            raise HTTPException(status_code=401, detail="key_expired")
+                        request.state.api_key = api_key
+
+        if api_key is None:
+            # No auth context — leave 401 to other deps (or allow public).
+            return
+
+        if not _scope_satisfies(api_key.scope, min_scope):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "detail": "insufficient_scope",
+                    "required": min_scope,
+                    "have": api_key.scope,
+                },
+            )
+
+    return _checker
 
 
 async def _get_user_org(

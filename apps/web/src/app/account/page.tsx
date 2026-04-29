@@ -8,6 +8,7 @@ import { useUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -17,6 +18,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ApiKey } from "@/server/routers/keys";
+import type { ApiKey, ApiKeyScope } from "@/server/routers/keys";
 import type { BillingData, SubscriptionData } from "@/server/routers/billing";
 
 function formatDate(iso: string | null | undefined): string {
@@ -54,6 +62,30 @@ function usagePercent(used: number, limit: number): number {
   if (limit <= 0) return 0;
   return Math.min(100, Math.round((used / limit) * 100));
 }
+
+function daysUntil(iso: string): number {
+  const ms = new Date(iso).getTime() - Date.now();
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+function expiryBadge(expiresAt: string, isExpired: boolean): {
+  text: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+} {
+  if (isExpired) return { text: "истёк", variant: "destructive" };
+  const days = daysUntil(expiresAt);
+  if (days <= 0) return { text: "истёк", variant: "destructive" };
+  if (days <= 7) return { text: `через ${days} д`, variant: "destructive" };
+  if (days <= 30) return { text: `через ${days} д`, variant: "secondary" };
+  return { text: `через ${days} д`, variant: "outline" };
+}
+
+const EXPIRY_PRESETS: { label: string; days: number }[] = [
+  { label: "30 дней", days: 30 },
+  { label: "90 дней", days: 90 },
+  { label: "180 дней", days: 180 },
+  { label: "365 дней", days: 365 },
+];
 
 export default function AccountPage() {
   const router = useRouter();
@@ -94,6 +126,8 @@ export default function AccountPage() {
   // New key dialog state
   const [newKeyDialogOpen, setNewKeyDialogOpen] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyScope, setNewKeyScope] = useState<ApiKeyScope>("read");
+  const [newKeyExpiresInDays, setNewKeyExpiresInDays] = useState<number>(90);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -177,7 +211,11 @@ export default function AccountPage() {
     e.preventDefault();
     setCreateError(null);
     try {
-      const result = await createMutation.mutateAsync({ name: newKeyName.trim() });
+      const result = await createMutation.mutateAsync({
+        name: newKeyName.trim(),
+        scope: newKeyScope,
+        expires_in_days: newKeyExpiresInDays,
+      });
       setCreatedKey(result.key);
       setNewKeyName("");
     } catch (err) {
@@ -197,6 +235,8 @@ export default function AccountPage() {
     setNewKeyDialogOpen(false);
     setCreatedKey(null);
     setNewKeyName("");
+    setNewKeyScope("read");
+    setNewKeyExpiresInDays(90);
     setCreateError(null);
     setCopied(false);
   }
@@ -431,38 +471,52 @@ export default function AccountPage() {
                 <TableRow>
                   <TableHead>Название</TableHead>
                   <TableHead>Префикс</TableHead>
-                  <TableHead>Создан</TableHead>
+                  <TableHead>Scope</TableHead>
+                  <TableHead>Истекает</TableHead>
                   <TableHead>Последнее использование</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(keysQuery.data as ApiKey[]).map((k) => (
-                  <TableRow key={k.id}>
-                    <TableCell>{k.name}</TableCell>
-                    <TableCell>
-                      <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                        {k.key_prefix}…
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {formatDate(k.created_at)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {formatDate(k.last_used_at)}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => void deleteMutation.mutateAsync({ id: k.id })}
-                        disabled={deleteMutation.isPending}
-                      >
-                        Удалить
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {(keysQuery.data as ApiKey[]).map((k) => {
+                  const badge = expiryBadge(k.expires_at, k.is_expired);
+                  return (
+                    <TableRow key={k.id}>
+                      <TableCell>{k.name}</TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                          {k.key_prefix}…
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="uppercase">
+                          {k.scope}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <div className="flex items-center gap-2">
+                          <Badge variant={badge.variant}>{badge.text}</Badge>
+                          <span className="text-muted-foreground">
+                            {formatDate(k.expires_at)}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {formatDate(k.last_used_at)}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => void deleteMutation.mutateAsync({ id: k.id })}
+                          disabled={deleteMutation.isPending}
+                        >
+                          Удалить
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -581,6 +635,54 @@ export default function AccountPage() {
                   required
                   autoFocus
                 />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="key-scope">Права (scope)</Label>
+                <Select
+                  value={newKeyScope}
+                  onValueChange={(v) => setNewKeyScope(v as ApiKeyScope)}
+                >
+                  <SelectTrigger id="key-scope">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="read">read — только чтение (rag/query)</SelectItem>
+                    <SelectItem value="write">write — чтение + запись (ingest, эксперименты)</SelectItem>
+                    <SelectItem value="admin">admin — всё, включая управление</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="key-expires">Срок действия</Label>
+                <div className="flex flex-wrap gap-2">
+                  {EXPIRY_PRESETS.map((preset) => (
+                    <Button
+                      key={preset.days}
+                      type="button"
+                      size="sm"
+                      variant={newKeyExpiresInDays === preset.days ? "default" : "outline"}
+                      onClick={() => setNewKeyExpiresInDays(preset.days)}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </div>
+                <Input
+                  id="key-expires"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={newKeyExpiresInDays}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) {
+                      setNewKeyExpiresInDays(Math.min(365, Math.max(1, Math.floor(v))));
+                    }
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  По умолчанию 90 дней, максимум 365.
+                </p>
               </div>
               {createError && (
                 <p className="text-sm text-red-500">{createError}</p>

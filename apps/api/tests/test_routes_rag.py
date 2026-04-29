@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +38,8 @@ async def _create_org_with_key(db: AsyncSession) -> tuple[str, str, str]:
         name="test-key",
         key_prefix=raw_key[:8],
         key_hash=key_hash,
+        expires_at=datetime.now(UTC) + timedelta(days=90),
+        scope="admin",
     )
 
     dataset = Dataset(

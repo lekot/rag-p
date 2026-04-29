@@ -80,6 +80,8 @@ async def _seed_org_with_api_key(
         name="usage-test-key",
         key_prefix=raw_key[:8],
         key_hash=key_hash,
+        expires_at=datetime.now(UTC) + timedelta(days=90),
+        scope="admin",
     )
 
     # Seed positive balance so billing pre-flight does not block RAG requests
