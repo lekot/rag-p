@@ -57,7 +57,10 @@ function SignupForm() {
         }
         router.push("/account/team");
       } else {
-        router.push("/");
+        // Brand-new accounts have no subscription yet — direct them to
+        // /pricing with a welcome banner so they understand the next step
+        // (otherwise the dashboard greets them with 402 errors).
+        router.push("/pricing?welcome=1");
       }
     } catch {
       setError("Ошибка сети. Попробуйте ещё раз.");

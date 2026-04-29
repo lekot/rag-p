@@ -66,6 +66,24 @@ class QuotaConsumption:
     overage: bool
 
 
+async def has_active_subscription(db: AsyncSession, org_id: str) -> bool:
+    """Return True iff the org currently has an active, non-expired subscription.
+
+    Read-only, side-effect free probe used by /auth/me, /auth/signup and
+    /auth/login responses to drive the post-signup customer-journey UX.
+    Unlike :func:`get_active_subscription`, this helper does NOT mutate the
+    row when the period has elapsed — it simply returns False.
+    """
+    result = await db.execute(
+        select(OrgSubscription.id).where(
+            OrgSubscription.org_id == org_id,
+            OrgSubscription.status == "active",
+            OrgSubscription.current_period_end > datetime.now(UTC),
+        )
+    )
+    return result.first() is not None
+
+
 async def get_active_subscription(db: AsyncSession, org_id: str) -> OrgSubscription | None:
     """Return the active subscription for *org_id*.
 

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { useUser } from "@/lib/auth";
 
 interface Tile {
   title: string;
@@ -33,6 +34,12 @@ function StatTile({ tile }: { tile: Tile }) {
 }
 
 export default function DashboardPage() {
+  const user = useUser();
+  // Show the no-plan banner only once we know the user is logged in AND we
+  // have confirmation from /me that they lack an active subscription.
+  // `undefined` = still loading, `null` = anonymous (no banner needed).
+  const needsPlan = user != null && user.has_active_subscription !== true;
+
   const datasets = trpc.datasets.list.useQuery();
   const pipelines = trpc.pipelines.list.useQuery({});
   const experiments = trpc.experiments.list.useQuery();
@@ -63,6 +70,24 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
+      {needsPlan && (
+        <div
+          role="alert"
+          className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 flex items-start gap-3"
+        >
+          <span aria-hidden className="text-2xl leading-none">!</span>
+          <div className="flex-1 space-y-1">
+            <p className="font-semibold text-amber-900">У вас нет активного плана</p>
+            <p className="text-sm text-amber-900/80">
+              Без подписки API возвращает 402 Payment Required для запросов и
+              загрузок документов. Выберите тариф, чтобы начать работу.
+            </p>
+          </div>
+          <Link href="/pricing">
+            <Button size="sm">Выбрать план</Button>
+          </Link>
+        </div>
+      )}
       <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
       <p className="text-sm text-muted-foreground mb-6">
         Workflow: <span className="font-medium">Dataset</span> → загрузка документов;{" "}

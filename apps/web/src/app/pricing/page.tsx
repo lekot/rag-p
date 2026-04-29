@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useUser } from "@/lib/auth";
@@ -75,10 +76,12 @@ const PLANS: Plan[] = [
   },
 ];
 
-export default function PricingPage() {
+function PricingPageInner() {
   const user = useUser();
   const orgId = user?.organization?.id ?? "";
   const isOwner = user?.organization?.role === "owner";
+  const searchParams = useSearchParams();
+  const showWelcome = searchParams?.get("welcome") === "1";
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,6 +116,21 @@ export default function PricingPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-10">
+      {showWelcome && (
+        <div
+          role="status"
+          className="rounded-lg border border-primary/30 bg-primary/5 px-5 py-4 flex items-start gap-3"
+        >
+          <span aria-hidden className="text-2xl leading-none">↓</span>
+          <div className="space-y-1">
+            <p className="font-semibold">Аккаунт создан.</p>
+            <p className="text-sm text-muted-foreground">
+              Чтобы начать загружать документы и делать запросы, выберите тариф ниже.
+              Без активного плана API возвращает 402 Payment Required.
+            </p>
+          </div>
+        </div>
+      )}
       <header className="text-center space-y-2">
         <h1 className="text-3xl font-bold">Тарифы</h1>
         <p className="text-sm text-muted-foreground">
@@ -245,5 +263,15 @@ export default function PricingPage() {
         </div>
       </details>
     </div>
+  );
+}
+
+export default function PricingPage() {
+  // useSearchParams must live under a Suspense boundary so the page can be
+  // statically prerendered without bailing out.
+  return (
+    <Suspense fallback={<div className="max-w-6xl mx-auto" />}>
+      <PricingPageInner />
+    </Suspense>
   );
 }

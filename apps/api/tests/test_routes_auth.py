@@ -1,7 +1,14 @@
 """Tests for authentication endpoints."""
 
+import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ragp_api.db.models import OrgSubscription, Plan
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,6 +89,86 @@ async def test_me_with_cookie_returns_user_org(client: AsyncClient) -> None:
     body = me_resp.json()
     assert body["user"]["email"] == "carol@example.com"
     assert body["organization"]["role"] == "owner"
+
+
+# ---------------------------------------------------------------------------
+# has_active_subscription flag in auth responses
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_signup_returns_has_active_subscription_false(client: AsyncClient) -> None:
+    """A brand-new account has no subscription — the response must signal
+    that explicitly so the web app redirects to /pricing."""
+    resp = await _signup(client, email="journey-signup@example.com", organization_name="JourneyOrg")
+    assert resp.status_code == 201
+    body = resp.json()
+    assert "has_active_subscription" in body
+    assert body["has_active_subscription"] is False
+
+
+@pytest.mark.asyncio
+async def test_me_endpoint_includes_subscription_flag(client: AsyncClient) -> None:
+    """GET /auth/me returns has_active_subscription=False after signup
+    (no OrgSubscription is created on signup)."""
+    signup_resp = await _signup(
+        client, email="journey-me@example.com", organization_name="JourneyMeOrg"
+    )
+    assert signup_resp.status_code == 201
+
+    me_resp = await client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200
+    body = me_resp.json()
+    assert "has_active_subscription" in body
+    assert body["has_active_subscription"] is False
+
+
+@pytest.mark.asyncio
+async def test_login_includes_subscription_flag_for_active_user(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Login response reflects an existing active subscription as True."""
+    signup_resp = await _signup(
+        client, email="journey-login@example.com", organization_name="JourneyLoginOrg"
+    )
+    assert signup_resp.status_code == 201
+    org_id = signup_resp.json()["organization"]["id"]
+
+    # Seed an active plan + subscription directly
+    plan = Plan(
+        id="personal",
+        name="Personal",
+        price_rub_monthly=Decimal("100"),
+        included_q=1000,
+        included_storage_bytes=10 * 1024 * 1024,
+        max_users=1,
+        rpm_per_key=60,
+        allow_overage=False,
+        is_active=True,
+        sort_order=1,
+    )
+    db_session.add(plan)
+    now = datetime.now(UTC)
+    sub = OrgSubscription(
+        id=str(uuid.uuid4()),
+        org_id=org_id,
+        plan_id="personal",
+        status="active",
+        current_period_start=now - timedelta(days=1),
+        current_period_end=now + timedelta(days=29),
+        q_used=0,
+        storage_bytes_used=0,
+        auto_renew=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    login_resp = await _login(client, email="journey-login@example.com")
+    assert login_resp.status_code == 200
+    body = login_resp.json()
+    assert body["has_active_subscription"] is True
 
 
 @pytest.mark.asyncio

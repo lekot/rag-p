@@ -17,9 +17,13 @@ const OrganizationSchema = z.object({
   role: z.string(),
 });
 
+// Backend always returns the flag, but keep it optional in the schema so
+// the web does not crash if the user is on an older API build during
+// rolling deploy. Missing / undefined is treated as "no active sub".
 const MeResponseSchema = z.object({
   user: UserSchema,
   organization: OrganizationSchema,
+  has_active_subscription: z.boolean().optional(),
 });
 
 export type MeResponse = z.infer<typeof MeResponseSchema>;
@@ -27,6 +31,7 @@ export type MeResponse = z.infer<typeof MeResponseSchema>;
 const AuthResponseSchema = z.object({
   user: UserSchema,
   organization: OrganizationSchema,
+  has_active_subscription: z.boolean().optional(),
 });
 
 export const authRouter = router({

@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.passwords import hash_password, verify_password
 from ragp_api.services.sessions import make_session_cookie, read_session_cookie
+from ragp_api.services.subscription import has_active_subscription
 from ragp_api.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -61,6 +62,11 @@ class OrgOut(BaseModel):
 class AuthOut(BaseModel):
     user: UserOut
     organization: OrgOut
+    # Drives post-signup UX: when False the web app routes the user to
+    # /pricing; when True the dashboard becomes the natural landing page.
+    # Defaulted for backward compatibility with any callers that may still
+    # construct AuthOut without the field.
+    has_active_subscription: bool = Field(default=False)
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +177,12 @@ async def signup(
 
     _set_session_cookie(response, user.id, org.id)
 
+    # Brand-new orgs never have a subscription yet — this is the explicit
+    # signal the web app uses to redirect to /pricing.
     return AuthOut(
         user=UserOut(id=user.id, email=user.email),
         organization=OrgOut(id=org.id, name=org.name, slug=org.slug, role="owner"),
+        has_active_subscription=False,
     )
 
 
@@ -215,11 +224,13 @@ async def login(
         metadata={},
         request=request,
     )
+    has_sub = await has_active_subscription(db, org.id)
     await db.commit()
 
     return AuthOut(
         user=UserOut(id=user.id, email=user.email),
         organization=OrgOut(id=org.id, name=org.name, slug=org.slug, role=membership.role),
+        has_active_subscription=has_sub,
     )
 
 
@@ -265,7 +276,9 @@ async def me(
     if result is None:
         raise HTTPException(status_code=401, detail="No organization found")
     user_dict, org_dict = result
+    has_sub = await has_active_subscription(db, org_dict["id"])
     return AuthOut(
         user=UserOut(**user_dict),
         organization=OrgOut(**org_dict),
+        has_active_subscription=has_sub,
     )
