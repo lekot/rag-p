@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     bge_reranker_device: str = "cpu"
     bge_reranker_max_batch: int = 32
 
+    # Experiment watchdog (background cron in workers/main.py).  An experiment
+    # whose updated_at is older than this many seconds and is still in
+    # queued/running is considered abandoned and force-failed.
+    experiment_stale_timeout_seconds: int = 900
+    experiment_watchdog_interval_minutes: int = 2
+
     # S3-compatible object storage for raw uploaded documents.
     s3_endpoint_url: str = ""
     s3_region: str = ""

@@ -288,6 +288,16 @@ class Experiment(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     leaderboard_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Watchdog heartbeat: bumped on every commit inside run_experiment_inline so
+    # the stale-experiment cron can detect dead workers.  ``onupdate`` updates
+    # the column automatically whenever any other column on the row is changed,
+    # but the runner also touches it explicitly to handle no-op commits.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class DatasetGoldenItem(Base):

@@ -14,6 +14,8 @@ from ragp_api.settings import settings
 from ragp_api.workers.tasks import (
     aggregate_usage_daily,
     expire_subscriptions_task,
+    mark_experiment_failed_on_crash,
+    mark_stale_experiments_failed,
     run_experiment_task,
 )
 
@@ -58,18 +60,56 @@ async def on_job_complete(ctx: dict) -> None:  # type: ignore[type-arg]
     jobs_total.labels(status="completed" if success else "failed").inc()
 
 
+async def on_job_failure(ctx: dict) -> None:  # type: ignore[type-arg]
+    """ARQ ``after_job_end`` hook for hard worker failures (timeout/crash).
+
+    ARQ invokes this when a job finishes with an exception.  For
+    ``run_experiment_task`` we synthesise a ``failed`` row with
+    ``error_code='worker_crash'`` so the experiment never gets stuck in
+    queued/running.  Wrapped in a broad try/except — the callback itself must
+    never raise.
+    """
+    try:
+        function_name = ctx.get("function") or ctx.get("function_name")
+        if function_name != "run_experiment_task":
+            return
+
+        args = ctx.get("args") or ()
+        if not args:
+            return
+        experiment_id = args[0]
+        exc = ctx.get("exception") or ctx.get("result")
+        error_msg = str(exc) if exc is not None else "Unknown worker failure"
+
+        await mark_experiment_failed_on_crash(experiment_id, error_msg)
+    except Exception as exc:  # pragma: no cover — defensive guard
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "on_job_failure callback itself failed: %s", exc
+        )
+
+
 class WorkerSettings:
     """ARQ worker configuration."""
 
-    functions = [run_experiment_task, aggregate_usage_daily]
+    functions = [run_experiment_task, aggregate_usage_daily, mark_stale_experiments_failed]
     cron_jobs = [
         cron(aggregate_usage_daily, hour=1, minute=0, run_at_startup=False),
         # Daily: expire subscriptions whose period has ended
         cron(expire_subscriptions_task, hour=0, minute=10, run_at_startup=False),
+        # Watchdog: scan for queued/running experiments whose heartbeat went
+        # stale and mark them failed.  Runs every two minutes.
+        cron(
+            mark_stale_experiments_failed,
+            minute=set(range(0, 60, 2)),
+            run_at_startup=False,
+        ),
     ]
     redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
     max_jobs = 5
     job_timeout = 600  # 10 minutes per experiment
     on_startup = on_startup
     on_job_start = on_job_start
-    on_job_complete = on_job_complete
+    on_job_end = on_job_complete
+    after_job_end = on_job_failure
