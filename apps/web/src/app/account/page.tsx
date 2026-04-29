@@ -101,6 +101,16 @@ export default function AccountPage() {
   // Logout
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // GDPR — data export and account deletion.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+
   async function handleLogout() {
     setLoggingOut(true);
     try {
@@ -108,6 +118,58 @@ export default function AccountPage() {
     } finally {
       setLoggingOut(false);
       router.push("/login");
+    }
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const resp = await fetch(`${apiBase}/api/v1/users/me/export`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!resp.ok) {
+        throw new Error(`Export failed: HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      a.download = `rag-platform-export-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Ошибка экспорта");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const resp = await fetch(`${apiBase}/api/v1/users/me/delete`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!resp.ok) {
+        const detail = await resp.text();
+        throw new Error(detail || `HTTP ${resp.status}`);
+      }
+      setDeleteDialogOpen(false);
+      // Cookie is intentionally left intact — backend now rejects all auth.
+      router.push("/login");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Ошибка удаления");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -406,6 +468,97 @@ export default function AccountPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Privacy / GDPR */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Конфиденциальность</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Согласно 152-ФЗ и GDPR вы можете получить полную копию ваших данных
+            или запросить удаление аккаунта. Подробности — на странице{" "}
+            <Link href="/privacy" className="underline hover:text-foreground">
+              Политика конфиденциальности
+            </Link>
+            .
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => void handleExport()}
+              disabled={exporting}
+            >
+              {exporting ? "Готовим архив…" : "Скачать мои данные"}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setDeleteConfirmText("");
+                setDeleteError(null);
+                setDeleteDialogOpen(true);
+              }}
+            >
+              Удалить аккаунт
+            </Button>
+          </div>
+          {exportError && (
+            <p className="text-sm text-destructive">{exportError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Delete account confirmation dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteDialogOpen(false);
+            setDeleteError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Удалить аккаунт?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              Аккаунт и все организации, в которых вы являетесь владельцем,
+              будут помечены к удалению. Через 30 дней данные будут физически
+              стёрты. До этого срока вы не сможете войти.
+            </p>
+            <p>
+              Для подтверждения введите <code>УДАЛИТЬ</code>:
+            </p>
+            <Input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="УДАЛИТЬ"
+              autoFocus
+            />
+            {deleteError && (
+              <p className="text-destructive">{deleteError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+            >
+              Отмена
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={deleting || deleteConfirmText !== "УДАЛИТЬ"}
+            >
+              {deleting ? "Удаляем…" : "Удалить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New Key Dialog */}
       <Dialog open={newKeyDialogOpen} onOpenChange={(open) => { if (!open) closeNewKeyDialog(); }}>

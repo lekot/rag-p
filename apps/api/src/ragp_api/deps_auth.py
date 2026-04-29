@@ -39,7 +39,12 @@ async def get_session_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    """Read session cookie and return the User, or None if absent/invalid."""
+    """Read session cookie and return the User, or None if absent/invalid.
+
+    Users with ``deletion_requested_at`` set are treated as locked: this
+    function raises ``HTTPException(403, account_pending_deletion)`` so the
+    response is consistent across all auth-protected endpoints.
+    """
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
@@ -48,7 +53,10 @@ async def get_session_user(
         return None
     user_id, _org_id = parsed
     user_result = await db.execute(select(User).where(User.id == user_id))
-    return user_result.scalar_one_or_none()
+    user = user_result.scalar_one_or_none()
+    if user is not None and user.deletion_requested_at is not None:
+        raise HTTPException(status_code=403, detail="account_pending_deletion")
+    return user
 
 
 async def get_api_key_org(
@@ -102,10 +110,17 @@ async def require_organization(
         parsed = read_session_cookie(token)
         if parsed:
             user_id, org_id = parsed
+            # Block sessions tied to a user awaiting deletion.
+            session_user_result = await db.execute(select(User).where(User.id == user_id))
+            session_user = session_user_result.scalar_one_or_none()
+            if session_user is not None and session_user.deletion_requested_at is not None:
+                raise HTTPException(status_code=403, detail="account_pending_deletion")
             session_org_result = await db.execute(
                 select(Organization).where(Organization.id == org_id)
             )
             session_org = session_org_result.scalar_one_or_none()
+            if session_org is not None and session_org.deletion_requested_at is not None:
+                raise HTTPException(status_code=403, detail="account_pending_deletion")
             if session_org and await _user_has_org_access(db, user_id, org_id):
                 return session_org
 
@@ -125,6 +140,8 @@ async def require_organization(
                 select(Organization).where(Organization.id == bearer_api_key.organization_id)
             )
             bearer_org = bearer_org_result.scalar_one_or_none()
+            if bearer_org is not None and bearer_org.deletion_requested_at is not None:
+                raise HTTPException(status_code=403, detail="account_pending_deletion")
             if bearer_org:
                 return bearer_org
 
