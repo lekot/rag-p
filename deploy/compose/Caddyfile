@@ -13,5 +13,11 @@ www.lekottt.ru {
 
 api.lekottt.ru {
 	encode zstd gzip
-	reverse_proxy api:8000
+	reverse_proxy api:8000 {
+		# Preserve the originating client IP for the YooKassa webhook
+		# allowlist check (apps/api/src/ragp_api/security/yookassa_webhook.py).
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
 }
