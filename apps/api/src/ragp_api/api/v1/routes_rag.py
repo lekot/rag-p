@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ragp_api.db.models import ApiKey, Dataset, Organization, Pipeline, PipelineVersion, Run
 from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import get_api_key_org
+from ragp_api.deps_auth import get_api_key_org, require_scope
 from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
@@ -143,6 +143,7 @@ async def rag_query(
     db: AsyncSession = Depends(get_db),
     auth: tuple[Organization, ApiKey] | None = Depends(get_api_key_org),
     redis: Any = Depends(get_redis),
+    _scope: None = Depends(require_scope("read")),
 ) -> RagQueryOut:
     """RAG query endpoint for programmatic (API-key-authenticated) access."""
 

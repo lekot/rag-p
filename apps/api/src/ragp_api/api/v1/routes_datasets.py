@@ -24,7 +24,7 @@ from ragp_api.db.models import (
     Run,
 )
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import require_organization
+from ragp_api.deps_auth import require_organization, require_scope
 from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
@@ -122,6 +122,7 @@ async def create_dataset(
     request: Request,
     db: AsyncSession = Depends(get_db),
     org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("write")),
 ) -> DatasetOut:
     dataset = Dataset(
         id=str(uuid.uuid4()),
@@ -190,6 +191,7 @@ async def delete_dataset(
     request: Request,
     db: AsyncSession = Depends(get_db),
     organization_id: str = Depends(get_current_organization_id),
+    _scope: None = Depends(require_scope("write")),
 ) -> None:
     result = await db.execute(
         select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
@@ -326,6 +328,7 @@ async def generate_golden(
     body: GenerateGoldenIn,
     db: AsyncSession = Depends(get_db),
     organization_id: str = Depends(get_current_organization_id),
+    _scope: None = Depends(require_scope("write")),
 ) -> GenerateGoldenOut:
     """Generate golden Q&A pairs for a dataset using DeepSeek."""
     ds_result = await db.execute(
@@ -535,6 +538,7 @@ async def upload_document(
     chunker_params: str = Form(default="{}"),
     db: AsyncSession = Depends(get_db),
     organization_id: str = Depends(get_current_organization_id),
+    _scope: None = Depends(require_scope("write")),
 ) -> UploadDocumentResponse:
     # Verify dataset ownership
     ds_result = await db.execute(

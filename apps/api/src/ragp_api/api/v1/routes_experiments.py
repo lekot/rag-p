@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Experiment, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
+from ragp_api.deps_auth import require_scope
 from ragp_api.settings import settings
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
@@ -85,6 +86,7 @@ class PipelineOut(BaseModel):
 async def create_experiment(
     body: ExperimentCreateIn,
     db: AsyncSession = Depends(get_db),
+    _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
     experiment = Experiment(
         id=str(uuid.uuid4()),
@@ -219,6 +221,7 @@ async def promote_to_pipeline(
     experiment_id: str,
     body: PromoteIn,
     db: AsyncSession = Depends(get_db),
+    _scope: None = Depends(require_scope("write")),
 ) -> PipelineOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
