@@ -8,6 +8,7 @@ import { authRouter } from "./auth";
 import { keysRouter } from "./keys";
 import { usageRouter } from "./usage";
 import { billingRouter } from "./billing";
+import { orgsRouter } from "./orgs";
 
 export const appRouter = router({
   plugins: pluginsRouter,
@@ -19,6 +20,7 @@ export const appRouter = router({
   keys: keysRouter,
   usage: usageRouter,
   billing: billingRouter,
+  orgs: orgsRouter,
 });
 
 export type AppRouter = typeof appRouter;
