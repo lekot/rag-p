@@ -41,6 +41,11 @@ out/
 secrets/
 y-secret_key.txt
 
+# Bench session artefacts (locust CSVs and seeded creds — never commit)
+scripts/bench/.bench-env
+scripts/bench/__pycache__/
+results/
+
 # IDE
 .idea/
 .vscode/*
