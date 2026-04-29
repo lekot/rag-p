@@ -25,6 +25,9 @@ Services:
 - `postgres`: `pgvector/pgvector:pg16` with local volume.
 - `redis`: queue/cache, no persistence for pilot.
 - `ollama`: local model runtime with local model volume.
+- `cohere-egress`: AmneziaWG VPN client + tinyproxy on `:8888`, used for
+  selective routing of cohere SDK calls only. See
+  [`cohere-vpn-sidecar.md`](cohere-vpn-sidecar.md).
 
 Persistent volumes:
 
@@ -55,6 +58,10 @@ Production environment secrets:
 - `RAGP_YOOKASSA_WEBHOOK_SECRET`: YooKassa webhook secret.
 - `RAGP_YOOKASSA_INN`: receipt INN.
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `COHERE_API_KEY`: optional provider keys.
+- `COHERE_AMNEZIA_CONF`: optional. Raw AmneziaWG `.conf` text used by the
+  `cohere-egress` sidecar to bypass the RU-side block on `api.cohere.com`.
+  See [`cohere-vpn-sidecar.md`](cohere-vpn-sidecar.md). When empty the
+  sidecar still starts (without VPN) and cohere calls fail-soft per plugin.
 - `RAGP_S3_ACCESS_KEY_ID`, `RAGP_S3_SECRET_ACCESS_KEY`: Selectel S3 keys.
 - `RAGP_S3_SERVICE_PASSWORD`: optional Selectel service-user password.
 
@@ -65,6 +72,8 @@ Optional repository variable:
   `https://s3.ru-1.storage.selcloud.ru`.
 - `RAGP_S3_BUCKET`: document/backups bucket name.
 - `RAGP_S3_SERVICE_USER`: Selectel service-user name.
+- `RAGP_COHERE_HTTP_PROXY`: cohere SDK proxy URL, default
+  `http://cohere-egress:8888`. Set empty to disable selective routing.
 
 ## Cutover
 
