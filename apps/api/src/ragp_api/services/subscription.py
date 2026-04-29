@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 _PERIOD_DAYS = 30
 
 
+def _aware_utc(value: datetime) -> datetime:
+    """Normalize a datetime to UTC-aware so comparisons never raise.
+
+    Why: SQLAlchemy + some DB drivers (e.g. SQLite, certain Postgres async paths)
+    can return tz-naive datetimes from columns declared TIMESTAMP WITH TIME ZONE.
+    Comparing those with `datetime.now(UTC)` raises TypeError. Coerce on read.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class NoActiveSubscriptionError(Exception):
     """Raised when an operation requires an active subscription but none exists."""
 
@@ -65,7 +77,7 @@ async def get_active_subscription(db: AsyncSession, org_id: str) -> OrgSubscript
         return None
 
     # Lazy expiry check
-    if sub.status == "active" and sub.current_period_end < datetime.now(UTC):
+    if sub.status == "active" and _aware_utc(sub.current_period_end) < datetime.now(UTC):
         sub.status = "expired"
         sub.updated_at = datetime.now(UTC)
         _log_event(
@@ -127,7 +139,7 @@ async def consume_q(db: AsyncSession, org_id: str, count: int = 1) -> QuotaConsu
     if sub is None or sub.status != "active":
         raise NoActiveSubscriptionError(f"No active subscription for org {org_id}")
 
-    if sub.current_period_end < datetime.now(UTC):
+    if _aware_utc(sub.current_period_end) < datetime.now(UTC):
         sub.status = "expired"
         sub.updated_at = datetime.now(UTC)
         await db.flush()
@@ -184,7 +196,7 @@ async def consume_storage(db: AsyncSession, org_id: str, bytes_count: int) -> No
     if sub is None or sub.status != "active":
         raise NoActiveSubscriptionError(f"No active subscription for org {org_id}")
 
-    if sub.current_period_end < datetime.now(UTC):
+    if _aware_utc(sub.current_period_end) < datetime.now(UTC):
         sub.status = "expired"
         sub.updated_at = datetime.now(UTC)
         await db.flush()
@@ -248,10 +260,10 @@ async def start_subscription(
     )
     sub = result.scalar_one_or_none()
 
-    if sub is not None and sub.status == "active" and sub.current_period_end >= now:
+    if sub is not None and sub.status == "active" and _aware_utc(sub.current_period_end) >= now:
         if sub.plan_id == plan_id:
             # ---- Renewal ----
-            new_end = max(now, sub.current_period_end) + timedelta(days=_PERIOD_DAYS)
+            new_end = max(now, _aware_utc(sub.current_period_end)) + timedelta(days=_PERIOD_DAYS)
             sub.current_period_end = new_end
             sub.q_used = 0
             sub.updated_at = now
