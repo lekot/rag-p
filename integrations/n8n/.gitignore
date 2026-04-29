@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.tsbuildinfo
+*.tsbuildinfo
+.env
+.env.local
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
