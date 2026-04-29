@@ -214,27 +214,62 @@ async def require_session_user(
     return user
 
 
-def require_scope(min_scope: str) -> Callable[[Request], None]:
+def require_scope(min_scope: str) -> Callable[..., Any]:
     """Dependency factory enforcing API-key scope hierarchy (admin > write > read).
 
     Session-cookie callers (UI users) bypass this check — UI always has full
     permissions and is governed by org membership/role instead.
 
     Behaviour:
-      - If the request was authenticated via API key, the key's `scope` must
-        satisfy `min_scope`; otherwise 403 ``insufficient_scope``.
-      - If no API key was attached (session-cookie auth), allow.
-      - If an API key was attached but the scope is insufficient, return
-        403 with ``{"detail": "insufficient_scope", "required": ..., "have": ...}``.
+      - If the request carries a session cookie that resolves to a real user,
+        the scope check is skipped.
+      - If a Bearer API key is supplied, look it up and require the key's
+        `scope` to satisfy `min_scope`; otherwise 403 ``insufficient_scope``.
+      - If neither is present, the request remains anonymous from this
+        dependency's perspective; it is up to other deps in the route
+        signature (e.g. `require_organization`) to issue 401.
     """
     if min_scope not in _SCOPE_RANK:
         raise ValueError(f"Unknown scope: {min_scope!r}")
 
-    def _checker(request: Request) -> None:
+    async def _checker(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        # Cached api_key on request.state (populated by get_api_key_org /
+        # require_organization) — fast path.
         api_key: ApiKey | None = getattr(request.state, "api_key", None)
+
         if api_key is None:
-            # Session-cookie path or unauthenticated (other deps will 401).
+            # If a session cookie is attached, skip scope check (UI users).
+            cookie = request.cookies.get(COOKIE_NAME)
+            if cookie:
+                parsed = read_session_cookie(cookie)
+                if parsed:
+                    return
+
+            # Look up the bearer key directly so endpoints that don't
+            # otherwise depend on get_api_key_org still get scope enforcement.
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                raw = auth_header.removeprefix("Bearer ").strip()
+                if raw:
+                    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+                    res = await db.execute(
+                        select(ApiKey).where(ApiKey.key_hash == key_hash)
+                    )
+                    api_key = res.scalar_one_or_none()
+                    if api_key is not None:
+                        if api_key.revoked_at is not None:
+                            raise HTTPException(status_code=401, detail="key_revoked")
+                        if _is_key_expired(api_key):
+                            raise HTTPException(status_code=401, detail="key_expired")
+                        request.state.api_key = api_key
+
+        if api_key is None:
+            # No auth context — leave 401 to other deps (or allow public).
             return
+
         if not _scope_satisfies(api_key.scope, min_scope):
             raise HTTPException(
                 status_code=403,
