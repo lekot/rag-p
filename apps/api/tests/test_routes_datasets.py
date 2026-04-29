@@ -53,6 +53,46 @@ async def _signup(client: AsyncClient, org_name: str) -> dict:
     return resp.json()
 
 
+async def _grant_test_subscription(
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+    *,
+    plan_id: str = "query-test",
+    included_q: int = 100,
+) -> None:
+    now = datetime.now(UTC)
+    db_session.add(
+        Plan(
+            id=plan_id,
+            name="Query Test",
+            price_rub_monthly=Decimal("100"),
+            included_q=included_q,
+            included_storage_bytes=10_000_000,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    db_session.add(
+        OrgSubscription(
+            id=str(uuid.uuid4()),
+            org_id=organization_id,
+            plan_id=plan_id,
+            status="active",
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            q_used=0,
+            storage_bytes_used=0,
+            auto_renew=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
+
+
 def _txt_upload(content: str, filename: str = "hello.txt") -> dict:
     return {
         "file": (filename, io.BytesIO(content.encode()), "text/plain"),
@@ -833,6 +873,58 @@ async def test_ask_returns_answer_with_chunks(client: AsyncClient, organization_
     assert body["usage"]["completion_tokens"] == 10
     # Ensure generator was called
     gen_instance.generate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ask_consumes_query_quota_when_enforced(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    await _grant_test_subscription(db_session, organization_id)
+    dataset_id = await _create_dataset(client, organization_id)
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": "Relevant context",
+            "score": 0.9,
+            "metadata": {},
+            "document_id": str(uuid.uuid4()),
+            "document_name": "doc.txt",
+        }
+    ]
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock(
+        return_value={
+            "answer": "Answer",
+            "trace": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},
+        }
+    )
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    old_enforce = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    try:
+        with patch(
+            "ragp_api.api.v1.routes_datasets.get_plugin",
+            side_effect=_make_ask_get_plugin(fake_chunks, generator_cls),
+        ):
+            resp = await client.post(
+                f"/api/v1/datasets/{dataset_id}/ask",
+                headers={"X-Organization-Id": organization_id},
+                json={"query": "anything"},
+            )
+    finally:
+        settings.enforce_subscription_quotas = old_enforce
+
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    subscription = (
+        await db_session.execute(
+            select(OrgSubscription).where(OrgSubscription.org_id == organization_id)
+        )
+    ).scalar_one()
+    assert subscription.q_used == 1
 
 
 @pytest.mark.asyncio

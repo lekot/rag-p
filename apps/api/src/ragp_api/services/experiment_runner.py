@@ -9,8 +9,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Experiment
+from ragp_api.services.subscription import (
+    NoActiveSubscriptionError,
+    QuotaExceededError,
+    consume_q,
+    release_q,
+)
+from ragp_api.services.usage import record_usage_event
 
 logger = logging.getLogger(__name__)
+
+_SELF_TEST_SAMPLE_LIMIT = 5
 
 
 def _metric_error(code: str, message: str) -> dict[str, Any]:
@@ -269,7 +278,7 @@ async def _self_test_metric(
     hit_count = 0
     attempted = 0
     failures = 0
-    test_sample = chunks[:5]  # Test on up to 5 chunks to avoid long runs
+    test_sample = chunks[:_SELF_TEST_SAMPLE_LIMIT]  # Test on a bounded sample to avoid long runs
 
     for chunk in test_sample:
         query = chunk["text"][:80]
@@ -322,6 +331,7 @@ async def run_experiment_inline(
     If the dataset has golden Q&A items, uses retrieval_hit + answer_similarity metrics.
     Otherwise falls back to self-test hit-rate heuristic.
     """
+    reserved_units = 0
     try:
         experiment.status = "running"
         await db.commit()
@@ -338,6 +348,36 @@ async def run_experiment_inline(
         chunks: list[dict[str, Any]] = []
         if not use_golden:
             chunks = await _load_dataset_chunks(db, dataset_id, organization_id)
+
+        units_per_combo = (
+            len(golden_items) if use_golden else min(len(chunks), _SELF_TEST_SAMPLE_LIMIT)
+        )
+        reserved_units = max(1, len(combinations) * max(1, units_per_combo))
+        try:
+            await consume_q(db, organization_id, count=reserved_units)
+            await db.commit()
+        except NoActiveSubscriptionError:
+            experiment.status = "failed"
+            experiment.leaderboard_json = [
+                {
+                    "error_code": "no_active_plan",
+                    "error": "Активной подписки нет. Купите план на /pricing",
+                }
+            ]
+            await db.commit()
+            return
+        except QuotaExceededError as exc:
+            experiment.status = "failed"
+            experiment.leaderboard_json = [
+                {
+                    "error_code": "quota_exceeded",
+                    "error": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+                    "q_used": exc.q_used,
+                    "q_limit": exc.q_limit,
+                }
+            ]
+            await db.commit()
+            return
 
         leaderboard = []
         for nodes in combinations:
@@ -371,9 +411,21 @@ async def run_experiment_inline(
         experiment.leaderboard_json = leaderboard
         experiment.status = "completed"
         await db.commit()
+        await record_usage_event(
+            db,
+            org_id=organization_id,
+            api_key_id=None,
+            pipeline_id=None,
+            model="experiment",
+            prompt_tokens=0,
+            completion_tokens=0,
+            quota_reserved=True,
+        )
 
     except Exception as exc:
         logger.exception("Experiment %s failed: %s", experiment.id, exc)
+        if reserved_units:
+            await release_q(db, experiment.organization_id, count=reserved_units)
         experiment.status = "failed"
         experiment.leaderboard_json = [{"error": str(exc)}]
         await db.commit()

@@ -43,10 +43,13 @@ from ragp_api.services.object_storage import (
 from ragp_api.services.pipeline_runner import run_pipeline
 from ragp_api.services.subscription import (
     NoActiveSubscriptionError,
+    QuotaExceededError,
     StorageQuotaExceededError,
+    consume_q,
     consume_storage,
     release_storage,
 )
+from ragp_api.services.usage import record_usage_event
 from ragp_api.settings import settings
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -758,6 +761,52 @@ class SearchOut(BaseModel):
     chunks: list[SearchChunkOut]
 
 
+async def _reserve_dataset_query_quota(db: AsyncSession, organization_id: str) -> None:
+    if not settings.enforce_subscription_quotas:
+        return
+    try:
+        await consume_q(db, organization_id, count=1)
+    except NoActiveSubscriptionError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        ) from exc
+    except QuotaExceededError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "quota_exceeded",
+                "q_used": exc.q_used,
+                "q_limit": exc.q_limit,
+                "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+            },
+        ) from exc
+
+
+async def _record_dataset_query_usage(
+    db: AsyncSession,
+    *,
+    organization_id: str,
+    pipeline_id: str | None,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    await record_usage_event(
+        db,
+        org_id=organization_id,
+        api_key_id=None,
+        pipeline_id=pipeline_id,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        quota_reserved=settings.enforce_subscription_quotas,
+    )
+
+
 @router.post("/{dataset_id}/search", response_model=SearchOut)
 async def search_dataset(
     dataset_id: str,
@@ -771,6 +820,8 @@ async def search_dataset(
     )
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    await _reserve_dataset_query_quota(db, organization_id)
 
     # Build embedder (same priority as ingest: Ollama → Cohere → OpenAI)
     ollama_host = os.environ.get("OLLAMA_HOST", "")
@@ -814,6 +865,14 @@ async def search_dataset(
         organization_id=organization_id,
         dataset_id=dataset_id,
         query_vec=query_vec,
+    )
+    await _record_dataset_query_usage(
+        db,
+        organization_id=organization_id,
+        pipeline_id=None,
+        model="retrieval-only",
+        prompt_tokens=0,
+        completion_tokens=0,
     )
 
     return SearchOut(
@@ -898,6 +957,8 @@ async def ask_dataset(
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
+    await _reserve_dataset_query_quota(db, organization_id)
+
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -962,12 +1023,28 @@ async def ask_dataset(
             await db.commit()
 
         if not raw_chunks and not answer:
+            await _record_dataset_query_usage(
+                db,
+                organization_id=organization_id,
+                pipeline_id=body.pipeline_id,
+                model=body.model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
             return AskOut(
                 answer="Не нашёл релевантных чанков для ответа.",
                 chunks=[],
                 usage=AskUsage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
             )
 
+        await _record_dataset_query_usage(
+            db,
+            organization_id=organization_id,
+            pipeline_id=body.pipeline_id,
+            model=body.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
         return AskOut(
             answer=answer,
             chunks=[
@@ -1010,6 +1087,14 @@ async def ask_dataset(
 
     # Empty retrieval → skip LLM
     if not raw_chunks:
+        await _record_dataset_query_usage(
+            db,
+            organization_id=organization_id,
+            pipeline_id=None,
+            model=body.model,
+            prompt_tokens=0,
+            completion_tokens=0,
+        )
         return AskOut(
             answer="Не нашёл релевантных чанков для ответа.",
             chunks=[],
@@ -1036,6 +1121,15 @@ async def ask_dataset(
             "Откройте источники ниже или проверьте настройки LLM."
         )
         usage_raw = {"prompt_tokens": 0, "completion_tokens": 0}
+
+    await _record_dataset_query_usage(
+        db,
+        organization_id=organization_id,
+        pipeline_id=None,
+        model=body.model,
+        prompt_tokens=int(usage_raw.get("prompt_tokens", 0)),
+        completion_tokens=int(usage_raw.get("completion_tokens", 0)),
+    )
 
     return AskOut(
         answer=answer,

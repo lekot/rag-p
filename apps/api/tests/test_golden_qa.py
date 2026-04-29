@@ -358,7 +358,14 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
     mock_retriever_instance.retrieve = AsyncMock(return_value=retrieved)
     mock_retriever_cls = MagicMock(return_value=mock_retriever_instance)
 
-    with patch("ragp_api.plugins.registry.get_plugin", return_value=mock_retriever_cls):
+    with (
+        patch("ragp_api.plugins.registry.get_plugin", return_value=mock_retriever_cls),
+        patch("ragp_api.services.experiment_runner.consume_q", new=AsyncMock()) as consume_mock,
+        patch(
+            "ragp_api.services.experiment_runner.record_usage_event",
+            new=AsyncMock(),
+        ) as usage_mock,
+    ):
         await run_experiment_inline(experiment, db_session)
 
     assert experiment.status == "completed"
@@ -372,3 +379,7 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
     # Hit should be 1.0 since mock returned chunk_id
     assert metrics["retrieval_hit"] == 1.0
     assert metrics["composite_score"] == 1.0
+    consume_mock.assert_awaited_once()
+    assert consume_mock.await_args.kwargs["count"] == 1
+    usage_mock.assert_awaited_once()
+    assert usage_mock.await_args.kwargs["quota_reserved"] is True
