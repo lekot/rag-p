@@ -1,0 +1,13 @@
+Glossary of terms used across the platform documentation.
+
+Embedding: a dense numerical vector that represents semantic content of a text fragment. Computed by an embedder plugin such as bge-m3 or text-embedding-3-small.
+
+Chunk: a fragment of an original document produced by a chunker plugin. Each chunk is small enough to fit into the embedding model context and large enough to carry meaningful semantics.
+
+Retriever: a plugin that, given a query embedding, returns the top-k most relevant chunks. The default implementation is pgvector-hybrid which combines cosine similarity with BM25 over a tsvector column.
+
+Generator: a plugin that produces a natural-language answer given the retrieved context and the original query. Implemented via LiteLLM so any OpenAI-compatible model can be wired in.
+
+Plan: a billing tier specifying included queries per month, included storage, allow_overage flag, and price in rubles per 30-day period.
+
+API key: a secret token of the form rgp_<32 hex chars>. Required for the public /rag/query endpoint and any programmatic integration.
