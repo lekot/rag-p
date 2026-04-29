@@ -20,6 +20,7 @@ from ragp_api.db.models import (
     Organization,
     OrgBalance,
     OrgMember,
+    Plan,
     User,
 )
 from ragp_api.services.billing import (
@@ -28,6 +29,7 @@ from ragp_api.services.billing import (
     get_balance,
     topup_balance,
 )
+from ragp_api.services.subscription import start_subscription
 from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
@@ -426,3 +428,58 @@ async def test_concurrent_deductions_atomic(
     )
     txs = tx_result.scalars().all()
     assert len(txs) == 2
+
+
+# ---------------------------------------------------------------------------
+# Customer-journey: subscription activation flips /me flag
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_subscription_activation_flips_me_flag(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """After signup /me reports has_active_subscription=False; after a
+    successful start_subscription (mimicking a YooKassa webhook activation)
+    the same /me call must report True without requiring re-login."""
+    # 1. Signup: brand-new account, no subscription yet
+    signup_data = await _signup(client, "journey-flag@example.com", org_name="JourneyFlagOrg")
+    org_id = signup_data["organization"]["id"]
+    assert signup_data["has_active_subscription"] is False
+
+    me_before = await client.get("/api/v1/auth/me")
+    assert me_before.status_code == 200
+    assert me_before.json()["has_active_subscription"] is False
+
+    # 2. Seed a plan and activate subscription (this is what the webhook
+    # handler ultimately calls).
+    db_session.add(
+        Plan(
+            id="personal",
+            name="Personal",
+            price_rub_monthly=Decimal("100"),
+            included_q=1000,
+            included_storage_bytes=10 * 1024 * 1024,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    await db_session.commit()
+
+    await start_subscription(
+        db_session,
+        org_id=org_id,
+        plan_id="personal",
+        payment_id="pay_journey_test",
+        amount_rub=Decimal("100"),
+    )
+    await db_session.commit()
+
+    # 3. Same session — /me must now report active subscription
+    me_after = await client.get("/api/v1/auth/me")
+    assert me_after.status_code == 200
+    assert me_after.json()["has_active_subscription"] is True
