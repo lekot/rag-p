@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,8 +27,21 @@ router = APIRouter(prefix="/keys", tags=["keys"])
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_EXPIRES_DAYS = 90
+_MAX_EXPIRES_DAYS = 365
+
+ScopeLiteral = Literal["read", "write", "admin"]
+
+
 class KeyCreateIn(BaseModel):
     name: str
+    expires_in_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=_MAX_EXPIRES_DAYS,
+        description="Days until key expiry. Default 90, max 365.",
+    )
+    scope: ScopeLiteral = "read"
 
 
 class KeyOut(BaseModel):
@@ -37,6 +50,9 @@ class KeyOut(BaseModel):
     key_prefix: str
     last_used_at: datetime | None = None
     created_at: datetime
+    expires_at: datetime
+    scope: str
+    is_expired: bool
 
 
 class KeyCreatedOut(BaseModel):
@@ -44,6 +60,8 @@ class KeyCreatedOut(BaseModel):
     key: str  # Full key -- returned ONCE only
     name: str
     key_prefix: str
+    expires_at: datetime
+    scope: str
 
 
 # ---------------------------------------------------------------------------
@@ -92,16 +110,29 @@ async def list_keys(
         select(ApiKey).where(ApiKey.organization_id == org_id).order_by(ApiKey.created_at.desc())
     )
     keys = result.scalars().all()
-    return [
-        KeyOut(
-            id=k.id,
-            name=k.name,
-            key_prefix=k.key_prefix,
-            last_used_at=k.last_used_at,
-            created_at=k.created_at,
+    now = datetime.now(UTC)
+    out: list[KeyOut] = []
+    for k in keys:
+        expires = k.expires_at
+        # Be tolerant of naive datetimes (some test/setup paths may insert without tz).
+        if expires is not None and expires.tzinfo is None:
+            expires_aware = expires.replace(tzinfo=UTC)
+        else:
+            expires_aware = expires
+        is_expired = expires_aware is not None and expires_aware <= now
+        out.append(
+            KeyOut(
+                id=k.id,
+                name=k.name,
+                key_prefix=k.key_prefix,
+                last_used_at=k.last_used_at,
+                created_at=k.created_at,
+                expires_at=k.expires_at,
+                scope=k.scope,
+                is_expired=is_expired,
+            )
         )
-        for k in keys
-    ]
+    return out
 
 
 @router.post("", response_model=KeyCreatedOut, status_code=201)
@@ -118,6 +149,9 @@ async def create_key(
     key_prefix = raw_secret[:8]
     key_hash = hashlib.sha256(raw_secret.encode()).hexdigest()
 
+    days = body.expires_in_days if body.expires_in_days is not None else _DEFAULT_EXPIRES_DAYS
+    expires_at = datetime.now(UTC) + timedelta(days=days)
+
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         organization_id=org_id,
@@ -125,6 +159,8 @@ async def create_key(
         name=body.name,
         key_prefix=key_prefix,
         key_hash=key_hash,
+        expires_at=expires_at,
+        scope=body.scope,
     )
     db.add(api_key)
     await db.flush()
@@ -136,7 +172,11 @@ async def create_key(
         event_type="key.create",
         resource_type="key",
         resource_id=api_key.id,
-        metadata={"prefix": key_prefix},
+        metadata={
+            "prefix": key_prefix,
+            "scope": body.scope,
+            "expires_in_days": days,
+        },
         request=request,
     )
     await db.commit()
@@ -147,6 +187,8 @@ async def create_key(
         key=raw_secret,
         name=api_key.name,
         key_prefix=api_key.key_prefix,
+        expires_at=api_key.expires_at,
+        scope=api_key.scope,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -83,6 +84,8 @@ async def _seed_org_with_api_key(
         name="billing-test-key",
         key_prefix=raw_key[:8],
         key_hash=key_hash,
+        expires_at=datetime.now(UTC) + timedelta(days=90),
+        scope="admin",
     )
 
     db.add_all([org, user, membership, org_member, api_key])

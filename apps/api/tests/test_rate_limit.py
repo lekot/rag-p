@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -47,6 +48,8 @@ async def _create_org_with_key(
         name="rl-test-key",
         key_prefix=raw_key[:8],
         key_hash=key_hash,
+        expires_at=datetime.now(UTC) + timedelta(days=90),
+        scope="admin",
     )
 
     dataset = Dataset(id=str(uuid.uuid4()), organization_id=org_id, name="RL DS", source="uploaded")
@@ -184,6 +187,8 @@ async def test_rate_limit_per_org_blocks_when_multiple_keys_exhaust(
             name=f"key-{raw[4:8]}",
             key_prefix=raw[:8],
             key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+            expires_at=datetime.now(UTC) + timedelta(days=90),
+            scope="admin",
         )
 
     api_key_a = _make_api_key(raw_key_a)
