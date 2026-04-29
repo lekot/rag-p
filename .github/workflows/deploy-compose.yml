@@ -141,10 +141,31 @@ jobs:
       - name: Upload compose bundle
         run: |
           set -euo pipefail
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "mkdir -p '$COMPOSE_DIR/postgres/initdb'"
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "mkdir -p '$COMPOSE_DIR/postgres/initdb' '$COMPOSE_DIR/cohere-egress'"
           scp -P "$COMPOSE_SSH_PORT" deploy/compose/compose.prod.yml "$REMOTE:$COMPOSE_DIR/compose.prod.yml"
           scp -P "$COMPOSE_SSH_PORT" deploy/compose/Caddyfile "$REMOTE:$COMPOSE_DIR/Caddyfile"
           scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres/initdb/001-extensions.sql "$REMOTE:$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
+          # cohere-egress build context (Dockerfile + entrypoint + tinyproxy.conf)
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/Dockerfile "$REMOTE:$COMPOSE_DIR/cohere-egress/Dockerfile"
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/entrypoint.sh "$REMOTE:$COMPOSE_DIR/cohere-egress/entrypoint.sh"
+          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/tinyproxy.conf "$REMOTE:$COMPOSE_DIR/cohere-egress/tinyproxy.conf"
+
+      - name: Provision cohere AmneziaWG conf
+        env:
+          COHERE_AMNEZIA_CONF: ${{ secrets.COHERE_AMNEZIA_CONF }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COHERE_AMNEZIA_CONF:-}" ]; then
+            echo "COHERE_AMNEZIA_CONF secret not set; cohere-egress will run without VPN (cohere calls will fail with network errors)"
+            # Make sure no stale conf is left from a previous deploy.
+            ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "rm -f '$COMPOSE_DIR/cohere.amnezia.conf'" || true
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$COHERE_AMNEZIA_CONF" > cohere.amnezia.conf
+          scp -P "$COMPOSE_SSH_PORT" cohere.amnezia.conf "$REMOTE:$COMPOSE_DIR/cohere.amnezia.conf"
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "chmod 600 '$COMPOSE_DIR/cohere.amnezia.conf'"
+          rm -f cohere.amnezia.conf
 
       - name: Write remote env
         env:
@@ -165,6 +186,7 @@ jobs:
           RAGP_S3_SECRET_ACCESS_KEY: ${{ secrets.RAGP_S3_SECRET_ACCESS_KEY }}
           RAGP_S3_SERVICE_USER: ${{ vars.RAGP_S3_SERVICE_USER }}
           RAGP_S3_SERVICE_PASSWORD: ${{ secrets.RAGP_S3_SERVICE_PASSWORD }}
+          RAGP_COHERE_HTTP_PROXY: ${{ vars.RAGP_COHERE_HTTP_PROXY || 'http://cohere-egress:8888' }}
         run: |
           set -euo pipefail
           umask 077
@@ -199,6 +221,7 @@ jobs:
           RAGP_S3_SECRET_ACCESS_KEY=${RAGP_S3_SECRET_ACCESS_KEY}
           RAGP_S3_SERVICE_USER=${RAGP_S3_SERVICE_USER}
           RAGP_S3_SERVICE_PASSWORD=${RAGP_S3_SERVICE_PASSWORD}
+          RAGP_COHERE_HTTP_PROXY=${RAGP_COHERE_HTTP_PROXY}
           EOF
           sed -i 's/^          //' compose.env
           scp -P "$COMPOSE_SSH_PORT" compose.env "$REMOTE:$COMPOSE_DIR/.env"
@@ -218,6 +241,9 @@ jobs:
             set -euo pipefail
             cd '$COMPOSE_DIR'
             docker compose -f compose.prod.yml --env-file .env pull
+            # Build the local cohere-egress image (AmneziaWG sidecar). Skipped
+            # for pull because the image is not on GHCR.
+            docker compose -f compose.prod.yml --env-file .env build cohere-egress
             docker compose -f compose.prod.yml --env-file .env up -d postgres redis ollama
             ready=0
             for i in \$(seq 1 60); do
