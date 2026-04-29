@@ -7,6 +7,10 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
+interface RagPRequestExtras extends Partial<IHttpRequestOptions> {
+	itemIndex?: number;
+}
+
 /**
  * Wrapper around `httpRequestWithAuthentication` that maps API errors onto
  * n8n's error model:
@@ -20,7 +24,7 @@ export async function ragPApiRequest(
 	resource: string,
 	body: IDataObject | Buffer | undefined = undefined,
 	qs: IDataObject = {},
-	options: Partial<IHttpRequestOptions> = {},
+	options: RagPRequestExtras = {},
 ): Promise<IDataObject> {
 	const credentials = await this.getCredentials('ragPApi');
 	const baseUrl = ((credentials.baseUrl as string) || 'https://api.lekottt.ru').replace(
@@ -28,6 +32,7 @@ export async function ragPApiRequest(
 		'',
 	);
 	const verifySsl = credentials.verifySsl !== false;
+	const { itemIndex = 0, ...httpOverrides } = options;
 
 	const requestOptions: IHttpRequestOptions = {
 		method,
@@ -35,7 +40,7 @@ export async function ragPApiRequest(
 		qs,
 		json: true,
 		skipSslCertificateValidation: !verifySsl,
-		...options,
+		...httpOverrides,
 	};
 
 	if (body !== undefined) {
@@ -55,7 +60,7 @@ export async function ragPApiRequest(
 
 		if (typeof status === 'number' && status >= 400 && status < 500) {
 			throw new NodeOperationError(this.getNode(), error as Error, {
-				itemIndex: 0,
+				itemIndex,
 				description: `RAG-Platform returned HTTP ${status}. Check parameters and credentials.`,
 			});
 		}

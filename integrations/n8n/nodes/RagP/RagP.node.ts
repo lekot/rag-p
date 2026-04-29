@@ -9,6 +9,8 @@ import { NodeConnectionType, NodeOperationError } from 'n8n-workflow';
 
 import { ragPApiRequest } from './GenericFunctions';
 import { queryOperationFields } from './descriptions/QueryDescription';
+import { uploadOperationFields } from './descriptions/UploadDescription';
+import { getDatasetOperationFields } from './descriptions/GetDatasetDescription';
 
 export class RagP implements INodeType {
 	description: INodeTypeDescription = {
@@ -61,10 +63,24 @@ export class RagP implements INodeType {
 						description: 'Run a RAG query against a dataset',
 						action: 'Query a dataset',
 					},
+					{
+						name: 'Upload Document',
+						value: 'uploadDocument',
+						description: 'Upload a text or binary document into a dataset',
+						action: 'Upload a document',
+					},
+					{
+						name: 'Get Dataset',
+						value: 'getDataset',
+						description: 'Fetch dataset metadata and indexing status',
+						action: 'Get a dataset',
+					},
 				],
 				default: 'query',
 			},
 			...queryOperationFields,
+			...uploadOperationFields,
+			...getDatasetOperationFields,
 		],
 	};
 
@@ -112,7 +128,86 @@ export class RagP implements INodeType {
 							typeof raw === 'string' ? (JSON.parse(raw) as IDataObject) : (raw as IDataObject);
 					}
 
-					response = await ragPApiRequest.call(this, 'POST', '/api/v1/rag/query', body);
+					response = await ragPApiRequest.call(
+						this,
+						'POST',
+						'/api/v1/rag/query',
+						body,
+						{},
+						{ itemIndex: i },
+					);
+				} else if (operation === 'uploadDocument') {
+					const datasetId = this.getNodeParameter('datasetId', i) as string;
+					const inputType = this.getNodeParameter('inputType', i, 'text') as
+						| 'text'
+						| 'binary';
+					const filename = this.getNodeParameter('filename', i, '') as string;
+
+					let fileBuffer: Buffer;
+					let resolvedFilename = filename;
+					let mimeType = 'text/plain';
+
+					if (inputType === 'binary') {
+						const binaryPropertyName = this.getNodeParameter(
+							'binaryPropertyName',
+							i,
+							'data',
+						) as string;
+						const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
+						fileBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+						resolvedFilename = filename || binaryData.fileName || 'document.bin';
+						mimeType = binaryData.mimeType || 'application/octet-stream';
+					} else {
+						const textContent = this.getNodeParameter('textContent', i, '') as string;
+						fileBuffer = Buffer.from(textContent, 'utf-8');
+						resolvedFilename = filename || 'document.txt';
+						mimeType = 'text/plain';
+					}
+
+					const formData = {
+						file: {
+							value: fileBuffer,
+							options: {
+								filename: resolvedFilename,
+								contentType: mimeType,
+							},
+						},
+					};
+
+					response = await ragPApiRequest.call(
+						this,
+						'POST',
+						`/api/v1/datasets/${encodeURIComponent(datasetId)}/documents`,
+						undefined,
+						{},
+						{
+							itemIndex: i,
+							json: false,
+							body: formData as unknown as IDataObject,
+							headers: {
+								// let the HTTP client set the multipart boundary
+								'Content-Type': undefined as unknown as string,
+							},
+						},
+					);
+
+					if (typeof response === 'string') {
+						try {
+							response = JSON.parse(response) as IDataObject;
+						} catch {
+							response = { raw: response } as IDataObject;
+						}
+					}
+				} else if (operation === 'getDataset') {
+					const datasetId = this.getNodeParameter('datasetId', i) as string;
+					response = await ragPApiRequest.call(
+						this,
+						'GET',
+						`/api/v1/datasets/${encodeURIComponent(datasetId)}`,
+						undefined,
+						{},
+						{ itemIndex: i },
+					);
 				} else {
 					throw new NodeOperationError(
 						this.getNode(),
