@@ -68,5 +68,5 @@ def bootstrap() -> None:
         ollama_embedder,
     )
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401
-    from ragp_api.plugins.rerankers import cohere  # noqa: F401
+    from ragp_api.plugins.rerankers import bge, cohere  # noqa: F401
     from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401
