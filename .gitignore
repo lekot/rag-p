@@ -34,7 +34,12 @@ out/
 .env.*.local
 *.pem
 *.key
+*.vpn
+*.ovpn
+*.wg.conf
+*.awg.conf
 secrets/
+y-secret_key.txt
 
 # IDE
 .idea/
