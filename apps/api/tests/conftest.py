@@ -26,13 +26,22 @@ async def reset_registry():
     """Clear plugin registry before each test to avoid cross-test pollution."""
     old_enforce_subscription_quotas = settings.enforce_subscription_quotas
     old_allow_legacy_org_header = settings.allow_legacy_org_header
+    old_yookassa_require_ip_check = settings.yookassa_require_ip_check
+    old_yookassa_revalidate_payment = settings.yookassa_revalidate_payment
     settings.enforce_subscription_quotas = False
     settings.allow_legacy_org_header = True
+    # Tests target the public webhook with synthetic payloads — bypass the
+    # production IP allowlist + payment re-validation by default.  Individual
+    # test modules opt back in by toggling these flags inside the test body.
+    settings.yookassa_require_ip_check = False
+    settings.yookassa_revalidate_payment = False
     _registry.clear()
     bootstrap()
     yield
     settings.enforce_subscription_quotas = old_enforce_subscription_quotas
     settings.allow_legacy_org_header = old_allow_legacy_org_header
+    settings.yookassa_require_ip_check = old_yookassa_require_ip_check
+    settings.yookassa_revalidate_payment = old_yookassa_revalidate_payment
     _registry.clear()
 
 

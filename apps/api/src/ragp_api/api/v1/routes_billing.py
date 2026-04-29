@@ -25,12 +25,19 @@ from ragp_api.db.models import (
 from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_session_user
+from ragp_api.security.yookassa_webhook import verify_yookassa_request
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.billing import get_balance, topup_balance
 from ragp_api.services.fx import get_usd_to_rub_rate
 from ragp_api.services.permissions import require_role
 from ragp_api.services.subscription import get_active_subscription, start_subscription
-from ragp_api.services.yookassa_client import create_payment, create_payment_rub
+from ragp_api.services.yookassa_client import (
+    PaymentRevalidationError,
+    create_payment,
+    create_payment_rub,
+    fetch_payment_status,
+)
+from ragp_api.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -435,7 +442,35 @@ async def list_subscription_events(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/v1/billing/webhook/yookassa", status_code=200)
+def _payments_match(webhook_obj: dict[str, Any], authoritative: dict[str, Any]) -> bool:
+    """Compare the webhook claim against the authoritative payment object.
+
+    Returns ``True`` when status is ``succeeded`` and amount/currency line up.
+    Tolerates Decimal/string differences in the amount field.
+    """
+    if authoritative.get("status") != "succeeded":
+        return False
+
+    wh_amount = (webhook_obj.get("amount") or {})
+    auth_amount = (authoritative.get("amount") or {})
+
+    if wh_amount.get("currency") != auth_amount.get("currency"):
+        return False
+
+    try:
+        wh_value = Decimal(str(wh_amount.get("value", "0")))
+        auth_value = Decimal(str(auth_amount.get("value", "0")))
+    except Exception:
+        return False
+
+    return wh_value == auth_value
+
+
+@router.post(
+    "/api/v1/billing/webhook/yookassa",
+    status_code=200,
+    dependencies=[Depends(verify_yookassa_request)],
+)
 async def yookassa_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -446,8 +481,11 @@ async def yookassa_webhook(
     - metadata.type == "subscription" → start_subscription()
     - metadata.type == "topup" (or absent) → topup_balance() (legacy overage flow)
 
-    Idempotency is enforced with DB constraints; signature/IP filtering is
-    deferred until YooKassa production webhook settings are finalized.
+    Security:
+    - IP allowlist enforced via ``verify_yookassa_request`` (403 ip_not_allowed).
+    - Server-side re-validation via ``GET /payments/{id}`` (403
+      payment_revalidation_failed) when ``RAGP_YOOKASSA_REVALIDATE_PAYMENT`` is true.
+    - Idempotency is enforced by DB constraints on payment_id.
     """
     raw = await request.body()
     try:
@@ -472,6 +510,30 @@ async def yookassa_webhook(
 
     if not payment_id:
         raise HTTPException(status_code=400, detail="missing payment id")
+
+    # ---- Server-side re-validation (defeats forged webhook payloads) ----
+    if settings.yookassa_revalidate_payment:
+        try:
+            authoritative = await fetch_payment_status(payment_id)
+        except PaymentRevalidationError as exc:
+            logger.warning(
+                "YooKassa webhook: re-validation failed for %s: %s", payment_id, exc
+            )
+            raise HTTPException(
+                status_code=403, detail="payment_revalidation_failed"
+            ) from exc
+
+        if not _payments_match(obj, authoritative):
+            logger.warning(
+                "YooKassa webhook: payment claim mismatch for %s "
+                "(webhook status=%s amount=%s, authoritative status=%s amount=%s)",
+                payment_id,
+                obj.get("status"),
+                obj.get("amount"),
+                authoritative.get("status"),
+                authoritative.get("amount"),
+            )
+            raise HTTPException(status_code=403, detail="payment_revalidation_failed")
 
     # ---- Subscription payment ----
     if payment_type == "subscription":
