@@ -33,6 +33,7 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0.0",
     "prometheus-client>=0.20.0",
     "yookassa>=3.5.0",
+    "sentence-transformers>=2.7.0",
 ]
 
 [project.optional-dependencies]
@@ -59,6 +60,7 @@ pgvector-hybrid = "ragp_api.plugins.retrievers.pgvector_hybrid:PgvectorHybridRet
 
 [project.entry-points."ragp.plugins.rerankers"]
 cohere = "ragp_api.plugins.rerankers.cohere:CohereReranker"
+bge-reranker = "ragp_api.plugins.rerankers.bge:BGEReranker"
 
 [project.entry-points."ragp.plugins.generators"]
 litellm-generator = "ragp_api.plugins.generators.litellm_generator:LiteLLMGenerator"

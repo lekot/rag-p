@@ -11,6 +11,7 @@ EXPECTED_NAMES = {
     "ollama-embedder",
     "pgvector-hybrid",
     "cohere",
+    "bge-reranker",
     "litellm-generator",
 }
 

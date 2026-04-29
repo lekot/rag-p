@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     yookassa_revalidate_payment: bool = True
     yookassa_revalidate_timeout_seconds: float = 10.0
 
+    # Local BGE reranker (fallback for Cohere when its API is unreachable).
+    bge_reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    bge_reranker_device: str = "cpu"
+    bge_reranker_max_batch: int = 32
+
     # S3-compatible object storage for raw uploaded documents.
     s3_endpoint_url: str = ""
     s3_region: str = ""
