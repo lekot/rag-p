@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
+from ragp_api.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,18 @@ _QA_PROMPT = (
 
 class GoldenGenerationError(RuntimeError):
     """Raised when chunks exist but the LLM cannot produce any golden Q&A pairs."""
+
+
+def _extractive_pair(chunk: Chunk) -> dict[str, str]:
+    text = " ".join(chunk.text.split())
+    answer = text[:700].rstrip()
+    if len(text) > 700:
+        answer += "..."
+    return {
+        "question": "Какая информация содержится в этом фрагменте?",
+        "answer": answer,
+        "source_chunk_id": chunk.id,
+    }
 
 
 async def generate_golden_qa(
@@ -89,9 +102,13 @@ async def generate_golden_qa(
         except json.JSONDecodeError as exc:
             failures += 1
             logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
+            if settings.llm_fallback_mode == "extractive":
+                pairs.append(_extractive_pair(chunk))
         except Exception as exc:
             failures += 1
             logger.warning("LLM call failed for chunk %s: %s — skipping", chunk.id, exc)
+            if settings.llm_fallback_mode == "extractive":
+                pairs.append(_extractive_pair(chunk))
 
     if not pairs and failures:
         raise GoldenGenerationError("LLM did not generate valid golden Q&A pairs")

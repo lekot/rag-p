@@ -4,6 +4,7 @@ from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
+from ragp_api.settings import settings
 
 _DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 
@@ -26,6 +27,38 @@ _PROMPT_TEMPLATE = (
     "Now answer the question using ONLY the context above. "
     'If absent, reply: "В предоставленных источниках ответа нет."'
 )
+
+
+def _extractive_answer(query: str, contexts: list[dict[str, Any]]) -> dict[str, Any]:
+    if not contexts:
+        return {
+            "answer": "Не нашёл релевантных чанков для ответа.",
+            "trace": {
+                "model": "extractive-fallback",
+                "fallback_mode": "extractive",
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+            },
+        }
+
+    snippets = []
+    for i, context in enumerate(contexts[:3], start=1):
+        text = " ".join(str(context.get("text", "")).split())
+        if len(text) > 700:
+            text = text[:697].rstrip() + "..."
+        snippets.append(f"[{i}] {text}")
+
+    answer = (
+        "LLM сейчас недоступен, поэтому показываю извлечённый ответ из найденных "
+        f"источников по запросу: {query}\n\n" + "\n\n".join(snippets)
+    )
+    return {
+        "answer": answer,
+        "trace": {
+            "model": "extractive-fallback",
+            "fallback_mode": "extractive",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        },
+    }
 
 
 @register
@@ -67,15 +100,20 @@ class LiteLLMGenerator(Generator):
         context_text = "\n\n".join(f"[{i + 1}] {c.get('text', '')}" for i, c in enumerate(contexts))
         user_message = _PROMPT_TEMPLATE.format(query=query, contexts=context_text)
 
-        response = await litellm.acompletion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception:
+            if settings.llm_fallback_mode == "extractive":
+                return _extractive_answer(query, contexts)
+            raise
 
         # response is untyped in litellm; cast to str to satisfy strict mode
         answer = cast(str, response.choices[0].message.content) or ""

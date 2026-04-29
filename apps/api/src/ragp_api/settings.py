@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # LiteLLM default model
     default_llm_model: str = "deepseek/deepseek-v4-flash"
     default_embedding_model: str = "openai/text-embedding-3-small"
+    llm_fallback_mode: str = "disabled"  # disabled | extractive
 
     # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD).
     # Default 0: every new account must top up via /pricing → ЮKassa to use anything.

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
 from ragp_api.services.golden_qa_generator import GoldenGenerationError, generate_golden_qa
+from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,6 +160,58 @@ async def test_generate_golden_qa_handles_invalid_json(
             db=db_session,
             sample_size=5,
         )
+
+
+@pytest.mark.asyncio
+async def test_generate_golden_qa_extractive_fallback_when_llm_fails(
+    db_session: AsyncSession, organization_id: str
+) -> None:
+    from ragp_api.db.models import Dataset
+
+    ds_id = str(uuid.uuid4())
+    ds = Dataset(id=ds_id, organization_id=organization_id, name="test-fallback", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        dataset_id=ds_id,
+        source_uri="upload://fallback.txt",
+        status="parsed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    chunk_text = "Ресурсы СКД отчёта группируются по родителю через поле parent. " * 5
+    chunk_id = str(uuid.uuid4())
+    chunk = Chunk(
+        id=chunk_id,
+        document_id=doc.id,
+        organization_id=organization_id,
+        text=chunk_text,
+    )
+    db_session.add(chunk)
+    await db_session.commit()
+
+    old_mode = settings.llm_fallback_mode
+    settings.llm_fallback_mode = "extractive"
+    try:
+        with patch(_PATCH_ACOMPLETION, new=AsyncMock(side_effect=RuntimeError("no llm"))):
+            pairs = await generate_golden_qa(
+                dataset_id=ds_id,
+                organization_id=organization_id,
+                db=db_session,
+                sample_size=1,
+            )
+    finally:
+        settings.llm_fallback_mode = old_mode
+
+    assert pairs == [
+        {
+            "question": "Какая информация содержится в этом фрагменте?",
+            "answer": chunk_text.strip(),
+            "source_chunk_id": chunk_id,
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------

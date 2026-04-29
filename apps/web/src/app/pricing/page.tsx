@@ -1,6 +1,13 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useUser } from "@/lib/auth";
 
 interface Plan {
+  id: string;
   name: string;
   price: string;
   tagline: string;
@@ -10,6 +17,7 @@ interface Plan {
 
 const PLANS: Plan[] = [
   {
+    id: "personal",
     name: "Personal",
     price: "100 ₽/мес",
     tagline: "Аккаунт «попробовать»",
@@ -22,6 +30,7 @@ const PLANS: Plan[] = [
     ],
   },
   {
+    id: "pro",
     name: "Pro",
     price: "1 500 ₽/мес",
     tagline: "Команда до 5 человек",
@@ -36,6 +45,7 @@ const PLANS: Plan[] = [
     ],
   },
   {
+    id: "corporate",
     name: "Corporate",
     price: "5 000 ₽/мес",
     tagline: "Компания до 25 человек",
@@ -49,6 +59,7 @@ const PLANS: Plan[] = [
     ],
   },
   {
+    id: "enterprise",
     name: "Enterprise",
     price: "60 000 ₽/мес",
     tagline: "Большие команды и SLA",
@@ -65,6 +76,41 @@ const PLANS: Plan[] = [
 ];
 
 export default function PricingPage() {
+  const user = useUser();
+  const orgId = user?.organization?.id ?? "";
+  const isOwner = user?.organization?.role === "owner";
+  const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function startCheckout(planId: string) {
+    if (!orgId) return;
+    setError(null);
+    setPendingPlanId(planId);
+    try {
+      const resp = await fetch(`/api/proxy/v1/orgs/${orgId}/subscription/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ plan_id: planId }),
+      });
+      const data = (await resp.json().catch(() => ({}))) as {
+        confirmation_url?: string;
+        detail?: string | { message?: string };
+      };
+      if (!resp.ok || !data.confirmation_url) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : data.detail?.message ?? "Не удалось создать платёж";
+        throw new Error(detail);
+      }
+      window.location.href = data.confirmation_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать платёж");
+      setPendingPlanId(null);
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-10">
       <header className="text-center space-y-2">
@@ -96,10 +142,40 @@ export default function PricingPage() {
                   <li key={f}>{f}</li>
                 ))}
               </ul>
+              <div className="mt-4">
+                {user === null ? (
+                  <Link href="/signup">
+                    <Button className="w-full" size="sm" variant={plan.highlight ? "default" : "outline"}>
+                      Зарегистрироваться
+                    </Button>
+                  </Link>
+                ) : (
+                  <Button
+                    className="w-full"
+                    size="sm"
+                    variant={plan.highlight ? "default" : "outline"}
+                    disabled={!orgId || !isOwner || pendingPlanId !== null}
+                    onClick={() => void startCheckout(plan.id)}
+                  >
+                    {pendingPlanId === plan.id ? "Открываю оплату…" : "Оплатить"}
+                  </Button>
+                )}
+                {user && !isOwner && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Оплатить может только владелец организации.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <details className="border rounded-lg p-4 text-sm">
         <summary className="cursor-pointer font-semibold">
