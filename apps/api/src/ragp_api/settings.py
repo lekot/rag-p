@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     yookassa_inn: str = ""  # RAGP_YOOKASSA_INN
     usd_to_rub_markup: Decimal = Decimal("0.03")  # 3% markup for exchange rate risk
 
+    # YooKassa webhook security (IP allowlist + server-side re-validation).
+    # YooKassa does not sign webhooks, so we filter inbound traffic by source IP
+    # against the published CIDRs and re-fetch the payment via /payments/{id}
+    # to ensure the payload was not forged.
+    yookassa_allowed_ips: str = (
+        "185.71.76.0/27,185.71.77.0/27,77.75.153.0/25,77.75.154.128/25,"
+        "77.75.156.11/32,77.75.156.35/32,2a02:5180::/32"
+    )
+    # CIDRs of trusted reverse proxies (Caddy/Docker bridge). Only X-Forwarded-For
+    # entries originating from these are trusted; everything else falls back to
+    # request.client.host to defeat XFF spoofing.
+    yookassa_trusted_proxies: str = "127.0.0.1/32,172.16.0.0/12,10.0.0.0/8"
+    yookassa_require_ip_check: bool = True
+    yookassa_revalidate_payment: bool = True
+    yookassa_revalidate_timeout_seconds: float = 10.0
+
     # S3-compatible object storage for raw uploaded documents.
     s3_endpoint_url: str = ""
     s3_region: str = ""
