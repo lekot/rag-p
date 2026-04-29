@@ -3,6 +3,7 @@
 import itertools
 import logging
 import math
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -332,8 +333,15 @@ async def run_experiment_inline(
     Otherwise falls back to self-test hit-rate heuristic.
     """
     reserved_units = 0
+
+    def _touch() -> None:
+        # Watchdog heartbeat — bumped before every commit so the stale-experiment
+        # cron can distinguish a live worker (slow combo) from a dead one.
+        experiment.updated_at = datetime.now(UTC)
+
     try:
         experiment.status = "running"
+        _touch()
         await db.commit()
 
         combinations = build_combinations(experiment.plugin_grid_json)
@@ -355,6 +363,7 @@ async def run_experiment_inline(
         reserved_units = max(1, len(combinations) * max(1, units_per_combo))
         try:
             await consume_q(db, organization_id, count=reserved_units)
+            _touch()
             await db.commit()
         except NoActiveSubscriptionError:
             experiment.status = "failed"
@@ -364,6 +373,7 @@ async def run_experiment_inline(
                     "error": "Активной подписки нет. Купите план на /pricing",
                 }
             ]
+            _touch()
             await db.commit()
             return
         except QuotaExceededError as exc:
@@ -376,6 +386,7 @@ async def run_experiment_inline(
                     "q_limit": exc.q_limit,
                 }
             ]
+            _touch()
             await db.commit()
             return
 
@@ -401,6 +412,9 @@ async def run_experiment_inline(
                     "composite_score": metrics.get("composite_score", 0.0),
                 }
             )
+            # Heartbeat after each combo so a slow grid does not look stale.
+            _touch()
+            await db.commit()
 
         # Sort by composite_score descending
         def _sort_key(entry: dict[str, Any]) -> float:
@@ -410,6 +424,7 @@ async def run_experiment_inline(
 
         experiment.leaderboard_json = leaderboard
         experiment.status = "completed"
+        _touch()
         await db.commit()
         await record_usage_event(
             db,
@@ -428,4 +443,5 @@ async def run_experiment_inline(
             await release_q(db, experiment.organization_id, count=reserved_units)
         experiment.status = "failed"
         experiment.leaderboard_json = [{"error": str(exc)}]
+        _touch()
         await db.commit()
