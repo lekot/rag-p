@@ -52,12 +52,15 @@ services:
       OLLAMA_HOST: http://ollama:11434
       RAGP_SESSION_COOKIE_SECURE: "true"
       RAGP_ALLOW_LEGACY_ORG_HEADER: "false"
+      RAGP_COHERE_HTTP_PROXY: ${RAGP_COHERE_HTTP_PROXY:-http://cohere-egress:8888}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      cohere-egress:
         condition: service_healthy
     healthcheck:
       test:
@@ -89,12 +92,15 @@ services:
       RAGP_REDIS_PORT: 6379
       REDIS_URL: redis://redis:6379/0
       OLLAMA_HOST: http://ollama:11434
+      RAGP_COHERE_HTTP_PROXY: ${RAGP_COHERE_HTTP_PROXY:-http://cohere-egress:8888}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      cohere-egress:
         condition: service_healthy
     expose:
       - "9090"
@@ -198,6 +204,38 @@ services:
       start_period: 10s
     expose:
       - "11434"
+    networks:
+      - internal
+
+  # Selective-egress sidecar: AmneziaWG VPN client + tinyproxy on :8888.
+  # Only cohere SDK calls (reranker + embedder) go through this proxy via
+  # RAGP_COHERE_HTTP_PROXY; everything else stays direct. The VPN config
+  # itself is materialised by CD onto the host as cohere.amnezia.conf and
+  # mounted read-only — if the file is absent the sidecar still starts
+  # tinyproxy (without VPN) so compose health does not block the rest of
+  # the stack.
+  cohere-egress:
+    build:
+      context: ./cohere-egress
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.conf.all.src_valid_mark: 1
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /opt/rag-p/cohere.amnezia.conf:/etc/amneziawg/awg0.conf:ro
+    expose:
+      - "8888"
+    healthcheck:
+      # Probe the local tinyproxy listener — VPN may legitimately be down
+      # during transient handshake retries, so we don't gate health on it.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -m 3 http://127.0.0.1:8888 || test $? -eq 22"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - internal
 
