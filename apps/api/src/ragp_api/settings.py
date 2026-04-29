@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     rate_limit_per_org_rpm: int = 1000
     enforce_subscription_quotas: bool = True
 
+    # Login brute-force protection (sliding window per IP+email)
+    login_rate_limit_attempts: int = 5
+    login_rate_limit_window_seconds: int = 900
+
     # Auth cookies. Keep false for local HTTP; enable in TLS deployments.
     session_cookie_secure: bool = False
     allow_legacy_org_header: bool = False
