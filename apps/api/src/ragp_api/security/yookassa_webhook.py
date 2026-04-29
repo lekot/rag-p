@@ -128,9 +128,7 @@ async def verify_yookassa_request(request: Request) -> None:
     if not allowed_nets:
         # Misconfiguration: refuse to fail-open.  An empty allowlist with the
         # check enabled means production is broken — surface that loudly.
-        logger.error(
-            "yookassa_webhook: ip check enabled but RAGP_YOOKASSA_ALLOWED_IPS is empty"
-        )
+        logger.error("yookassa_webhook: ip check enabled but RAGP_YOOKASSA_ALLOWED_IPS is empty")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="ip_not_allowed",

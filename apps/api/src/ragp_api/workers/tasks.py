@@ -140,9 +140,7 @@ async def mark_experiment_failed_on_crash(experiment_id: str, error: str) -> boo
         experiment.updated_at = datetime.now(UTC)
         await db.commit()
 
-    logger.warning(
-        "mark_experiment_failed_on_crash: experiment %s marked failed", experiment_id
-    )
+    logger.warning("mark_experiment_failed_on_crash: experiment %s marked failed", experiment_id)
     return True
 
 

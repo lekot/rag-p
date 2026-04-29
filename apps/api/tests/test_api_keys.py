@@ -75,9 +75,7 @@ async def _seed_org_with_key(
         expires_at=expires_at or (datetime.now(UTC) + timedelta(days=90)),
         scope=scope,
     )
-    dataset = Dataset(
-        id=str(uuid.uuid4()), organization_id=org_id, name="DS", source="uploaded"
-    )
+    dataset = Dataset(id=str(uuid.uuid4()), organization_id=org_id, name="DS", source="uploaded")
     balance = OrgBalance(org_id=org_id, balance_usd=Decimal("100.00"))
     db.add_all([org, user, membership, api_key, dataset, balance])
     await db.commit()
@@ -116,9 +114,7 @@ async def test_create_key_with_custom_expires_in_days_clamped_to_365(
 ) -> None:
     """expires_in_days > 365 → 422 validation."""
     await _signup_and_login(client, email="clamp@example.com", org_name="clamp-org")
-    resp = await client.post(
-        "/api/v1/keys", json={"name": "x", "expires_in_days": 400}
-    )
+    resp = await client.post("/api/v1/keys", json={"name": "x", "expires_in_days": 400})
     assert resp.status_code == 422, resp.text
 
 
@@ -128,18 +124,14 @@ async def test_create_key_rejects_expires_in_days_zero_or_negative(
 ) -> None:
     await _signup_and_login(client, email="neg@example.com", org_name="neg-org")
     for bad in (0, -1):
-        resp = await client.post(
-            "/api/v1/keys", json={"name": "x", "expires_in_days": bad}
-        )
+        resp = await client.post("/api/v1/keys", json={"name": "x", "expires_in_days": bad})
         assert resp.status_code == 422, f"value={bad} got {resp.status_code}: {resp.text}"
 
 
 @pytest.mark.asyncio
 async def test_create_key_rejects_invalid_scope(client: AsyncClient) -> None:
     await _signup_and_login(client, email="badscope@example.com", org_name="badscope-org")
-    resp = await client.post(
-        "/api/v1/keys", json={"name": "x", "scope": "superuser"}
-    )
+    resp = await client.post("/api/v1/keys", json={"name": "x", "scope": "superuser"})
     assert resp.status_code == 422, resp.text
 
 
@@ -174,9 +166,7 @@ async def test_list_keys_returns_is_expired_flag(
 
     # Move expires_at into the past
     past = datetime.now(UTC) - timedelta(days=1)
-    await db_session.execute(
-        update(ApiKey).where(ApiKey.id == key_id).values(expires_at=past)
-    )
+    await db_session.execute(update(ApiKey).where(ApiKey.id == key_id).values(expires_at=past))
     await db_session.commit()
 
     list_resp = await client.get("/api/v1/keys")
@@ -453,9 +443,7 @@ async def test_migration_backfills_existing_keys_with_90d_and_admin_scope() -> N
         )
 
         # Read back and assert.
-        rows = (
-            await conn.execute(text("SELECT id, scope, expires_at FROM api_keys"))
-        ).all()
+        rows = (await conn.execute(text("SELECT id, scope, expires_at FROM api_keys"))).all()
         assert len(rows) == 1
         legacy = rows[0]
         assert legacy[0] == "k1"

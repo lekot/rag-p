@@ -255,9 +255,7 @@ def require_scope(min_scope: str) -> Callable[..., Any]:
                 raw = auth_header.removeprefix("Bearer ").strip()
                 if raw:
                     key_hash = hashlib.sha256(raw.encode()).hexdigest()
-                    res = await db.execute(
-                        select(ApiKey).where(ApiKey.key_hash == key_hash)
-                    )
+                    res = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
                     api_key = res.scalar_one_or_none()
                     if api_key is not None:
                         if api_key.revoked_at is not None:
