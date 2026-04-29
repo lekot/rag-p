@@ -97,10 +97,16 @@ Rollback is image-tag based:
 Database downgrade is not automated. For the pilot phase, migrations should be
 treated as forward-only unless a specific manual rollback is written.
 
+## Postgres backups
+
+Daily `pg_dump` of the production database is uploaded to a dedicated
+Selectel S3 bucket by the `postgres-backup` Compose service. Schedule,
+retention, restore procedure, and key-rotation steps live in the
+runbook: [`postgres-backup.md`](./postgres-backup.md).
+
 ## Known limits
 
 - This is not HA: one host, one Postgres, one worker pool.
-- Backups are not yet automated in this bundle.
 - Resource isolation is container-level only, not namespace/cluster-level.
 - Experiments still need product-level work: tenant isolation, billing,
   durable runs, prioritised queues, cancellation, retries, and observability.
