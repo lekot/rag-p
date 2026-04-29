@@ -137,6 +137,35 @@ services:
     networks:
       - internal
 
+  postgres-backup:
+    build:
+      context: ./postgres-backup
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Proxy for S3 connectivity: if `aws s3 ls` against the target bucket
+      # works, credentials and endpoint are still valid.
+      test:
+        [
+          "CMD-SHELL",
+          "AWS_ACCESS_KEY_ID=$$RAGP_PGBACKUP_S3_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$$RAGP_PGBACKUP_S3_SECRET_ACCESS_KEY aws --endpoint-url $$RAGP_PGBACKUP_S3_ENDPOINT_URL s3 ls s3://$$RAGP_PGBACKUP_S3_BUCKET >/dev/null",
+        ]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    networks:
+      - internal
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
