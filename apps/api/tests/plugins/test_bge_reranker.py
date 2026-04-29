@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ragp_api.plugins.registry import list_plugins
 from ragp_api.plugins.rerankers import bge as bge_module
 from ragp_api.plugins.rerankers.bge import BGEReranker
-from ragp_api.plugins.registry import list_plugins
 
 
 @pytest.fixture(autouse=True)
