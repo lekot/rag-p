@@ -3,12 +3,18 @@ import { router, publicProcedure } from "../trpc";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const ScopeSchema = z.enum(["read", "write", "admin"]);
+export type ApiKeyScope = z.infer<typeof ScopeSchema>;
+
 const ApiKeySchema = z.object({
   id: z.string(),
   name: z.string(),
   key_prefix: z.string(),
   last_used_at: z.string().nullable().optional(),
   created_at: z.string(),
+  expires_at: z.string(),
+  scope: ScopeSchema,
+  is_expired: z.boolean(),
 });
 
 export type ApiKey = z.infer<typeof ApiKeySchema>;
@@ -18,6 +24,8 @@ const CreatedKeySchema = z.object({
   key: z.string(),
   name: z.string(),
   key_prefix: z.string(),
+  expires_at: z.string(),
+  scope: ScopeSchema,
 });
 
 export type CreatedKey = z.infer<typeof CreatedKeySchema>;
@@ -48,11 +56,23 @@ export const keysRouter = router({
   }),
 
   create: publicProcedure
-    .input(z.object({ name: z.string().min(1) }))
+    .input(
+      z.object({
+        name: z.string().min(1),
+        expires_in_days: z.number().int().min(1).max(365).optional(),
+        scope: ScopeSchema.optional(),
+      })
+    )
     .mutation(async ({ input, ctx }) => {
       const res = await authedFetch("/api/v1/keys", ctx.cookieHeader, {
         method: "POST",
-        body: JSON.stringify({ name: input.name }),
+        body: JSON.stringify({
+          name: input.name,
+          ...(input.expires_in_days !== undefined
+            ? { expires_in_days: input.expires_in_days }
+            : {}),
+          ...(input.scope !== undefined ? { scope: input.scope } : {}),
+        }),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => res.statusText);
