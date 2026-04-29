@@ -12,10 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Membership, Organization, OrgMember, User
+from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, _get_user_org, require_session_user
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.passwords import hash_password, verify_password
+from ragp_api.services.rate_limiter import check_login_attempt
 from ragp_api.services.sessions import make_session_cookie, read_session_cookie
 from ragp_api.settings import settings
 
@@ -66,6 +68,24 @@ class AuthOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the client IP for rate-limit keying.
+
+    Honours ``X-Forwarded-For`` (first hop) when present so requests behind a
+    trusted reverse proxy are not all bucketed together. Falls back to
+    ``request.client.host`` and finally to ``"unknown"`` when neither is
+    available.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    if request.client is not None and request.client.host:
+        return request.client.host
+    return "unknown"
 
 
 def _set_session_cookie(response: Response, user_id: str, org_id: str) -> None:
@@ -183,7 +203,20 @@ async def login(
     response: Response,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    redis: Any = Depends(get_redis),
 ) -> Any:
+    # Brute-force guard: sliding window per (IP, email). Counter is incremented
+    # for every attempt — including successful ones — so a guessed password on
+    # the N-th try still leaves the attacker locked out for the window.
+    ip = _client_ip(request)
+    ok, retry_after = await check_login_attempt(redis, ip, body.email, settings)
+    if not ok:
+        raise HTTPException(
+            status_code=429,
+            detail="too_many_login_attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if user is None or not user.password_hash:

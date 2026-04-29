@@ -16,6 +16,7 @@ and a WARNING is logged. Platform availability beats rate-limit enforcement.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import time
@@ -81,6 +82,44 @@ async def check(
         retry_after = window_seconds
 
     return False, retry_after
+
+
+async def check_login_attempt(
+    redis: Any,
+    ip: str,
+    email: str,
+    settings: Settings,
+) -> tuple[bool, int]:
+    """Check brute-force login rate limit per (IP, email).
+
+    Uses a sliding-window counter keyed by ``login_rate:{ip}:{sha256(email)}``.
+    Email is lower-cased before hashing so the limit is case-insensitive,
+    and the raw address never enters the Redis key.
+
+    Returns:
+        (True, 0)            — attempt is allowed.
+        (False, retry_after) — attempt is blocked; ``retry_after`` is the number
+                               of seconds the caller should wait.
+
+    Fail-open: when Redis is unavailable, returns ``(True, 0)`` and logs a
+    warning. Platform availability beats brute-force prevention.
+    """
+    limit = settings.login_rate_limit_attempts
+    window_seconds = settings.login_rate_limit_window_seconds
+
+    email_hash = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+    key = f"login_rate:{ip}:{email_hash}"
+
+    try:
+        ok, retry_after = await check(redis, key, limit, window_seconds)
+        return ok, retry_after
+    except Exception as exc:
+        logger.warning(
+            "Login rate limiter: Redis unavailable (%s: %s) — failing open",
+            type(exc).__name__,
+            exc,
+        )
+        return True, 0
 
 
 async def check_rag_query_limits(
