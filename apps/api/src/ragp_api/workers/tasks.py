@@ -52,6 +52,12 @@ async def mark_stale_experiments_failed(ctx: dict[str, Any] | None = None) -> in
     marked = 0
 
     async with async_session() as db:
+        # On SQLite (test backend) timestamps come back tz-naive, so the
+        # comparison must use the same flavour.  On Postgres TIMESTAMPTZ this
+        # is automatically aware, but a cutoff in either form serialises to
+        # the same SQL literal so it's fine to feed in tz-aware unconditionally
+        # — the only place we need to be careful is in Python-side arithmetic
+        # below (see _normalise call).
         stmt = (
             select(Experiment)
             .where(
@@ -71,7 +77,12 @@ async def mark_stale_experiments_failed(ctx: dict[str, Any] | None = None) -> in
 
         now = datetime.now(UTC)
         for experiment in stale:
-            stale_for = int((now - experiment.updated_at).total_seconds())
+            # SQLite (used in tests) strips tzinfo on round-trip; normalise so
+            # the subtraction below is always tz-aware.
+            updated = experiment.updated_at
+            if updated is not None and updated.tzinfo is None:
+                updated = updated.replace(tzinfo=UTC)
+            stale_for = int((now - updated).total_seconds()) if updated else 0
             experiment.status = "failed"
             experiment.leaderboard_json = [
                 {
