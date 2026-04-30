@@ -77,6 +77,11 @@ export default function LoginPage() {
               {loading ? "Входим…" : "Войти"}
             </Button>
             <p className="text-sm text-center text-muted-foreground">
+              <Link href="/forgot-password" className="underline hover:text-foreground">
+                Забыли пароль?
+              </Link>
+            </p>
+            <p className="text-sm text-center text-muted-foreground">
               Нет аккаунта?{" "}
               <Link href="/signup" className="underline hover:text-foreground">
                 Зарегистрироваться

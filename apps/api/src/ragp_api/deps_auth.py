@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ragp_api.db.models import ApiKey, Membership, Organization, OrgMember, User
 from ragp_api.deps import get_db
 from ragp_api.services.sessions import COOKIE_NAME as _COOKIE_NAME
-from ragp_api.services.sessions import read_session_cookie
+from ragp_api.services.sessions import read_session_cookie, read_session_cookie_with_ts
 from ragp_api.settings import settings
 
 # Re-export for convenience (used by routes_auth)
@@ -65,18 +65,27 @@ async def get_session_user(
     Users with ``deletion_requested_at`` set are treated as locked: this
     function raises ``HTTPException(403, account_pending_deletion)`` so the
     response is consistent across all auth-protected endpoints.
+
+    Cookies issued before ``user.sessions_invalidated_at`` (set on password
+    reset) are rejected with 401 so that old sessions cannot be replayed.
     """
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
-    parsed = read_session_cookie(token)
-    if not parsed:
+    parsed_with_ts = read_session_cookie_with_ts(token)
+    if not parsed_with_ts:
         return None
-    user_id, _org_id = parsed
+    user_id, _org_id, issued_at = parsed_with_ts
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
     if user is not None and user.deletion_requested_at is not None:
         raise HTTPException(status_code=403, detail="account_pending_deletion")
+    if user is not None and user.sessions_invalidated_at is not None:
+        inv_at = user.sessions_invalidated_at
+        if inv_at.tzinfo is None:
+            inv_at = inv_at.replace(tzinfo=UTC)
+        if issued_at <= inv_at:
+            return None
     return user
 
 
@@ -139,22 +148,39 @@ async def require_organization(
     # 1. Session cookie
     token = request.cookies.get(COOKIE_NAME)
     if token:
-        parsed = read_session_cookie(token)
-        if parsed:
-            user_id, org_id = parsed
+        parsed_ts = read_session_cookie_with_ts(token)
+        if parsed_ts:
+            user_id, org_id, issued_at = parsed_ts
             # Block sessions tied to a user awaiting deletion.
             session_user_result = await db.execute(select(User).where(User.id == user_id))
             session_user = session_user_result.scalar_one_or_none()
             if session_user is not None and session_user.deletion_requested_at is not None:
                 raise HTTPException(status_code=403, detail="account_pending_deletion")
-            session_org_result = await db.execute(
-                select(Organization).where(Organization.id == org_id)
-            )
-            session_org = session_org_result.scalar_one_or_none()
-            if session_org is not None and session_org.deletion_requested_at is not None:
-                raise HTTPException(status_code=403, detail="account_pending_deletion")
-            if session_org and await _user_has_org_access(db, user_id, org_id):
-                return session_org
+            # Reject cookies issued before a password reset.
+            if session_user is not None and session_user.sessions_invalidated_at is not None:
+                inv_at = session_user.sessions_invalidated_at
+                if inv_at.tzinfo is None:
+                    inv_at = inv_at.replace(tzinfo=UTC)
+                if issued_at <= inv_at:
+                    pass  # fall through to API key / 401
+                else:
+                    session_org_result = await db.execute(
+                        select(Organization).where(Organization.id == org_id)
+                    )
+                    session_org = session_org_result.scalar_one_or_none()
+                    if session_org is not None and session_org.deletion_requested_at is not None:
+                        raise HTTPException(status_code=403, detail="account_pending_deletion")
+                    if session_org and await _user_has_org_access(db, user_id, org_id):
+                        return session_org
+            else:
+                session_org_result = await db.execute(
+                    select(Organization).where(Organization.id == org_id)
+                )
+                session_org = session_org_result.scalar_one_or_none()
+                if session_org is not None and session_org.deletion_requested_at is not None:
+                    raise HTTPException(status_code=403, detail="account_pending_deletion")
+                if session_org and await _user_has_org_access(db, user_id, org_id):
+                    return session_org
 
     # 2. API key Bearer token
     auth_header = request.headers.get("Authorization", "")

@@ -94,5 +94,17 @@ class Settings(BaseSettings):
     s3_access_key_id: str = ""
     s3_secret_access_key: str = ""
 
+    # SMTP for transactional emails (password reset etc.).
+    # smtp_host="" disables SMTP — links are printed to the application log.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+
+    # Password reset token TTL.
+    password_reset_token_ttl_minutes: int = 60
+
 
 settings = Settings()

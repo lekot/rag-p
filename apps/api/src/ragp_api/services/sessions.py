@@ -1,8 +1,10 @@
 """Signed httpOnly session cookies using itsdangerous."""
 
 import os
+from datetime import UTC, datetime
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from itsdangerous.exc import SignatureExpired as _SignatureExpired
 
 _SECRET = os.environ.get("RAGP_SESSION_SECRET", "dev-only-not-secret-change-in-prod")
 _SALT = "ragp-session"
@@ -30,4 +32,19 @@ def read_session_cookie(token: str) -> tuple[str, str] | None:
         data = s.loads(token, max_age=_MAX_AGE)
         return data["u"], data["o"]
     except (BadSignature, SignatureExpired, KeyError):
+        return None
+
+
+def read_session_cookie_with_ts(token: str) -> tuple[str, str, datetime] | None:
+    """Parse and validate a session token, also returning the issue timestamp.
+
+    Returns (user_id, org_id, issued_at) or None if token is invalid/expired.
+    Used to reject cookies issued before a password reset.
+    """
+    s = _get_serializer()
+    try:
+        data, ts = s.loads(token, max_age=_MAX_AGE, return_timestamp=True)
+        issued_at = datetime.fromtimestamp(ts.timestamp(), tz=UTC)
+        return data["u"], data["o"], issued_at
+    except (_SignatureExpired, BadSignature, KeyError):
         return None
