@@ -27,8 +27,8 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        # pnpm version is taken from tests/e2e/package.json `packageManager`
+        # field — don't pass `version` here or you get ERR_PNPM_BAD_PM_VERSION.
 
       - name: Install e2e dependencies
         working-directory: tests/e2e
