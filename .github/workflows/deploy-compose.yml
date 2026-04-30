@@ -167,6 +167,12 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$COHERE_AMNEZIA_CONF" > cohere.amnezia.conf
+          # If a previous deploy ran without the secret, docker-compose's volume
+          # mount of ./cohere.amnezia.conf creates an empty *directory* on the
+          # host instead of an error.  Subsequent scp would then drop the file
+          # *inside* that directory and the bind-mount stays broken.  Remove
+          # both file and dir variants before uploading.
+          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "rm -rf '$COMPOSE_DIR/cohere.amnezia.conf'"
           scp -P "$COMPOSE_SSH_PORT" cohere.amnezia.conf "$REMOTE:$COMPOSE_DIR/cohere.amnezia.conf"
           ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "chmod 600 '$COMPOSE_DIR/cohere.amnezia.conf'"
           rm -f cohere.amnezia.conf
