@@ -13,7 +13,7 @@
 # /etc/amneziawg/awg0.conf volume is missing — handy for local smoke / CI.
 
 ARG ALPINE_VERSION=3.20
-ARG GO_VERSION=1.22
+ARG GO_VERSION=1.25
 
 # ---------------------------------------------------------------------------
 # Stage 1: build amneziawg-go (userspace wireguard implementation with AWG)
