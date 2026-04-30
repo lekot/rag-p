@@ -11,7 +11,7 @@ from ragp_api.db.models import Experiment, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_scope
 from ragp_api.services.audit import log_audit_event
-from ragp_api.services.queue import enqueue
+from ragp_api.services.queue import QuotaExceededError, enqueue
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
@@ -113,12 +113,20 @@ async def create_experiment(
 
     # Enqueue to ARQ worker — POST returns immediately (~50 ms).
     # Poll GET /experiments/{id} until status != "queued"/"running".
-    await enqueue(
-        task_type="experiment.run",
-        tenant_id=body.organization_id,
-        payload={"experiment_id": experiment.id},
-        idempotency_key=f"experiment.run:{experiment.id}",
-    )
+    try:
+        await enqueue(
+            task_type="experiment.run",
+            tenant_id=body.organization_id,
+            payload={"experiment_id": experiment.id},
+            idempotency_key=f"experiment.run:{experiment.id}",
+            queue_name="rag.experiment",
+        )
+    except QuotaExceededError as e:
+        raise HTTPException(
+            status_code=429,
+            detail="quota_exceeded",
+            headers={"Retry-After": str(int(e.retry_after_seconds))},
+        ) from e
 
     return ExperimentOut(
         id=experiment.id,

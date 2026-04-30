@@ -106,5 +106,14 @@ class Settings(BaseSettings):
     # Password reset token TTL.
     password_reset_token_ttl_minutes: int = 60
 
+    # Per-tenant queue fairness (sliding window rate limits).
+    # Controls how many jobs one tenant may enqueue per rolling window.
+    # ENV names follow the RAGP_ prefix convention.
+    queue_quota_window_seconds: int = 60  # RAGP_QUEUE_QUOTA_WINDOW_SECONDS
+    queue_quota_experiment_per_tenant: int = 5  # RAGP_QUEUE_QUOTA_EXPERIMENT_PER_TENANT
+    queue_quota_ingest_per_tenant: int = 10  # RAGP_QUEUE_QUOTA_INGEST_PER_TENANT
+    queue_quota_live_per_tenant: int = 60  # RAGP_QUEUE_QUOTA_LIVE_PER_TENANT
+    # rag.maintenance has no cap — unlimited enqueues.
+
 
 settings = Settings()
