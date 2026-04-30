@@ -12,9 +12,19 @@ Verifies:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
+from fakeredis.aioredis import FakeRedis
+
+
+@pytest_asyncio.fixture
+async def fake_redis() -> FakeRedis:
+    r = FakeRedis(decode_responses=True)
+    yield r
+    await r.aclose()
+
 
 # ---------------------------------------------------------------------------
 # WorkerSettings class structure
@@ -97,19 +107,20 @@ def test_worker_settings_is_alias_for_experiment():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_experiment_run_routes_to_experiment_queue():
+async def test_enqueue_experiment_run_routes_to_experiment_queue(fake_redis: FakeRedis):
     """enqueue(task_type="experiment.run") must pass _queue_name="rag.experiment"."""
     from ragp_api.services.queue import enqueue
 
     pool = MagicMock()
     pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="j1"))
 
-    await enqueue(
-        task_type="experiment.run",
-        tenant_id="org-1",
-        payload={"experiment_id": "exp-123"},
-        arq_pool=pool,
-    )
+    with patch("ragp_api.services.queue.aioredis.Redis", return_value=fake_redis):
+        await enqueue(
+            task_type="experiment.run",
+            tenant_id="org-1",
+            payload={"experiment_id": "exp-123"},
+            arq_pool=pool,
+        )
 
     pool.enqueue_job.assert_awaited_once()
     kwargs = pool.enqueue_job.call_args.kwargs
@@ -119,19 +130,20 @@ async def test_enqueue_experiment_run_routes_to_experiment_queue():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_dataset_ingest_routes_to_ingest_queue():
+async def test_enqueue_dataset_ingest_routes_to_ingest_queue(fake_redis: FakeRedis):
     """enqueue(task_type="dataset.ingest") must pass _queue_name="rag.ingest"."""
     from ragp_api.services.queue import enqueue
 
     pool = MagicMock()
     pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="j2"))
 
-    await enqueue(
-        task_type="dataset.ingest",
-        tenant_id="org-1",
-        payload={"dataset_id": "ds-456"},
-        arq_pool=pool,
-    )
+    with patch("ragp_api.services.queue.aioredis.Redis", return_value=fake_redis):
+        await enqueue(
+            task_type="dataset.ingest",
+            tenant_id="org-1",
+            payload={"dataset_id": "ds-456"},
+            arq_pool=pool,
+        )
 
     pool.enqueue_job.assert_awaited_once()
     kwargs = pool.enqueue_job.call_args.kwargs
@@ -159,20 +171,21 @@ async def test_enqueue_unknown_task_type_raises():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_respects_explicit_queue_name_override():
+async def test_enqueue_respects_explicit_queue_name_override(fake_redis: FakeRedis):
     """Explicit queue_name= kwarg overrides the routing table."""
     from ragp_api.services.queue import enqueue
 
     pool = MagicMock()
     pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="j3"))
 
-    await enqueue(
-        task_type="experiment.run",
-        tenant_id="org-1",
-        payload={"experiment_id": "exp-789"},
-        queue_name="rag.custom",
-        arq_pool=pool,
-    )
+    with patch("ragp_api.services.queue.aioredis.Redis", return_value=fake_redis):
+        await enqueue(
+            task_type="experiment.run",
+            tenant_id="org-1",
+            payload={"experiment_id": "exp-789"},
+            queue_name="rag.custom",
+            arq_pool=pool,
+        )
 
     pool.enqueue_job.assert_awaited_once()
     assert pool.enqueue_job.call_args.kwargs["_queue_name"] == "rag.custom"

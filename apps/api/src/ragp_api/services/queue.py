@@ -1,8 +1,10 @@
 """Unified enqueue helper with task envelope, idempotency, and per-queue routing.
 
-Phase 1 introduced the envelope + idempotency layer.
-Phase 2 adds per-task-type queue routing so ``enqueue()`` automatically picks
-the right ARQ queue (``rag.experiment``, ``rag.ingest``, …).
+Phase 1–3 of queue contract enforcement:
+
+- Phase 1: envelope + idempotency layer (PR #23).
+- Phase 2: per-task-type queue routing (PR #25).
+- Phase 3: per-tenant fairness via Redis sorted sets (this file).
 
 Callers should always go through ``enqueue()`` instead of using
 ``pool.enqueue_job(...)`` directly.  This gives us:
@@ -11,12 +13,15 @@ Callers should always go through ``enqueue()`` instead of using
 - Idempotency: identical ``idempotency_key`` values within a 24-hour window
   return the original task_id without creating a duplicate ARQ job.
 - Automatic queue routing: each ``task_type`` maps to a single ARQ queue.
-- A single place to add per-tenant fairness and backpressure in later PRs.
+- Per-tenant fairness: one tenant cannot flood a queue and starve others.
+  ``QuotaExceededError`` is raised when the cap is breached so callers can
+  return HTTP 429 + Retry-After.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -34,6 +39,9 @@ _IDEM_PREFIX = "queue:idempotency:"
 # TTL for idempotency keys (24 hours in seconds).
 _IDEM_TTL = 86400
 
+# Redis key prefix for per-tenant quota sorted sets.
+_QUOTA_PREFIX = "tenant_quota:"
+
 # Mapping from logical task_type to the ARQ function name registered in
 # WorkerSettings.functions.  Add new task types here as they are introduced.
 _TASK_TYPE_TO_ARQ_FUNCTION: dict[str, str] = {
@@ -48,6 +56,93 @@ _TASK_TYPE_TO_QUEUE: dict[str, str] = {
     "experiment.run": "rag.experiment",
     "dataset.ingest": "rag.ingest",
 }
+
+
+# Map queue name → per-tenant cap (None = no cap).
+# Populated lazily from settings so tests can patch settings before import.
+def _queue_caps() -> dict[str, int | None]:
+    return {
+        "rag.experiment": settings.queue_quota_experiment_per_tenant,
+        "rag.ingest": settings.queue_quota_ingest_per_tenant,
+        "rag.live": settings.queue_quota_live_per_tenant,
+        "rag.maintenance": None,  # no cap
+    }
+
+
+class QuotaExceededError(Exception):
+    """Raised when a tenant exceeds the per-queue enqueue rate limit."""
+
+    def __init__(self, queue: str, tenant_id: str, retry_after_seconds: float) -> None:
+        self.queue = queue
+        self.tenant_id = tenant_id
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            f"Tenant {tenant_id!r} exceeded quota for queue {queue!r}. "
+            f"Retry after {retry_after_seconds:.1f}s."
+        )
+
+
+async def _check_tenant_quota(
+    r: aioredis.Redis,
+    tenant_id: str,
+    queue_name: str,
+    *,
+    window_seconds: int | None = None,
+    cap: int | None = None,
+) -> None:
+    """Enforce per-tenant sliding-window quota for *queue_name*.
+
+    Sorted set ``tenant_quota:{queue_name}`` member = ``{tenant_id}:{uuid4}``,
+    score = epoch ts of the enqueue.  Old entries outside the window are
+    pruned before counting.  Raises ``QuotaExceededError`` when the per-tenant
+    count >= cap.
+    """
+    if cap is None:
+        caps = _queue_caps()
+        cap = caps.get(queue_name)
+    if cap is None:
+        return  # No cap configured for this queue.
+
+    if window_seconds is None:
+        window_seconds = settings.queue_quota_window_seconds
+
+    now = time.time()
+    window_start = now - window_seconds
+    redis_key = f"{_QUOTA_PREFIX}{queue_name}"
+
+    await r.zremrangebyscore(redis_key, "-inf", window_start)
+
+    tenant_prefix = f"{tenant_id}:"
+    members: list[str] = await r.zrangebyscore(redis_key, window_start, "+inf")
+    tenant_count = sum(1 for m in members if m.startswith(tenant_prefix))
+
+    if tenant_count >= cap:
+        tenant_members_with_scores: list[tuple[str, float]] = await r.zrangebyscore(
+            redis_key, window_start, "+inf", withscores=True
+        )
+        tenant_scores = [
+            score
+            for member, score in tenant_members_with_scores
+            if member.startswith(tenant_prefix)
+        ]
+        oldest_ts = min(tenant_scores) if tenant_scores else window_start
+        retry_after = max(0.0, (oldest_ts + window_seconds) - now)
+        logger.warning(
+            "_check_tenant_quota: quota exceeded tenant=%s queue=%s count=%d cap=%d"
+            " retry_after=%.1fs",
+            tenant_id,
+            queue_name,
+            tenant_count,
+            cap,
+            retry_after,
+        )
+        raise QuotaExceededError(
+            queue=queue_name, tenant_id=tenant_id, retry_after_seconds=retry_after
+        )
+
+    member = f"{tenant_id}:{uuid.uuid4()}"
+    await r.zadd(redis_key, {member: now})
+    await r.expire(redis_key, window_seconds * 2)
 
 
 async def enqueue(
@@ -67,8 +162,8 @@ async def enqueue(
         Logical task identifier (e.g. ``"experiment.run"``).  Must be a key
         in ``_TASK_TYPE_TO_ARQ_FUNCTION``.
     tenant_id:
-        Organisation / tenant identifier.  Stored in the envelope for
-        observability and future per-tenant fairness (PR 3).
+        Organisation / tenant identifier.  Stored in the envelope and used
+        for per-tenant fairness.
     payload:
         Arbitrary task-specific data.  Passed as-is inside the envelope.
     idempotency_key:
@@ -88,6 +183,14 @@ async def enqueue(
         - ``job_id`` (str | None): ARQ job identifier; *None* for deduplicated calls.
         - ``task_id`` (str): UUID for this logical task (stable across deduplication).
         - ``deduplicated`` (bool): *True* when the idempotency key was already set.
+
+    Raises
+    ------
+    QuotaExceededError
+        When the tenant has exceeded the per-queue rate cap within the
+        rolling window.
+    ValueError
+        When *task_type* is not registered.
     """
     arq_function = _TASK_TYPE_TO_ARQ_FUNCTION.get(task_type)
     if arq_function is None:
@@ -105,24 +208,22 @@ async def enqueue(
 
     task_id = str(uuid.uuid4())
 
-    # --- Idempotency check via Redis SETNX ---
-    if idempotency_key is not None:
-        redis_key = f"{_IDEM_PREFIX}{idempotency_key}"
+    r: aioredis.Redis = aioredis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    try:
+        # --- Per-tenant quota check (Phase 3) ---
+        await _check_tenant_quota(r, tenant_id, resolved_queue)
 
-        # We need a plain Redis client (redis.asyncio) for SETNX, not the ARQ
-        # pool.
-        r: aioredis.Redis = aioredis.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-        )
-        try:
-            # SETNX + EXPIRE atomically via SET … NX EX
+        # --- Idempotency check via Redis SETNX ---
+        if idempotency_key is not None:
+            redis_key = f"{_IDEM_PREFIX}{idempotency_key}"
             was_set = await r.set(redis_key, task_id, nx=True, ex=_IDEM_TTL)
             if not was_set:
-                # Key already exists — fetch the original task_id
                 existing_task_id = await r.get(redis_key)
                 logger.debug(
                     "enqueue: deduplicated task_type=%s idempotency_key=%s existing_task_id=%s",
@@ -135,10 +236,9 @@ async def enqueue(
                     "task_id": existing_task_id or task_id,
                     "deduplicated": True,
                 }
-        finally:
-            await r.aclose()
+    finally:
+        await r.aclose()
 
-    # --- Build envelope ---
     envelope: dict[str, Any] = {
         "task_id": task_id,
         "task_type": task_type,
@@ -148,7 +248,6 @@ async def enqueue(
         "ts": datetime.now(UTC).isoformat(),
     }
 
-    # --- Enqueue via ARQ on the resolved queue ---
     own_pool = arq_pool is None
     pool: ArqRedis
     if own_pool:
