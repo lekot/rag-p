@@ -1,7 +1,24 @@
-"""ARQ WorkerSettings — entrypoint for the background worker process.
+"""ARQ WorkerSettings — entrypoints for per-queue worker processes.
 
-Run with:
-    arq ragp_api.workers.main.WorkerSettings
+Phase 2 of 4: split workers per queue (live / ingest / experiment / maintenance).
+
+Each class is a separate ARQ worker entrypoint.  Run with, e.g.:
+    arq ragp_api.workers.main.WorkerExperimentSettings
+    arq ragp_api.workers.main.WorkerIngestSettings
+    arq ragp_api.workers.main.WorkerMaintenanceSettings
+
+``WorkerSettings`` is kept as a backwards-compatibility alias for
+``WorkerExperimentSettings`` so that any existing ``docker compose`` or
+deployment script that references the old name continues to work during the
+first rollout.  New deployments should use the per-queue class names.
+
+Notes on score tasks
+--------------------
+There are currently no dedicated score task functions in the codebase.
+``WorkerExperimentSettings`` therefore handles both experiment orchestration
+and any future scoring sub-tasks (they would share ``rag.experiment`` queue).
+A separate ``WorkerScoreSettings`` / ``rag.score`` queue can be split off in a
+later PR once scoring tasks exist.
 """
 
 from __future__ import annotations
@@ -102,13 +119,100 @@ async def on_job_failure(ctx: dict) -> None:  # type: ignore[type-arg]
         logging.getLogger(__name__).exception("on_job_failure callback itself failed: %s", exc)
 
 
-class WorkerSettings:
-    """ARQ worker configuration."""
+# ---------------------------------------------------------------------------
+# Shared Redis settings helper
+# ---------------------------------------------------------------------------
 
-    functions = [run_experiment_task, aggregate_usage_daily, mark_stale_experiments_failed]
+
+def _redis_settings() -> RedisSettings:
+    return RedisSettings(host=settings.redis_host, port=settings.redis_port)
+
+
+# ---------------------------------------------------------------------------
+# Worker: rag.live — synchronous user-facing queries (reserved for future use)
+# ---------------------------------------------------------------------------
+
+
+class WorkerLiveSettings:
+    """ARQ worker for the ``rag.live`` queue.
+
+    No functions are registered yet — this queue is reserved for future
+    low-latency synchronous user requests that must not compete with
+    long-running ingest or experiment jobs.
+    """
+
+    queue_name = "rag.live"
+    functions: list = []
+    redis_settings = _redis_settings()
+    max_jobs = 4
+    job_timeout = 30
+    on_startup = on_startup
+    on_job_start = on_job_start
+    on_job_end = on_job_complete
+
+
+# ---------------------------------------------------------------------------
+# Worker: rag.ingest — long-running dataset upload / ingestion jobs
+# ---------------------------------------------------------------------------
+
+
+class WorkerIngestSettings:
+    """ARQ worker for the ``rag.ingest`` queue.
+
+    No ingest task functions exist in the codebase yet.  The functions list
+    will be populated once ``run_dataset_ingest_task`` is implemented.
+    """
+
+    queue_name = "rag.ingest"
+    functions: list = []
+    redis_settings = _redis_settings()
+    max_jobs = 2
+    job_timeout = 1800  # 30 minutes — large file uploads can be slow
+    on_startup = on_startup
+    on_job_start = on_job_start
+    on_job_end = on_job_complete
+
+
+# ---------------------------------------------------------------------------
+# Worker: rag.experiment — eval grid runs (+ score sub-tasks until split)
+# ---------------------------------------------------------------------------
+
+
+class WorkerExperimentSettings:
+    """ARQ worker for the ``rag.experiment`` queue.
+
+    Handles experiment orchestration.  Score sub-tasks share this queue for
+    now; a dedicated ``rag.score`` queue/worker can be split off later.
+    """
+
+    queue_name = "rag.experiment"
+    functions = [run_experiment_task]
+    redis_settings = _redis_settings()
+    max_jobs = 1
+    job_timeout = 600  # 10 minutes per experiment
+    on_startup = on_startup
+    on_job_start = on_job_start
+    on_job_end = on_job_complete
+    after_job_end = on_job_failure
+
+
+# ---------------------------------------------------------------------------
+# Worker: rag.maintenance — cron jobs only
+# ---------------------------------------------------------------------------
+
+
+class WorkerMaintenanceSettings:
+    """ARQ worker for the ``rag.maintenance`` queue.
+
+    Runs periodic housekeeping cron jobs.  No ad-hoc enqueueable functions
+    are registered — only the cron schedule matters here.
+    """
+
+    queue_name = "rag.maintenance"
+    functions = [aggregate_usage_daily, expire_subscriptions_task, mark_stale_experiments_failed]
     cron_jobs = [
         cron(aggregate_usage_daily, hour=1, minute=0, run_at_startup=False),
-        # Daily: expire subscriptions whose period has ended
+        # Daily: expire subscriptions whose period has ended.
         cron(expire_subscriptions_task, hour=0, minute=10, run_at_startup=False),
         # Watchdog: scan for queued/running experiments whose heartbeat went
         # stale and mark them failed.  Runs every two minutes.
@@ -118,10 +222,20 @@ class WorkerSettings:
             run_at_startup=False,
         ),
     ]
-    redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
-    max_jobs = 5
-    job_timeout = 600  # 10 minutes per experiment
+    redis_settings = _redis_settings()
+    max_jobs = 2
+    job_timeout = 300
     on_startup = on_startup
     on_job_start = on_job_start
     on_job_end = on_job_complete
-    after_job_end = on_job_failure
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatibility alias
+# ---------------------------------------------------------------------------
+
+#: ``WorkerSettings`` is kept so that any existing deployment script that
+#: runs ``arq ragp_api.workers.main.WorkerSettings`` keeps working without
+#: change during a rolling rollout.  Prefer ``WorkerExperimentSettings`` for
+#: new deployments.
+WorkerSettings = WorkerExperimentSettings

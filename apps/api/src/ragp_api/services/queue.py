@@ -1,13 +1,16 @@
-"""Unified enqueue helper with task envelope and idempotency.
+"""Unified enqueue helper with task envelope, idempotency, and per-queue routing.
 
-Phase 1 of queue contract enforcement (PR 1 of 4).
+Phase 1 introduced the envelope + idempotency layer.
+Phase 2 adds per-task-type queue routing so ``enqueue()`` automatically picks
+the right ARQ queue (``rag.experiment``, ``rag.ingest``, …).
 
-All background work should go through ``enqueue()`` instead of calling
+Callers should always go through ``enqueue()`` instead of using
 ``pool.enqueue_job(...)`` directly.  This gives us:
 
 - A consistent task envelope format ({task_id, task_type, tenant_id, ...}).
 - Idempotency: identical ``idempotency_key`` values within a 24-hour window
-  will return the original task_id without creating a duplicate ARQ job.
+  return the original task_id without creating a duplicate ARQ job.
+- Automatic queue routing: each ``task_type`` maps to a single ARQ queue.
 - A single place to add per-tenant fairness and backpressure in later PRs.
 """
 
@@ -16,16 +19,13 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import redis.asyncio as aioredis
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 
 from ragp_api.settings import settings
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,15 @@ _IDEM_TTL = 86400
 # WorkerSettings.functions.  Add new task types here as they are introduced.
 _TASK_TYPE_TO_ARQ_FUNCTION: dict[str, str] = {
     "experiment.run": "run_experiment_task",
-    # Future task types will be added here when their workers are defined.
+    "dataset.ingest": "run_dataset_ingest_task",
+}
+
+# Maps every known task_type to its ARQ queue name.
+# Extend this dict when a new task_type is introduced — never hard-code the
+# queue name at the call site.
+_TASK_TYPE_TO_QUEUE: dict[str, str] = {
+    "experiment.run": "rag.experiment",
+    "dataset.ingest": "rag.ingest",
 }
 
 
@@ -48,7 +56,7 @@ async def enqueue(
     tenant_id: str,
     payload: dict[str, Any],
     idempotency_key: str | None = None,
-    queue_name: str | None = None,  # reserved for per-queue split (PR 2); ignored for now
+    queue_name: str | None = None,
     arq_pool: ArqRedis | None = None,
 ) -> dict[str, Any]:
     """Enqueue a background task using a unified task envelope.
@@ -68,8 +76,8 @@ async def enqueue(
         same key within 24 hours returns the original result without
         submitting a new ARQ job.
     queue_name:
-        Reserved for the future worker-split PR.  Currently ignored; all
-        jobs go to the default ARQ queue.
+        Override the queue resolved from ``_TASK_TYPE_TO_QUEUE``.  Leave
+        ``None`` so that routing stays driven by the task_type table.
     arq_pool:
         An existing ``ArqRedis`` pool to reuse.  When *None* a temporary
         pool is created and closed after the call.
@@ -86,6 +94,13 @@ async def enqueue(
         raise ValueError(
             f"Unknown task_type {task_type!r}.  "
             f"Register it in services/queue._TASK_TYPE_TO_ARQ_FUNCTION."
+        )
+
+    resolved_queue = queue_name or _TASK_TYPE_TO_QUEUE.get(task_type)
+    if resolved_queue is None:
+        raise ValueError(
+            f"No queue registered for task_type {task_type!r} — add it to "
+            "_TASK_TYPE_TO_QUEUE in services/queue.py"
         )
 
     task_id = str(uuid.uuid4())
@@ -133,7 +148,7 @@ async def enqueue(
         "ts": datetime.now(UTC).isoformat(),
     }
 
-    # --- Enqueue via ARQ ---
+    # --- Enqueue via ARQ on the resolved queue ---
     own_pool = arq_pool is None
     pool: ArqRedis
     if own_pool:
@@ -142,15 +157,20 @@ async def enqueue(
         pool = arq_pool  # type: ignore[assignment]
 
     try:
-        job = await pool.enqueue_job(arq_function, envelope=envelope)
+        job = await pool.enqueue_job(
+            arq_function,
+            envelope=envelope,
+            _queue_name=resolved_queue,
+        )
         job_id: str | None = job.job_id if job is not None else None
     finally:
         if own_pool:
             await pool.aclose()
 
     logger.debug(
-        "enqueue: task_type=%s task_id=%s job_id=%s",
+        "enqueue: task_type=%s queue=%s task_id=%s job_id=%s",
         task_type,
+        resolved_queue,
         task_id,
         job_id,
     )
