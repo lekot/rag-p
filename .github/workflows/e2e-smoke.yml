@@ -15,15 +15,16 @@ on:
 jobs:
   e2e-smoke:
     name: Playwright smoke tests
-    runs-on: ubuntu-latest
+    # Self-hosted runner; Chromium + system deps come pre-installed in the
+    # Microsoft Playwright base image so we don't need apt sudo on the host.
+    runs-on: [self-hosted, ci]
+    container:
+      image: mcr.microsoft.com/playwright:v1.45.0-jammy
+      options: --user 0
     timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -33,10 +34,6 @@ jobs:
       - name: Install e2e dependencies
         working-directory: tests/e2e
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        working-directory: tests/e2e
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run Playwright smoke tests
         working-directory: tests/e2e
