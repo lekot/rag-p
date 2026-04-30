@@ -68,16 +68,30 @@ async def on_job_failure(ctx: dict) -> None:  # type: ignore[type-arg]
     ``error_code='worker_crash'`` so the experiment never gets stuck in
     queued/running.  Wrapped in a broad try/except — the callback itself must
     never raise.
+
+    Supports both the legacy positional-arg calling convention and the new
+    envelope-based convention introduced in services/queue.py (PR 1).
     """
     try:
         function_name = ctx.get("function") or ctx.get("function_name")
         if function_name != "run_experiment_task":
             return
 
-        args = ctx.get("args") or ()
-        if not args:
+        # New convention: experiment_id is inside kwargs["envelope"]["payload"]
+        kwargs = ctx.get("kwargs") or {}
+        envelope = kwargs.get("envelope") or {}
+        experiment_id: str | None = (
+            envelope.get("payload", {}).get("experiment_id") if envelope else None
+        )
+
+        # Legacy fallback: experiment_id was the first positional arg
+        if not experiment_id:
+            args = ctx.get("args") or ()
+            experiment_id = args[0] if args else None
+
+        if not experiment_id:
             return
-        experiment_id = args[0]
+
         exc = ctx.get("exception") or ctx.get("result")
         error_msg = str(exc) if exc is not None else "Unknown worker failure"
 

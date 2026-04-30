@@ -158,14 +158,28 @@ async def expire_subscriptions_task(ctx: dict[str, Any]) -> None:
     logger.info("expire_subscriptions_task: expired %d subscriptions", count)
 
 
-async def run_experiment_task(ctx: dict[str, Any], experiment_id: str) -> None:
+async def run_experiment_task(
+    ctx: dict[str, Any],
+    envelope: dict[str, Any] | None = None,
+    # Legacy positional arg kept for backward-compat with any jobs enqueued
+    # before the envelope migration.  New callers always pass `envelope`.
+    experiment_id: str | None = None,
+) -> None:
     """
     ARQ task: load Experiment from DB and run the evaluation grid.
 
     This task runs inside the ARQ worker process (not inside a FastAPI request).
     It creates its own DB session via the standalone async_session helper so it
     can operate outside of the request/dependency-injection lifecycle.
+
+    Accepts tasks enqueued via the new ``services.queue.enqueue()`` helper
+    (which passes ``envelope=<dict>``) as well as legacy direct
+    ``pool.enqueue_job("run_experiment_task", <experiment_id>)`` calls.
     """
+    # Resolve experiment_id from envelope (new path) or legacy positional arg.
+    if envelope is not None:
+        experiment_id = envelope.get("payload", {}).get("experiment_id") or envelope.get("task_id")
+
     from sqlalchemy import select
 
     from ragp_api.db.models import Experiment

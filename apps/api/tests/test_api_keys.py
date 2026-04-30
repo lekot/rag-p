@@ -316,13 +316,9 @@ async def test_admin_scope_can_create_experiment(
         db_session, raw_key=raw_key, scope="admin"
     )
 
-    fake_pool = AsyncMock()
-    fake_pool.enqueue_job = AsyncMock(return_value=None)
-    fake_pool.aclose = AsyncMock(return_value=None)
-
     with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        new=AsyncMock(return_value=fake_pool),
+        "ragp_api.api.v1.routes_experiments.enqueue",
+        new=AsyncMock(return_value={"job_id": "j", "task_id": "t", "deduplicated": False}),
     ):
         resp = await client.post(
             "/api/v1/experiments",

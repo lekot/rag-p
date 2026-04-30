@@ -223,11 +223,9 @@ async def test_experiment_start_audit_event(
 ) -> None:
     """POST /experiments creates experiment.start audit with name + dataset_id."""
     dataset_id = await _create_dataset(client, organization_id, name="ExpAuditDS")
-    pool_mock = _make_redis_pool_mock()
-
     with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
+        "ragp_api.api.v1.routes_experiments.enqueue",
+        new=AsyncMock(return_value={"job_id": "j", "task_id": "t", "deduplicated": False}),
     ):
         resp = await client.post(
             "/api/v1/experiments",
@@ -270,15 +268,14 @@ async def test_experiment_promote_audit_event(
     from ragp_api.db.models import Experiment
 
     dataset_id = await _create_dataset(client, organization_id, name="PromoteAuditDS")
-    pool_mock = _make_redis_pool_mock()
 
     winning_nodes = [
         {"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}},
     ]
 
     with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
+        "ragp_api.api.v1.routes_experiments.enqueue",
+        new=AsyncMock(return_value={"job_id": "j", "task_id": "t", "deduplicated": False}),
     ):
         create_resp = await client.post(
             "/api/v1/experiments",
