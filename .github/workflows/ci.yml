@@ -12,11 +12,6 @@ jobs:
   lint-py:
     name: Python lint + typecheck + pytest
     runs-on: [self-hosted, ci]
-    # Two self-hosted runners share the host filesystem; share the uv cache
-    # too, otherwise both stash torch/scipy/etc separately under each
-    # runner's own _work/_temp/setup-uv-cache and the disk fills up.
-    env:
-      UV_CACHE_DIR: /var/cache/uv
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -40,6 +35,12 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
+          # Two self-hosted runners share the host filesystem; share the uv
+          # download cache too so torch/scipy don't get stashed twice and
+          # the disk fills up.  setup-uv writes UV_CACHE_DIR for downstream
+          # steps automatically when this input is set.
+          cache-local-path: /var/cache/uv
+          enable-cache: true
 
       - name: Set up Python
         run: uv python install 3.12
