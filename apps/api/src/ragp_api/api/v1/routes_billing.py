@@ -263,6 +263,7 @@ class SubscriptionCheckoutOut(BaseModel):
 async def subscription_checkout(
     org_id: str,
     body: SubscriptionCheckoutIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     redis: Any = Depends(get_redis),
     current_user: User = Depends(require_session_user),
@@ -310,6 +311,18 @@ async def subscription_checkout(
         },
         redis=redis,
     )
+
+    await log_audit_event(
+        db,
+        org_id=org_id,
+        user_id=current_user.id,
+        event_type="billing.checkout",
+        resource_type="org_subscription",
+        resource_id=org_id,
+        metadata={"plan_id": body.plan_id, "amount_rub": float(amount_rub)},
+        request=request,
+    )
+    await db.commit()
 
     return SubscriptionCheckoutOut(
         confirmation_url=confirmation_url,
@@ -550,6 +563,17 @@ async def yookassa_webhook(
         if existing:
             return {"status": "already_processed"}
 
+        # Determine whether this is a new subscription or a plan switch
+        # (needed to choose the correct audit event_type).
+        existing_sub_result = await db.execute(
+            select(OrgSubscription).where(OrgSubscription.org_id == org_id_str)
+        )
+        existing_sub = existing_sub_result.scalar_one_or_none()
+        is_new_subscription = existing_sub is None or existing_sub.status != "active"
+        is_plan_switch = (
+            not is_new_subscription and existing_sub is not None and existing_sub.plan_id != plan_id
+        )
+
         try:
             sub = await start_subscription(
                 db,
@@ -557,6 +581,22 @@ async def yookassa_webhook(
                 plan_id=plan_id,
                 payment_id=payment_id,
                 amount_rub=amount_rub,
+            )
+            audit_event_type = (
+                "billing.plan_switched" if is_plan_switch else "billing.subscription_started"
+            )
+            await log_audit_event(
+                db,
+                org_id=org_id_str,
+                user_id=None,
+                event_type=audit_event_type,
+                resource_type="org_subscription",
+                resource_id=org_id_str,
+                metadata={
+                    "plan_id": plan_id,
+                    "amount_rub": float(amount_rub),
+                    "payment_id": payment_id,
+                },
             )
             await db.commit()
         except IntegrityError:

@@ -365,6 +365,16 @@ async def generate_golden(
         )
         for item in db_items
     ]
+    await log_audit_event(
+        db,
+        org_id=organization_id,
+        user_id=None,
+        event_type="golden.generate",
+        resource_type="dataset",
+        resource_id=dataset_id,
+        metadata={"count": len(out_items)},
+    )
+    await db.commit()
     return GenerateGoldenOut(items=out_items, count=len(out_items))
 
 
@@ -727,9 +737,9 @@ async def upload_document(
         org_id=organization_id,
         user_id=None,
         event_type="dataset.upload",
-        resource_type="document",
-        resource_id=doc.id,
-        metadata={"filename": file.filename or "", "size": len(raw)},
+        resource_type="dataset",
+        resource_id=dataset_id,
+        metadata={"name": file.filename or "", "size_bytes": len(raw)},
         request=request,
     )
     await db.commit()

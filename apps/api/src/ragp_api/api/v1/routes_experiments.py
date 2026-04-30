@@ -4,7 +4,7 @@ from typing import Any
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ragp_api.db.models import Experiment, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_scope
+from ragp_api.services.audit import log_audit_event
 from ragp_api.settings import settings
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
@@ -85,6 +86,7 @@ class PipelineOut(BaseModel):
 @router.post("", status_code=201, response_model=ExperimentOut)
 async def create_experiment(
     body: ExperimentCreateIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
@@ -97,6 +99,17 @@ async def create_experiment(
         status="queued",
     )
     db.add(experiment)
+    await db.flush()
+    await log_audit_event(
+        db,
+        org_id=body.organization_id,
+        user_id=None,
+        event_type="experiment.start",
+        resource_type="experiment",
+        resource_id=experiment.id,
+        metadata={"name": body.name, "dataset_id": body.dataset_id},
+        request=request,
+    )
     await db.commit()
     await db.refresh(experiment)
 
@@ -220,6 +233,7 @@ async def get_leaderboard(
 async def promote_to_pipeline(
     experiment_id: str,
     body: PromoteIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _scope: None = Depends(require_scope("write")),
 ) -> PipelineOut:
@@ -260,6 +274,17 @@ async def promote_to_pipeline(
 
     db.add(version)
     db.add(pipeline)
+    await db.flush()
+    await log_audit_event(
+        db,
+        org_id=experiment.organization_id,
+        user_id=None,
+        event_type="experiment.promote",
+        resource_type="experiment",
+        resource_id=experiment_id,
+        metadata={"pipeline_id": pipeline_id, "pipeline_name": body.name},
+        request=request,
+    )
     await db.commit()
     await db.refresh(pipeline)
 
