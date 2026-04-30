@@ -34,6 +34,7 @@ dependencies = [
     "prometheus-client>=0.20.0",
     "yookassa>=3.5.0",
     "sentence-transformers>=2.7.0",
+    "aiosmtplib>=3.0.0",
 ]
 
 [project.optional-dependencies]
