@@ -46,10 +46,42 @@ require_env POSTGRES_HOST
 require_env POSTGRES_USER
 require_env POSTGRES_DB
 require_env POSTGRES_PASSWORD
-require_env RAGP_PGBACKUP_S3_ENDPOINT_URL
-require_env RAGP_PGBACKUP_S3_BUCKET
-require_env RAGP_PGBACKUP_S3_ACCESS_KEY_ID
-require_env RAGP_PGBACKUP_S3_SECRET_ACCESS_KEY
+
+# S3 destination is optional in `loop` mode: if any required S3 env is missing
+# we don't crash-loop the container — just warn and sleep forever.  This keeps
+# `docker compose up` healthy when the operator hasn't yet provisioned a
+# backup bucket (still a `pending manual step` in docs/backlog.md).  In `once`
+# mode we keep the strict behaviour so CI / manual runs surface the gap.
+S3_OPTIONAL_VARS=(
+    RAGP_PGBACKUP_S3_ENDPOINT_URL
+    RAGP_PGBACKUP_S3_BUCKET
+    RAGP_PGBACKUP_S3_ACCESS_KEY_ID
+    RAGP_PGBACKUP_S3_SECRET_ACCESS_KEY
+)
+S3_DISABLED=0
+for v in "${S3_OPTIONAL_VARS[@]}"; do
+    if [[ -z "${!v:-}" ]]; then
+        S3_DISABLED=1
+        break
+    fi
+done
+
+if [[ "$S3_DISABLED" == "1" ]]; then
+    if [[ "$MODE" == "once" ]]; then
+        # In once mode keep strict behaviour so CI / ad-hoc runs surface the gap.
+        for v in "${S3_OPTIONAL_VARS[@]}"; do
+            require_env "$v"
+        done
+    else
+        log "WARNING: S3 destination not fully configured — backup loop disabled."
+        log "         set RAGP_PGBACKUP_S3_{ENDPOINT_URL,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY}"
+        log "         on the compose host to enable scheduled backups."
+        # Sleep in a tight wakeup-able loop so docker stop is responsive.
+        while true; do
+            sleep 3600
+        done
+    fi
+fi
 
 PREFIX="${RAGP_PGBACKUP_PREFIX:-pg-backups/}"
 # Normalise: strip leading slash, ensure trailing slash so concat is predictable.
