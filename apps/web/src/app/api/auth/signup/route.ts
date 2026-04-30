@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Server-side fetch: prefer the docker-internal URL (e.g. http://api:8000)
+// over the public domain so the request stays inside the compose network and
+// doesn't loop back through Caddy.
+const API_URL =
+  process.env.API_URL_INTERNAL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as unknown;
