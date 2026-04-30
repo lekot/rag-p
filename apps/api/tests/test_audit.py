@@ -133,8 +133,8 @@ async def test_dataset_upload_creates_audit_event_with_filename(
     )
     event = result.scalar_one_or_none()
     assert event is not None, "dataset.upload audit event not found"
-    assert event.metadata_json.get("filename") == "hello.txt"
-    assert event.metadata_json.get("size") == len(file_content)
+    assert event.metadata_json.get("name") == "hello.txt"
+    assert event.metadata_json.get("size_bytes") == len(file_content)
 
 
 @pytest.mark.asyncio
