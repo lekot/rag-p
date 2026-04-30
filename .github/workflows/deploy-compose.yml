@@ -23,6 +23,10 @@ jobs:
     # restarts the stack via `sudo -u ragp-deploy` so we never need to ssh
     # back into ourselves.
     runs-on: [self-hosted, deploy]
+    # Production environment is the scope for COMPOSE_*, RAGP_* and other
+    # secrets used below — without this binding they all resolve to "" at
+    # runtime and the .env we render is empty.
+    environment: production
     steps:
       - uses: actions/checkout@v4
         with:
