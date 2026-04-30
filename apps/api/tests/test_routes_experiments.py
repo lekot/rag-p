@@ -7,6 +7,22 @@ from httpx import AsyncClient
 
 from ragp_api.services.experiment_runner import build_combinations
 
+# ---------------------------------------------------------------------------
+# Helper: mock the queue.enqueue() helper so tests don't need a real Redis.
+# ---------------------------------------------------------------------------
+
+
+def _make_enqueue_mock(experiment_id: str | None = None) -> AsyncMock:
+    """Return an AsyncMock that mimics services.queue.enqueue() return value."""
+    mock = AsyncMock(
+        return_value={
+            "job_id": "mock-job-id",
+            "task_id": experiment_id or "mock-task-id",
+            "deduplicated": False,
+        }
+    )
+    return mock
+
 
 async def _create_dataset(client: AsyncClient, organization_id: str) -> str:
     resp = await client.post(
@@ -56,7 +72,12 @@ def test_build_combinations_accepts_frontend_name_alias() -> None:
 
 
 def _make_redis_pool_mock() -> MagicMock:
-    """Return a mock that behaves like an arq ArqRedis pool."""
+    """Return a mock that behaves like an arq ArqRedis pool.
+
+    Kept for tests that still need to mock the ARQ pool directly (e.g. in
+    services/queue unit tests).  Route tests now patch ``services.queue.enqueue``
+    directly instead.
+    """
     pool = AsyncMock()
     pool.enqueue_job = AsyncMock(return_value=MagicMock())
     pool.aclose = AsyncMock()
@@ -69,12 +90,9 @@ def _make_redis_pool_mock() -> MagicMock:
 async def test_experiment_enqueued_returns_queued_status(client: AsyncClient, organization_id: str):
     """POST /experiments should persist experiment with status='queued' and enqueue the job."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         response = await client.post(
             "/api/v1/experiments",
             json={
@@ -92,20 +110,21 @@ async def test_experiment_enqueued_returns_queued_status(client: AsyncClient, or
     assert data["dataset_id"] == dataset_id
     assert data["status"] == "queued"
 
-    # Verify enqueue_job was called with the experiment id
-    pool_mock.enqueue_job.assert_called_once_with("run_experiment_task", data["id"])
+    # Verify enqueue was called with experiment.run task type
+    enqueue_mock.assert_awaited_once()
+    call_kwargs = enqueue_mock.call_args.kwargs
+    assert call_kwargs["task_type"] == "experiment.run"
+    assert call_kwargs["tenant_id"] == organization_id
+    assert call_kwargs["payload"]["experiment_id"] == data["id"]
 
 
 @pytest.mark.asyncio
 async def test_create_experiment_enqueues_job(client: AsyncClient, organization_id: str):
-    """POST /experiments enqueues 'run_experiment_task' — job id is returned."""
+    """POST /experiments enqueues 'run_experiment_task' via queue.enqueue()."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         response = await client.post(
             "/api/v1/experiments",
             json={
@@ -119,47 +138,39 @@ async def test_create_experiment_enqueues_job(client: AsyncClient, organization_
     assert response.status_code == 201
     data = response.json()
     assert data["status"] == "queued"
-    pool_mock.enqueue_job.assert_awaited_once()
-    call_args = pool_mock.enqueue_job.call_args
-    assert call_args.args[0] == "run_experiment_task"
-    assert call_args.args[1] == data["id"]
+    enqueue_mock.assert_awaited_once()
+    call_kwargs = enqueue_mock.call_args.kwargs
+    assert call_kwargs["task_type"] == "experiment.run"
+    assert call_kwargs["payload"]["experiment_id"] == data["id"]
 
 
 @pytest.mark.asyncio
-async def test_create_experiment_redis_pool_closed_on_success(
-    client: AsyncClient, organization_id: str
-):
-    """create_pool.aclose() must be called even when enqueue succeeds."""
+async def test_create_experiment_enqueue_called_once(client: AsyncClient, organization_id: str):
+    """enqueue() is called exactly once per POST /experiments request."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         await client.post(
             "/api/v1/experiments",
             json={
-                "name": "Close Test",
+                "name": "Once Test",
                 "organization_id": organization_id,
                 "dataset_id": dataset_id,
                 "plugin_grid": PLUGIN_GRID,
             },
         )
 
-    pool_mock.aclose.assert_awaited_once()
+    assert enqueue_mock.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_list_experiments_org_filtered(client: AsyncClient, organization_id: str):
     """GET /experiments?organization_id=... returns only org's experiments."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         await client.post(
             "/api/v1/experiments",
             json={
@@ -191,12 +202,9 @@ async def test_list_experiments_org_filtered(client: AsyncClient, organization_i
 async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
     """GET /experiments/{id} returns full experiment including plugin_grid."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
             json={
@@ -221,12 +229,9 @@ async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
 async def test_promote_to_pipeline_requires_completed(client: AsyncClient, organization_id: str):
     """POST /experiments/{id}/promote_to_pipeline returns 422 when status != 'completed'."""
     dataset_id = await _create_dataset(client, organization_id)
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
             json={
@@ -261,12 +266,9 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str, db
         {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}},
     ]
 
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
             json={
@@ -326,12 +328,9 @@ async def test_pipeline_list_filter_by_dataset(
     ds2_id = ds2_resp.json()["id"]
 
     winning_nodes = [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}]
-    pool_mock = _make_redis_pool_mock()
+    enqueue_mock = _make_enqueue_mock()
 
-    with patch(
-        "ragp_api.api.v1.routes_experiments.create_pool",
-        return_value=pool_mock,
-    ):
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         exp_resp = await client.post(
             "/api/v1/experiments",
             json={
