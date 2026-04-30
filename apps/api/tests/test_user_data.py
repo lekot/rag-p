@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -89,6 +90,7 @@ async def _seed_api_key(db_session: AsyncSession, org_id: str, user_id: str) -> 
             name="ci",
             key_prefix="rgp_test",
             key_hash="a" * 64,
+            expires_at=datetime.now(UTC) + timedelta(days=90),
         )
     )
     await db_session.commit()
