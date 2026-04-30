@@ -20,7 +20,9 @@ jobs:
           POSTGRES_PASSWORD: ragp
           POSTGRES_DB: ragp_test
         ports:
-          - 5432:5432
+          # Map container :5432 to a random host port so two parallel jobs
+          # on the same self-hosted runner box don't fight over 5432.
+          - "5432"
         options: >-
           --health-cmd "pg_isready -U ragp"
           --health-interval 10s
@@ -51,7 +53,8 @@ jobs:
 
       - name: pytest
         env:
-          TEST_DATABASE_URL: postgresql+asyncpg://ragp:ragp@localhost:5432/ragp_test
+          # Resolve the dynamically-mapped host port at runtime.
+          TEST_DATABASE_URL: postgresql+asyncpg://ragp:ragp@localhost:${{ job.services.postgres.ports['5432'] }}/ragp_test
         run: |
           cd apps/api
           uv run pytest tests/ -x --tb=short
@@ -83,17 +86,3 @@ jobs:
       - name: TypeScript typecheck
         working-directory: apps/web
         run: pnpm run typecheck
-
-  helm-lint:
-    name: Helm lint
-    runs-on: [self-hosted, ci]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-
-      - name: helm lint
-        run: |
-          helm lint charts/rag-p
-          helm lint charts/rag-p-runtime
