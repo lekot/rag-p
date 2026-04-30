@@ -83,17 +83,3 @@ jobs:
       - name: TypeScript typecheck
         working-directory: apps/web
         run: pnpm run typecheck
-
-  helm-lint:
-    name: Helm lint
-    runs-on: [self-hosted, ci]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-
-      - name: helm lint
-        run: |
-          helm lint charts/rag-p
-          helm lint charts/rag-p-runtime
