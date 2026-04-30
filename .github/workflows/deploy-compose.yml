@@ -233,3 +233,18 @@ jobs:
           esac
           retry_curl /tmp/signup.css "$css_url"
           test -s /tmp/signup.css
+
+      - name: Prune stale docker artefacts
+        # Always run, even if smoke fails — disk pressure persists across
+        # runs and the CI pipeline starts breaking with "no space left on
+        # device" once images / build cache pile up past ~85%.
+        if: always()
+        run: |
+          set -euo pipefail
+          # Drop dangling layers, untagged builds and old build cache.
+          # Safe with -a -f because rag-p-{api,web}:latest are still in use
+          # by running containers — docker won't reclaim those.
+          sudo -u ragp-deploy docker image prune -a -f >/dev/null 2>&1 || true
+          sudo -u ragp-deploy docker builder prune -a -f >/dev/null 2>&1 || true
+          sudo -u ragp-deploy docker container prune -f >/dev/null 2>&1 || true
+          df -h / | tail -1
