@@ -179,9 +179,7 @@ async def fetch_payment_status(payment_id: str) -> dict[str, Any]:
                 try:
                     data = response.json()
                 except ValueError as exc:
-                    raise PaymentRevalidationError(
-                        "yookassa returned malformed JSON"
-                    ) from exc
+                    raise PaymentRevalidationError("yookassa returned malformed JSON") from exc
                 if not isinstance(data, dict):
                     raise PaymentRevalidationError("yookassa response is not an object")
                 return data
@@ -194,9 +192,7 @@ async def fetch_payment_status(payment_id: str) -> dict[str, Any]:
                 continue
             break
 
-    raise PaymentRevalidationError(
-        f"yookassa returned non-success status: {last_status}"
-    )
+    raise PaymentRevalidationError(f"yookassa returned non-success status: {last_status}")
 
 
 def parse_webhook(raw_body: bytes, headers: dict[str, str]) -> WebhookNotification:

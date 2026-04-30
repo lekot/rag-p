@@ -28,9 +28,7 @@ def upgrade() -> None:
     )
     # Backfill: existing rows get updated_at = created_at so they don't look
     # stale to the watchdog the moment the migration lands.
-    op.execute(
-        "UPDATE experiments SET updated_at = created_at WHERE updated_at IS NOT NULL"
-    )
+    op.execute("UPDATE experiments SET updated_at = created_at WHERE updated_at IS NOT NULL")
     op.create_index(
         "ix_experiments_status_updated_at",
         "experiments",

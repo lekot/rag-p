@@ -47,9 +47,7 @@ def _make_async_context_manager(mock_client: MagicMock) -> MagicMock:
 async def test_cohere_reranker_no_proxy_when_setting_empty() -> None:
     settings.cohere_http_proxy = ""
 
-    rerank_response = SimpleNamespace(
-        results=[SimpleNamespace(index=0, relevance_score=0.9)]
-    )
+    rerank_response = SimpleNamespace(results=[SimpleNamespace(index=0, relevance_score=0.9)])
     mock_client = MagicMock()
     mock_client.rerank = AsyncMock(return_value=rerank_response)
 
@@ -72,9 +70,7 @@ async def test_cohere_reranker_no_proxy_when_setting_empty() -> None:
 async def test_cohere_reranker_uses_proxy_when_setting_set() -> None:
     settings.cohere_http_proxy = "http://cohere-egress:8888"
 
-    rerank_response = SimpleNamespace(
-        results=[SimpleNamespace(index=0, relevance_score=0.42)]
-    )
+    rerank_response = SimpleNamespace(results=[SimpleNamespace(index=0, relevance_score=0.42)])
     mock_client = MagicMock()
     mock_client.rerank = AsyncMock(return_value=rerank_response)
 
@@ -130,9 +126,7 @@ async def test_cohere_embedder_no_proxy_when_setting_empty(monkeypatch) -> None:
     settings.cohere_http_proxy = ""
     monkeypatch.setenv("COHERE_API_KEY", "k")
 
-    embed_response = SimpleNamespace(
-        embeddings=SimpleNamespace(float_=[[0.1, 0.2, 0.3]])
-    )
+    embed_response = SimpleNamespace(embeddings=SimpleNamespace(float_=[[0.1, 0.2, 0.3]]))
     mock_client = MagicMock()
     mock_client.embed = AsyncMock(return_value=embed_response)
 
@@ -153,9 +147,7 @@ async def test_cohere_embedder_uses_proxy_when_setting_set(monkeypatch) -> None:
     settings.cohere_http_proxy = "http://cohere-egress:8888"
     monkeypatch.setenv("COHERE_API_KEY", "k")
 
-    embed_response = SimpleNamespace(
-        embeddings=SimpleNamespace(float_=[[0.7]])
-    )
+    embed_response = SimpleNamespace(embeddings=SimpleNamespace(float_=[[0.7]]))
     mock_client = MagicMock()
     mock_client.embed = AsyncMock(return_value=embed_response)
 

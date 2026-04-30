@@ -451,8 +451,8 @@ def _payments_match(webhook_obj: dict[str, Any], authoritative: dict[str, Any]) 
     if authoritative.get("status") != "succeeded":
         return False
 
-    wh_amount = (webhook_obj.get("amount") or {})
-    auth_amount = (authoritative.get("amount") or {})
+    wh_amount = webhook_obj.get("amount") or {}
+    auth_amount = authoritative.get("amount") or {}
 
     if wh_amount.get("currency") != auth_amount.get("currency"):
         return False
@@ -516,12 +516,8 @@ async def yookassa_webhook(
         try:
             authoritative = await fetch_payment_status(payment_id)
         except PaymentRevalidationError as exc:
-            logger.warning(
-                "YooKassa webhook: re-validation failed for %s: %s", payment_id, exc
-            )
-            raise HTTPException(
-                status_code=403, detail="payment_revalidation_failed"
-            ) from exc
+            logger.warning("YooKassa webhook: re-validation failed for %s: %s", payment_id, exc)
+            raise HTTPException(status_code=403, detail="payment_revalidation_failed") from exc
 
         if not _payments_match(obj, authoritative):
             logger.warning(

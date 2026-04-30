@@ -28,7 +28,7 @@ try:  # pragma: no cover — import guard
             "Experiments force-failed by the stale-experiment watchdog",
         )
 except Exception:  # pragma: no cover
-    experiment_watchdog_marked_failed_total = None  # type: ignore[assignment]
+    experiment_watchdog_marked_failed_total = None
 
 
 async def mark_stale_experiments_failed(ctx: dict[str, Any] | None = None) -> int:
@@ -140,9 +140,7 @@ async def mark_experiment_failed_on_crash(experiment_id: str, error: str) -> boo
         experiment.updated_at = datetime.now(UTC)
         await db.commit()
 
-    logger.warning(
-        "mark_experiment_failed_on_crash: experiment %s marked failed", experiment_id
-    )
+    logger.warning("mark_experiment_failed_on_crash: experiment %s marked failed", experiment_id)
     return True
 
 

@@ -85,9 +85,7 @@ async def on_job_failure(ctx: dict) -> None:  # type: ignore[type-arg]
     except Exception as exc:  # pragma: no cover — defensive guard
         import logging
 
-        logging.getLogger(__name__).exception(
-            "on_job_failure callback itself failed: %s", exc
-        )
+        logging.getLogger(__name__).exception("on_job_failure callback itself failed: %s", exc)
 
 
 class WorkerSettings:
