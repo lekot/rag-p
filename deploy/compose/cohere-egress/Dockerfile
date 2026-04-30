@@ -43,7 +43,8 @@ RUN git clone --depth 1 --branch "${AWG_TOOLS_REF}" \
       https://github.com/amnezia-vpn/amneziawg-tools.git . \
  && cd src \
  && make \
- && make install DESTDIR=/out PREFIX=/usr WITH_BASHCOMPLETION=no WITH_SYSTEMDUNITS=no
+ && make install DESTDIR=/out PREFIX=/usr \
+      WITH_WGQUICK=yes WITH_BASHCOMPLETION=no WITH_SYSTEMDUNITS=no
 
 # ---------------------------------------------------------------------------
 # Stage 3: runtime
