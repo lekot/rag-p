@@ -101,6 +101,10 @@ class User(Base):
     deletion_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Bumped on password reset so pre-reset cookies are rejected.
+    sessions_invalidated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     memberships: Mapped[list["Membership"]] = relationship(back_populates="user")
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user")

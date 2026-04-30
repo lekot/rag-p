@@ -17,6 +17,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Add sessions_invalidated_at to users so password reset can revoke old cookies.
+    op.add_column(
+        "users",
+        sa.Column("sessions_invalidated_at", sa.DateTime(timezone=True), nullable=True),
+    )
+
     op.create_table(
         "password_reset_tokens",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -41,3 +47,5 @@ def downgrade() -> None:
     op.drop_index("ix_password_reset_tokens_expires_at", table_name="password_reset_tokens")
     op.drop_index("ix_password_reset_tokens_user_id", table_name="password_reset_tokens")
     op.drop_table("password_reset_tokens")
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.drop_column("sessions_invalidated_at")
