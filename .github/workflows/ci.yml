@@ -38,9 +38,11 @@ jobs:
           # Two self-hosted runners share the host filesystem; share the uv
           # download cache too so torch/scipy don't get stashed twice and
           # the disk fills up.  setup-uv writes UV_CACHE_DIR for downstream
-          # steps automatically when this input is set.
+          # steps automatically when cache-local-path is set.  We don't pass
+          # enable-cache: true because the action's cache-restore step
+          # requires uv.lock (we don't have one — the project uses
+          # pyproject-only resolution).
           cache-local-path: /var/cache/uv
-          enable-cache: true
 
       - name: Set up Python
         run: uv python install 3.12
