@@ -18,6 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import redis.asyncio as aioredis
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 
@@ -94,10 +95,7 @@ async def enqueue(
         redis_key = f"{_IDEM_PREFIX}{idempotency_key}"
 
         # We need a plain Redis client (redis.asyncio) for SETNX, not the ARQ
-        # pool.  Borrow the pool's connection if it exposes the low-level
-        # client; otherwise open our own.
-        import redis.asyncio as aioredis
-
+        # pool.
         r: aioredis.Redis = aioredis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
