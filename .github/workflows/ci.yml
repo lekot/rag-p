@@ -12,6 +12,11 @@ jobs:
   lint-py:
     name: Python lint + typecheck + pytest
     runs-on: [self-hosted, ci]
+    # Two self-hosted runners share the host filesystem; share the uv cache
+    # too, otherwise both stash torch/scipy/etc separately under each
+    # runner's own _work/_temp/setup-uv-cache and the disk fills up.
+    env:
+      UV_CACHE_DIR: /var/cache/uv
     services:
       postgres:
         image: pgvector/pgvector:pg16
