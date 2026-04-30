@@ -57,32 +57,31 @@ jobs:
       - name: Provision compose bundle
         run: |
           set -euo pipefail
-          # Stage everything into a workspace dir owned by gha-runner, then
-          # hand it over to ragp-deploy via sudo cp/mv (gha-runner has no
-          # write access to /opt/rag-p — keeps prod isolated from CI work).
-          STAGE="$(mktemp -d)"
-          cp deploy/compose/compose.prod.yml "$STAGE/compose.prod.yml"
-          cp deploy/compose/Caddyfile "$STAGE/Caddyfile"
-          mkdir -p "$STAGE/postgres/initdb" "$STAGE/cohere-egress" "$STAGE/postgres-backup"
-          cp deploy/compose/postgres/initdb/001-extensions.sql "$STAGE/postgres/initdb/001-extensions.sql"
-          cp deploy/compose/cohere-egress/Dockerfile     "$STAGE/cohere-egress/Dockerfile"
-          cp deploy/compose/cohere-egress/entrypoint.sh  "$STAGE/cohere-egress/entrypoint.sh"
-          cp deploy/compose/cohere-egress/tinyproxy.conf "$STAGE/cohere-egress/tinyproxy.conf"
-          cp deploy/compose/postgres-backup/Dockerfile  "$STAGE/postgres-backup/Dockerfile"
-          cp deploy/compose/postgres-backup/backup.sh   "$STAGE/postgres-backup/backup.sh"
-          cp deploy/compose/postgres-backup/restore.sh  "$STAGE/postgres-backup/restore.sh"
-          # Atomic-ish handover.
-          sudo -u ragp-deploy mkdir -p "$COMPOSE_DIR/postgres/initdb" "$COMPOSE_DIR/cohere-egress" "$COMPOSE_DIR/postgres-backup"
-          sudo -u ragp-deploy cp "$STAGE/compose.prod.yml" "$COMPOSE_DIR/compose.prod.yml"
-          sudo -u ragp-deploy cp "$STAGE/Caddyfile"        "$COMPOSE_DIR/Caddyfile"
-          sudo -u ragp-deploy cp "$STAGE/postgres/initdb/001-extensions.sql" "$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
-          for f in Dockerfile entrypoint.sh tinyproxy.conf; do
-            sudo -u ragp-deploy cp "$STAGE/cohere-egress/$f" "$COMPOSE_DIR/cohere-egress/$f"
-          done
-          for f in Dockerfile backup.sh restore.sh; do
-            sudo -u ragp-deploy cp "$STAGE/postgres-backup/$f" "$COMPOSE_DIR/postgres-backup/$f"
-          done
-          rm -rf "$STAGE"
+          # gha-runner's $HOME and mktemp dirs are mode 700 — ragp-deploy
+          # can't read from them under sudo.  Pipe each file through `cat |
+          # sudo tee` so the read happens as gha-runner (owner) and the
+          # write happens as ragp-deploy.
+          sudo -u ragp-deploy mkdir -p \
+            "$COMPOSE_DIR/postgres/initdb" \
+            "$COMPOSE_DIR/cohere-egress" \
+            "$COMPOSE_DIR/postgres-backup"
+
+          install_as_deploy() {
+            local src="$1" dst="$2" mode="${3:-644}"
+            cat "$src" | sudo -u ragp-deploy tee "$dst" >/dev/null
+            sudo -u ragp-deploy chmod "$mode" "$dst"
+          }
+
+          install_as_deploy deploy/compose/compose.prod.yml "$COMPOSE_DIR/compose.prod.yml"
+          install_as_deploy deploy/compose/Caddyfile        "$COMPOSE_DIR/Caddyfile"
+          install_as_deploy deploy/compose/postgres/initdb/001-extensions.sql \
+                            "$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
+          install_as_deploy deploy/compose/cohere-egress/Dockerfile     "$COMPOSE_DIR/cohere-egress/Dockerfile"
+          install_as_deploy deploy/compose/cohere-egress/entrypoint.sh  "$COMPOSE_DIR/cohere-egress/entrypoint.sh" 755
+          install_as_deploy deploy/compose/cohere-egress/tinyproxy.conf "$COMPOSE_DIR/cohere-egress/tinyproxy.conf"
+          install_as_deploy deploy/compose/postgres-backup/Dockerfile   "$COMPOSE_DIR/postgres-backup/Dockerfile"
+          install_as_deploy deploy/compose/postgres-backup/backup.sh    "$COMPOSE_DIR/postgres-backup/backup.sh"  755
+          install_as_deploy deploy/compose/postgres-backup/restore.sh   "$COMPOSE_DIR/postgres-backup/restore.sh" 755
 
       - name: Provision cohere AmneziaWG conf
         env:
@@ -94,15 +93,13 @@ jobs:
             sudo -u ragp-deploy rm -rf "$COMPOSE_DIR/cohere.amnezia.conf" || true
             exit 0
           fi
-          STAGE_FILE="$(mktemp)"
-          umask 077
-          printf '%s\n' "$COHERE_AMNEZIA_CONF" > "$STAGE_FILE"
           # docker-compose can leave a stale *directory* at this path if the
           # secret was previously empty; rm -rf catches both file + dir.
           sudo -u ragp-deploy rm -rf "$COMPOSE_DIR/cohere.amnezia.conf"
-          sudo -u ragp-deploy cp "$STAGE_FILE" "$COMPOSE_DIR/cohere.amnezia.conf"
+          # Pipe through tee so the secret is never written to a file that
+          # gha-runner owns (mode-700 home is unreadable by ragp-deploy anyway).
+          printf '%s\n' "$COHERE_AMNEZIA_CONF" | sudo -u ragp-deploy tee "$COMPOSE_DIR/cohere.amnezia.conf" >/dev/null
           sudo -u ragp-deploy chmod 600 "$COMPOSE_DIR/cohere.amnezia.conf"
-          rm -f "$STAGE_FILE"
 
       - name: Write remote env
         env:
@@ -129,8 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          STAGE_ENV="$(mktemp)"
-          cat > "$STAGE_ENV" <<EOF
+          ENV_BODY=$(cat <<EOF
           POSTGRES_DB=ragp
           POSTGRES_USER=ragp
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -163,10 +159,11 @@ jobs:
           RAGP_S3_SERVICE_PASSWORD=${RAGP_S3_SERVICE_PASSWORD}
           RAGP_COHERE_HTTP_PROXY=${RAGP_COHERE_HTTP_PROXY}
           EOF
-          sed -i 's/^          //' "$STAGE_ENV"
-          sudo -u ragp-deploy cp "$STAGE_ENV" "$COMPOSE_DIR/.env"
+          )
+          # Strip the YAML-imposed leading indent and write through tee so the
+          # secret-laden .env never sits in a gha-runner-owned file.
+          printf '%s\n' "$ENV_BODY" | sed 's/^          //' | sudo -u ragp-deploy tee "$COMPOSE_DIR/.env" >/dev/null
           sudo -u ragp-deploy chmod 600 "$COMPOSE_DIR/.env"
-          rm -f "$STAGE_ENV"
 
       - name: Build local-only images & migrate
         run: |
