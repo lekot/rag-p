@@ -39,11 +39,14 @@ async def fake_redis() -> FakeRedis:
 
 
 @pytest.mark.asyncio
-async def test_enqueue_without_idempotency_key_returns_new_task_id():
+async def test_enqueue_without_idempotency_key_returns_new_task_id(fake_redis: FakeRedis):
     """enqueue() without idempotency_key generates a new task_id, deduplicated=False."""
     pool_mock = _make_arq_pool_mock()
 
-    with patch("ragp_api.services.queue.create_pool", return_value=pool_mock):
+    with (
+        patch("ragp_api.services.queue.create_pool", return_value=pool_mock),
+        patch("ragp_api.services.queue.aioredis.Redis", return_value=fake_redis),
+    ):
         from ragp_api.services.queue import enqueue
 
         result = await enqueue(
@@ -66,11 +69,14 @@ async def test_enqueue_without_idempotency_key_returns_new_task_id():
 
 
 @pytest.mark.asyncio
-async def test_envelope_contains_required_keys():
+async def test_envelope_contains_required_keys(fake_redis: FakeRedis):
     """The envelope dict passed to ARQ must contain all required top-level keys."""
     pool_mock = _make_arq_pool_mock()
 
-    with patch("ragp_api.services.queue.create_pool", return_value=pool_mock):
+    with (
+        patch("ragp_api.services.queue.create_pool", return_value=pool_mock),
+        patch("ragp_api.services.queue.aioredis.Redis", return_value=fake_redis),
+    ):
         from ragp_api.services.queue import enqueue
 
         await enqueue(
