@@ -46,11 +46,13 @@ jobs:
       - name: Build web image
         run: |
           set -euo pipefail
+          # Web Dockerfile expects pnpm-lock.yaml + pnpm-workspace.yaml at the
+          # build-context root (pnpm workspace), so we build from the repo root.
           docker build \
             -f apps/web/Dockerfile \
             -t rag-p-web:${{ steps.tag.outputs.value }} \
             -t rag-p-web:latest \
-            apps/web
+            .
 
       - name: Provision compose bundle
         run: |
