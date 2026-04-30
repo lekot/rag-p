@@ -11,7 +11,7 @@ concurrency:
 jobs:
   lint-py:
     name: Python lint + typecheck + pytest
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci]
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -58,7 +58,7 @@ jobs:
 
   lint-typecheck-web:
     name: Web lint + typecheck
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci]
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +86,7 @@ jobs:
 
   helm-lint:
     name: Helm lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci]
     steps:
       - uses: actions/checkout@v4
 

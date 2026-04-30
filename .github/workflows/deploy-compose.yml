@@ -12,147 +12,75 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_PREFIX: ghcr.io/lekot
   COMPOSE_DIR: /opt/rag-p
-  COMPOSE_SSH_PORT: ${{ vars.COMPOSE_SSH_PORT || '22' }}
 
 jobs:
-  build-api:
-    name: Build api image
-    if: ${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && (github.event_name == 'workflow_dispatch' || vars.DEPLOY_TARGET == 'compose') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      tag: ${{ steps.tag.outputs.value }}
-      image: ${{ steps.image.outputs.value }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Compute tag
-        id: tag
-        run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "value=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute image
-        id: image
-        run: echo "value=${IMAGE_PREFIX}/rag-p-api:${{ steps.tag.outputs.value }}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push api
-        uses: docker/build-push-action@v5
-        with:
-          context: apps/api
-          push: true
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,scope=api,mode=max
-          tags: |
-            ${{ steps.image.outputs.value }}
-            ${{ env.IMAGE_PREFIX }}/rag-p-api:compose-latest
-
-  build-web:
-    name: Build web image
-    if: ${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && (github.event_name == 'workflow_dispatch' || vars.DEPLOY_TARGET == 'compose') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      tag: ${{ steps.tag.outputs.value }}
-      image: ${{ steps.image.outputs.value }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Compute tag
-        id: tag
-        run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "value=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute image
-        id: image
-        run: echo "value=${IMAGE_PREFIX}/rag-p-web:${{ steps.tag.outputs.value }}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          push: true
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,scope=web,mode=max
-          build-args: |
-            NEXT_PUBLIC_API_URL=https://api.lekottt.ru
-          tags: |
-            ${{ steps.image.outputs.value }}
-            ${{ env.IMAGE_PREFIX }}/rag-p-web:compose-latest
-
   deploy:
-    name: Deploy over SSH
-    needs: [build-api, build-web]
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      REMOTE: ${{ secrets.COMPOSE_USER }}@${{ secrets.COMPOSE_HOST }}
-      RAGP_API_IMAGE: ${{ needs.build-api.outputs.image }}
-      RAGP_WEB_IMAGE: ${{ needs.build-web.outputs.image }}
+    name: Build + deploy on host
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Self-hosted runner lives on the same host as the prod compose stack.
+    # Builds images directly into the local docker daemon (no GHCR push) and
+    # restarts the stack via `sudo -u ragp-deploy` so we never need to ssh
+    # back into ourselves.
+    runs-on: [self-hosted, deploy]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Prepare SSH
-        env:
-          COMPOSE_SSH_PRIVATE_KEY: ${{ secrets.COMPOSE_SSH_PRIVATE_KEY }}
-          COMPOSE_HOST: ${{ secrets.COMPOSE_HOST }}
+      - name: Compute image tag
+        id: tag
         run: |
-          set -euo pipefail
-          test -n "$COMPOSE_HOST"
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$COMPOSE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "$COMPOSE_SSH_PORT" -H "$COMPOSE_HOST" >> ~/.ssh/known_hosts
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "value=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload compose bundle
+      - name: Build api image
         run: |
           set -euo pipefail
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "mkdir -p '$COMPOSE_DIR/postgres/initdb' '$COMPOSE_DIR/cohere-egress' '$COMPOSE_DIR/postgres-backup'"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/compose.prod.yml "$REMOTE:$COMPOSE_DIR/compose.prod.yml"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/Caddyfile "$REMOTE:$COMPOSE_DIR/Caddyfile"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres/initdb/001-extensions.sql "$REMOTE:$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
-          # cohere-egress build context (Dockerfile + entrypoint + tinyproxy.conf)
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/Dockerfile "$REMOTE:$COMPOSE_DIR/cohere-egress/Dockerfile"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/entrypoint.sh "$REMOTE:$COMPOSE_DIR/cohere-egress/entrypoint.sh"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/cohere-egress/tinyproxy.conf "$REMOTE:$COMPOSE_DIR/cohere-egress/tinyproxy.conf"
-          # postgres-backup build context (Dockerfile + backup.sh + restore.sh)
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres-backup/Dockerfile "$REMOTE:$COMPOSE_DIR/postgres-backup/Dockerfile"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres-backup/backup.sh "$REMOTE:$COMPOSE_DIR/postgres-backup/backup.sh"
-          scp -P "$COMPOSE_SSH_PORT" deploy/compose/postgres-backup/restore.sh "$REMOTE:$COMPOSE_DIR/postgres-backup/restore.sh"
+          docker build \
+            -f apps/api/Dockerfile \
+            -t rag-p-api:${{ steps.tag.outputs.value }} \
+            -t rag-p-api:latest \
+            apps/api
+
+      - name: Build web image
+        run: |
+          set -euo pipefail
+          docker build \
+            -f apps/web/Dockerfile \
+            -t rag-p-web:${{ steps.tag.outputs.value }} \
+            -t rag-p-web:latest \
+            apps/web
+
+      - name: Provision compose bundle
+        run: |
+          set -euo pipefail
+          # Stage everything into a workspace dir owned by gha-runner, then
+          # hand it over to ragp-deploy via sudo cp/mv (gha-runner has no
+          # write access to /opt/rag-p — keeps prod isolated from CI work).
+          STAGE="$(mktemp -d)"
+          cp deploy/compose/compose.prod.yml "$STAGE/compose.prod.yml"
+          cp deploy/compose/Caddyfile "$STAGE/Caddyfile"
+          mkdir -p "$STAGE/postgres/initdb" "$STAGE/cohere-egress" "$STAGE/postgres-backup"
+          cp deploy/compose/postgres/initdb/001-extensions.sql "$STAGE/postgres/initdb/001-extensions.sql"
+          cp deploy/compose/cohere-egress/Dockerfile     "$STAGE/cohere-egress/Dockerfile"
+          cp deploy/compose/cohere-egress/entrypoint.sh  "$STAGE/cohere-egress/entrypoint.sh"
+          cp deploy/compose/cohere-egress/tinyproxy.conf "$STAGE/cohere-egress/tinyproxy.conf"
+          cp deploy/compose/postgres-backup/Dockerfile  "$STAGE/postgres-backup/Dockerfile"
+          cp deploy/compose/postgres-backup/backup.sh   "$STAGE/postgres-backup/backup.sh"
+          cp deploy/compose/postgres-backup/restore.sh  "$STAGE/postgres-backup/restore.sh"
+          # Atomic-ish handover.
+          sudo -u ragp-deploy mkdir -p "$COMPOSE_DIR/postgres/initdb" "$COMPOSE_DIR/cohere-egress" "$COMPOSE_DIR/postgres-backup"
+          sudo -u ragp-deploy cp "$STAGE/compose.prod.yml" "$COMPOSE_DIR/compose.prod.yml"
+          sudo -u ragp-deploy cp "$STAGE/Caddyfile"        "$COMPOSE_DIR/Caddyfile"
+          sudo -u ragp-deploy cp "$STAGE/postgres/initdb/001-extensions.sql" "$COMPOSE_DIR/postgres/initdb/001-extensions.sql"
+          for f in Dockerfile entrypoint.sh tinyproxy.conf; do
+            sudo -u ragp-deploy cp "$STAGE/cohere-egress/$f" "$COMPOSE_DIR/cohere-egress/$f"
+          done
+          for f in Dockerfile backup.sh restore.sh; do
+            sudo -u ragp-deploy cp "$STAGE/postgres-backup/$f" "$COMPOSE_DIR/postgres-backup/$f"
+          done
+          rm -rf "$STAGE"
 
       - name: Provision cohere AmneziaWG conf
         env:
@@ -160,22 +88,19 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${COHERE_AMNEZIA_CONF:-}" ]; then
-            echo "COHERE_AMNEZIA_CONF secret not set; cohere-egress will run without VPN (cohere calls will fail with network errors)"
-            # Make sure no stale conf is left from a previous deploy.
-            ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "rm -f '$COMPOSE_DIR/cohere.amnezia.conf'" || true
+            echo "COHERE_AMNEZIA_CONF secret not set; cohere-egress will run without VPN"
+            sudo -u ragp-deploy rm -rf "$COMPOSE_DIR/cohere.amnezia.conf" || true
             exit 0
           fi
+          STAGE_FILE="$(mktemp)"
           umask 077
-          printf '%s\n' "$COHERE_AMNEZIA_CONF" > cohere.amnezia.conf
-          # If a previous deploy ran without the secret, docker-compose's volume
-          # mount of ./cohere.amnezia.conf creates an empty *directory* on the
-          # host instead of an error.  Subsequent scp would then drop the file
-          # *inside* that directory and the bind-mount stays broken.  Remove
-          # both file and dir variants before uploading.
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "rm -rf '$COMPOSE_DIR/cohere.amnezia.conf'"
-          scp -P "$COMPOSE_SSH_PORT" cohere.amnezia.conf "$REMOTE:$COMPOSE_DIR/cohere.amnezia.conf"
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "chmod 600 '$COMPOSE_DIR/cohere.amnezia.conf'"
-          rm -f cohere.amnezia.conf
+          printf '%s\n' "$COHERE_AMNEZIA_CONF" > "$STAGE_FILE"
+          # docker-compose can leave a stale *directory* at this path if the
+          # secret was previously empty; rm -rf catches both file + dir.
+          sudo -u ragp-deploy rm -rf "$COMPOSE_DIR/cohere.amnezia.conf"
+          sudo -u ragp-deploy cp "$STAGE_FILE" "$COMPOSE_DIR/cohere.amnezia.conf"
+          sudo -u ragp-deploy chmod 600 "$COMPOSE_DIR/cohere.amnezia.conf"
+          rm -f "$STAGE_FILE"
 
       - name: Write remote env
         env:
@@ -197,10 +122,13 @@ jobs:
           RAGP_S3_SERVICE_USER: ${{ vars.RAGP_S3_SERVICE_USER }}
           RAGP_S3_SERVICE_PASSWORD: ${{ secrets.RAGP_S3_SERVICE_PASSWORD }}
           RAGP_COHERE_HTTP_PROXY: ${{ vars.RAGP_COHERE_HTTP_PROXY || 'http://cohere-egress:8888' }}
+          RAGP_API_IMAGE: rag-p-api:${{ steps.tag.outputs.value }}
+          RAGP_WEB_IMAGE: rag-p-web:${{ steps.tag.outputs.value }}
         run: |
           set -euo pipefail
           umask 077
-          cat > compose.env <<EOF
+          STAGE_ENV="$(mktemp)"
+          cat > "$STAGE_ENV" <<EOF
           POSTGRES_DB=ragp
           POSTGRES_USER=ragp
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -233,59 +161,48 @@ jobs:
           RAGP_S3_SERVICE_PASSWORD=${RAGP_S3_SERVICE_PASSWORD}
           RAGP_COHERE_HTTP_PROXY=${RAGP_COHERE_HTTP_PROXY}
           EOF
-          sed -i 's/^          //' compose.env
-          scp -P "$COMPOSE_SSH_PORT" compose.env "$REMOTE:$COMPOSE_DIR/.env"
-          rm -f compose.env
+          sed -i 's/^          //' "$STAGE_ENV"
+          sudo -u ragp-deploy cp "$STAGE_ENV" "$COMPOSE_DIR/.env"
+          sudo -u ragp-deploy chmod 600 "$COMPOSE_DIR/.env"
+          rm -f "$STAGE_ENV"
 
-      - name: Pull and migrate
-        env:
-          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      - name: Build local-only images & migrate
         run: |
           set -euo pipefail
-          if [ -n "$GHCR_READ_TOKEN" ]; then
-            printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "docker login ghcr.io -u lekot --password-stdin"
-          else
-            echo "GHCR_READ_TOKEN is not set; pulling images without docker login"
-          fi
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "
+          sudo -u ragp-deploy bash <<EOF
             set -euo pipefail
-            cd '$COMPOSE_DIR'
-            docker compose -f compose.prod.yml --env-file .env pull
-            # Build local-only images (AmneziaWG sidecar + pg_dump runner).
-            # Skipped for pull because they are not on GHCR.
+            cd "$COMPOSE_DIR"
+            # Build sidecar + backup runner (not on GHCR).
             docker compose -f compose.prod.yml --env-file .env build cohere-egress postgres-backup
+            # Bring infra up first.
             docker compose -f compose.prod.yml --env-file .env up -d postgres redis ollama
-            ready=0
-            for i in \$(seq 1 60); do
-              if docker compose -f compose.prod.yml --env-file .env exec -T postgres pg_isready -U ragp -d ragp; then ready=1; break; fi
-              sleep 2
+            for svc in postgres:'pg_isready -U ragp -d ragp' redis:'redis-cli ping | grep -q PONG' ollama:'ollama list'; do
+              name="\${svc%%:*}"
+              cmd="\${svc#*:}"
+              ready=0
+              for i in \$(seq 1 60); do
+                if docker compose -f compose.prod.yml --env-file .env exec -T "\$name" sh -lc "\$cmd"; then
+                  ready=1; break
+                fi
+                sleep 2
+              done
+              if [ "\$ready" != 1 ]; then
+                echo "::error::\$name did not become ready"; exit 1
+              fi
             done
-            test \"\$ready\" = 1
-            ready=0
-            for i in \$(seq 1 60); do
-              if docker compose -f compose.prod.yml --env-file .env exec -T redis redis-cli ping | grep -q PONG; then ready=1; break; fi
-              sleep 2
-            done
-            test \"\$ready\" = 1
-            ready=0
-            for i in \$(seq 1 60); do
-              if docker compose -f compose.prod.yml --env-file .env exec -T ollama ollama list; then ready=1; break; fi
-              sleep 2
-            done
-            test \"\$ready\" = 1
-            docker compose -f compose.prod.yml --env-file .env exec -T ollama sh -lc 'ollama pull \"\$OLLAMA_MODEL\"'
+            docker compose -f compose.prod.yml --env-file .env exec -T ollama sh -lc 'ollama pull "\$OLLAMA_MODEL"'
             docker compose -f compose.prod.yml --env-file .env run --rm migrate
-          "
+          EOF
 
       - name: Start app
         run: |
           set -euo pipefail
-          ssh -p "$COMPOSE_SSH_PORT" "$REMOTE" "
+          sudo -u ragp-deploy bash <<EOF
             set -euo pipefail
-            cd '$COMPOSE_DIR'
+            cd "$COMPOSE_DIR"
             docker compose -f compose.prod.yml --env-file .env up -d --remove-orphans
             docker compose -f compose.prod.yml --env-file .env ps
-          "
+          EOF
 
       - name: Smoke test
         run: |
