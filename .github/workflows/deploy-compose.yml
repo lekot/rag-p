@@ -245,9 +245,9 @@ jobs:
             set -euo pipefail
             cd '$COMPOSE_DIR'
             docker compose -f compose.prod.yml --env-file .env pull
-            # Build the local cohere-egress image (AmneziaWG sidecar). Skipped
-            # for pull because the image is not on GHCR.
-            docker compose -f compose.prod.yml --env-file .env build cohere-egress
+            # Build local-only images (AmneziaWG sidecar + pg_dump runner).
+            # Skipped for pull because they are not on GHCR.
+            docker compose -f compose.prod.yml --env-file .env build cohere-egress postgres-backup
             docker compose -f compose.prod.yml --env-file .env up -d postgres redis ollama
             ready=0
             for i in \$(seq 1 60); do
