@@ -23,6 +23,8 @@ later PR once scoring tasks exist.
 
 from __future__ import annotations
 
+from typing import Any
+
 from arq.connections import RedisSettings
 from arq.cron import cron
 from prometheus_client import Counter, Histogram, start_http_server
@@ -142,7 +144,7 @@ class WorkerLiveSettings:
     """
 
     queue_name = "rag.live"
-    functions: list = []
+    functions: list[Any] = []
     redis_settings = _redis_settings()
     max_jobs = 4
     job_timeout = 30
@@ -164,7 +166,7 @@ class WorkerIngestSettings:
     """
 
     queue_name = "rag.ingest"
-    functions: list = []
+    functions: list[Any] = []
     redis_settings = _redis_settings()
     max_jobs = 2
     job_timeout = 1800  # 30 minutes — large file uploads can be slow
