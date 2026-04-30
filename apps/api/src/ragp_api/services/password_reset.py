@@ -47,9 +47,7 @@ async def request_reset(db: AsyncSession, email: str) -> None:
 
     raw_token = secrets.token_hex(32)
     token_hash = _sha256(raw_token)
-    expires_at = datetime.now(UTC) + timedelta(
-        minutes=settings.password_reset_token_ttl_minutes
-    )
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.password_reset_token_ttl_minutes)
 
     prt = PasswordResetToken(
         id=str(uuid.uuid4()),

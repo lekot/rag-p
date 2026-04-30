@@ -38,7 +38,7 @@ async def send_password_reset_email(to: str, link: str) -> None:
         text_body = f"Перейдите по ссылке для сброса пароля:\n{link}\n\nСсылка действительна 1 час."
         html_body = (
             f"<p>Перейдите по ссылке для сброса пароля:</p>"
-            f"<p><a href=\"{link}\">{link}</a></p>"
+            f'<p><a href="{link}">{link}</a></p>'
             f"<p>Ссылка действительна 1 час.</p>"
         )
 

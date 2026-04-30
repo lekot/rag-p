@@ -99,9 +99,9 @@ async def test_forgot_password_known_email_creates_token_and_sends_email(
     assert resp.status_code == 200
 
     result = await db_session.execute(
-        select(PasswordResetToken).join(User, User.id == PasswordResetToken.user_id).where(
-            User.email == email
-        )
+        select(PasswordResetToken)
+        .join(User, User.id == PasswordResetToken.user_id)
+        .where(User.email == email)
     )
     tokens = result.scalars().all()
     assert len(tokens) == 1
@@ -259,9 +259,7 @@ async def test_sessions_invalidated_after_reset(
 
 
 @pytest.mark.asyncio
-async def test_audit_events_recorded(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_audit_events_recorded(client: AsyncClient, db_session: AsyncSession) -> None:
     """password_reset.requested and .completed audit events must be present."""
     email = "audit@example.com"
     await _signup(client, email=email, password="pass123")
