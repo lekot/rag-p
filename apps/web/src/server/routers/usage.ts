@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { router, publicProcedure } from "../trpc";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL } from "../api-url";
 
 async function authedFetch(
   path: string,

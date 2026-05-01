@@ -1,7 +1,6 @@
 /** Thin wrapper over fetch for FastAPI calls. */
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL } from "./api-url";
 
 async function apiFetch<T>(
   path: string,
