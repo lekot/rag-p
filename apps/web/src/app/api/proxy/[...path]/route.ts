@@ -33,8 +33,12 @@ async function proxy(req: NextRequest, context: RouteContext) {
   const responseHeaders = new Headers();
   const upstreamContentType = upstream.headers.get("content-type");
   if (upstreamContentType) responseHeaders.set("content-type", upstreamContentType);
-  const setCookie = upstream.headers.get("set-cookie");
-  if (setCookie) responseHeaders.set("set-cookie", setCookie);
+  // Node fetch's headers.get("set-cookie") joins all Set-Cookie values with
+  // ", " — that breaks expiry dates like "Wed, 09 Jun 2026" because the
+  // joiner becomes ambiguous.  getSetCookie() preserves each cookie.
+  for (const cookie of upstream.headers.getSetCookie()) {
+    responseHeaders.append("set-cookie", cookie);
+  }
 
   return new NextResponse(await upstream.arrayBuffer(), {
     status: upstream.status,
