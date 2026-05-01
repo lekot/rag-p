@@ -19,10 +19,13 @@ export async function POST(req: NextRequest) {
   const data = (await upstream.json()) as unknown;
   const res = NextResponse.json(data, { status: upstream.status });
 
-  // Passthrough Set-Cookie from FastAPI so the browser stores ragp_session
-  const setCookie = upstream.headers.get("set-cookie");
-  if (setCookie) {
-    res.headers.set("set-cookie", setCookie);
+  // Passthrough Set-Cookie from FastAPI so the browser stores ragp_session.
+  // `headers.get("set-cookie")` only returns one concatenated string with all
+  // cookies joined by ", " — Set-Cookie values themselves contain commas
+  // (e.g. expiry dates), so re-emitting that breaks the cookie.  Use the
+  // Node 20+ `getSetCookie()` API and append each entry separately.
+  for (const cookie of upstream.headers.getSetCookie()) {
+    res.headers.append("set-cookie", cookie);
   }
   return res;
 }
