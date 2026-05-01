@@ -96,6 +96,43 @@ For ingestion:
 - [rag-p API reference](https://lekottt.ru/docs)
 - [Issues](https://github.com/Lekot/rag-p/issues)
 
+## Publishing
+
+Releases are automated via the [`n8n-publish.yml`](../../.github/workflows/n8n-publish.yml)
+GitHub Actions workflow. It runs `npm ci && npm run build && npm publish --access public`
+from `integrations/n8n/` against the public npm registry.
+
+### One-time setup
+
+Add an npm automation token (with publish rights on `n8n-nodes-rag-p`) as the
+repository secret `NPM_TOKEN`:
+
+```bash
+gh secret set NPM_TOKEN --body "<npm-automation-token>"
+```
+
+### Releasing a new version
+
+1. Bump `version` in [`package.json`](./package.json) and merge the change to
+   `main`.
+2. Trigger the workflow either manually or via a tag:
+
+   **Manual run:**
+
+   ```bash
+   gh workflow run n8n-publish.yml
+   ```
+
+   **Tag-driven release** (pushes matching `n8n-v*` trigger automatically):
+
+   ```bash
+   git tag n8n-v0.1.1
+   git push origin n8n-v0.1.1
+   ```
+
+The workflow itself does not bump the version — it publishes whatever is in
+`integrations/n8n/package.json` on the checked-out ref.
+
 ## License
 
 [MIT](LICENSE.md)

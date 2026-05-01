@@ -1,0 +1,57 @@
+name: Publish n8n community node
+
+# Publishes the `n8n-nodes-rag-p` package from `integrations/n8n/` to the
+# public npm registry.
+#
+# Triggers:
+#   - Manual via `gh workflow run n8n-publish.yml` (workflow_dispatch).
+#   - Pushing a git tag matching `n8n-v*` (e.g. `git tag n8n-v0.1.1 && git
+#     push origin n8n-v0.1.1`).
+#
+# Required secret: `NPM_TOKEN` — an npm automation token with publish rights
+# on `n8n-nodes-rag-p`.  The first publish must be from a maintainer account
+# that owns the (currently unclaimed) name on the registry.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'n8n-v*'
+
+concurrency:
+  group: n8n-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build + publish to npm
+    # Self-hosted to stay within the runner pool we already pay for and to
+    # keep behaviour consistent with deploy / CI.  The job is short and only
+    # needs Node + outbound https to registry.npmjs.org, so the deploy runner
+    # is a fine fit (no docker required here).
+    runs-on: [self-hosted, deploy]
+    defaults:
+      run:
+        working-directory: integrations/n8n
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify pack contents
+        run: npm pack --dry-run
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

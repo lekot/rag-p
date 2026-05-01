@@ -133,7 +133,7 @@
 - **Settings page → Delete org** UI (backend `request_account_deletion` уже есть в GDPR PR).
 - **Cron на cascade hard-delete** для GDPR `pending_deletion` orgs/users старше 30 дней.
 - **Cohere config rotation runbook** (когда Amnezia ключ Maxim обновит, как через `gh secret set COHERE_AMNEZIA_CONF`).
-- **n8n npm publish** — ветка `feat/n8n-community-node` смержена, но пакет не опубликован. Нужен manual `cd integrations/n8n && npm publish --access public`.
+- **n8n npm publish** — automated via `.github/workflows/n8n-publish.yml`. Manual trigger: `gh workflow run n8n-publish.yml` (requires NPM_TOKEN secret).
 - **Vault/ESO** — отложено до KMS-backed инфры. Сейчас .env на хосте, ротация через CD secrets — приемлемо для пилота.
 
 ---
