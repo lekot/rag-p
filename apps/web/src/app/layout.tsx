@@ -27,7 +27,9 @@ export default function RootLayout({
         <Providers>
           <div className="flex flex-col min-h-screen bg-background">
             <nav className="border-b px-6 py-3 flex items-center gap-6">
-              <span className="font-semibold text-lg">RAG Platform</span>
+              <a href="/" className="font-semibold text-lg hover:text-foreground/80">
+                RAG Platform
+              </a>
               <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
                 Dashboard
               </a>
