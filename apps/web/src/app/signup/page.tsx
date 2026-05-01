@@ -1,17 +1,14 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 function SignupForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const inviteToken = searchParams?.get("invite") ?? null;
 
@@ -46,21 +43,26 @@ function SignupForm() {
       // If we arrived via an invite link, accept it now
       if (inviteToken) {
         try {
-          await fetch(`${API_URL}/api/v1/invites/accept`, {
+          await fetch(`/api/proxy/v1/invites/accept`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            credentials: "include",
+            credentials: "same-origin",
             body: JSON.stringify({ token: inviteToken }),
           });
         } catch {
           // Non-fatal: user is registered, invite accept failed silently
         }
-        router.push("/account/team");
+        // Hard navigation so navbar/useUser pick up the fresh session cookie
+        // (router.push keeps the React tree warm and tRPC's auth.me query
+        // stays cached as null).
+        window.location.assign("/account/team");
       } else {
         // Brand-new accounts have no subscription yet — direct them to
         // /pricing with a welcome banner so they understand the next step
-        // (otherwise the dashboard greets them with 402 errors).
-        router.push("/pricing?welcome=1");
+        // (otherwise the dashboard greets them with 402 errors).  Hard
+        // navigation forces a fresh tRPC session lookup; otherwise the
+        // pricing nav and CTA buttons render in anonymous state for one cycle.
+        window.location.assign("/pricing?welcome=1");
       }
     } catch {
       setError("Ошибка сети. Попробуйте ещё раз.");
