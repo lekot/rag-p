@@ -146,6 +146,14 @@
    - `COHERE_AMNEZIA_CONF` (multi-line, содержимое локального `cohere.awg.conf` в корне репо — gitignored).
    - `RAGP_PGBACKUP_S3_*` если bucket для backup'ов отдельный (или переиспользовать существующий `RAGP_S3_*`).
    - `GRAFANA_*` / `ALERTMANAGER_*` — **не нужны**, observability через Prometheus/Grafana отменили (хостер мониторит сервер).
+   - **SMTP для password reset** (без них письмо со ссылкой не отправляется — link только в логах API):
+     ```
+     gh secret set RAGP_SMTP_HOST --env production --body "smtp.example.com"
+     gh secret set RAGP_SMTP_USER --env production --body "noreply@lekottt.ru"
+     gh secret set RAGP_SMTP_PASSWORD --env production --body "<app-password>"
+     gh secret set RAGP_SMTP_FROM --env production --body "RAG-P <noreply@lekottt.ru>"
+     ```
+     Опционально через `gh variable set` (не секреты): `RAGP_SMTP_PORT` (default 587), `RAGP_SMTP_USE_TLS` (default true), `RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES` (default 60).
 
 2. **Selectel S3** — создать bucket `rag-p-pg-backups` (или префикс в существующем).
 
