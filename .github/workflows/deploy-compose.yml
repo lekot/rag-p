@@ -247,4 +247,9 @@ jobs:
           sudo -u ragp-deploy docker image prune -a -f >/dev/null 2>&1 || true
           sudo -u ragp-deploy docker builder prune -a -f >/dev/null 2>&1 || true
           sudo -u ragp-deploy docker container prune -f >/dev/null 2>&1 || true
+          # Anonymous (sha-named) volumes left behind by docker compose
+          # restarts can pile up to ~10 GB.  `volume prune` (without -a) only
+          # touches dangling volumes — named volumes attached to running
+          # services (postgres, ollama, redis) are kept.
+          sudo -u ragp-deploy docker volume prune -f >/dev/null 2>&1 || true
           df -h / | tail -1
