@@ -1,0 +1,17 @@
+# Source TypeScript files (only built dist/ ships)
+nodes/**/*.ts
+credentials/**/*.ts
+tsconfig.json
+tsconfig.tsbuildinfo
+**/*.tsbuildinfo
+
+# Dev tooling
+.eslintrc.js
+.eslintrc.prepublish.js
+.prettierrc.js
+.gitignore
+scripts/
+
+# Source maps and declaration maps from incremental builds
+dist/**/*.d.ts.map
+dist/**/*.tsbuildinfo
