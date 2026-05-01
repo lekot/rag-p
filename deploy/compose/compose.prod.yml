@@ -28,6 +28,10 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.lekottt.ru}
+      # Server-side Next.js route handlers must reach the API via the docker
+      # service network — fetching api.lekottt.ru from inside the bridge
+      # ECONNREFUSEs back at Caddy.  Public URL stays for the browser.
+      API_URL_INTERNAL: http://api:8000
       PORT: 3000
       HOSTNAME: 0.0.0.0
     depends_on:
