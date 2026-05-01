@@ -705,7 +705,7 @@ export default function DocsPage() {
                 <strong>RAG-Platform: Upload Document</strong> с{" "}
                 <code className="bg-muted px-1 py-0.5 rounded">Input Type = binary</code>, затем
                 опционально <strong>Wait</strong> + <strong>Get Dataset</strong> до{" "}
-                <code className="bg-muted px-1 py-0.5 rounded">indexed_status == "ready"</code>.
+                <code className="bg-muted px-1 py-0.5 rounded">indexed_status == &quot;ready&quot;</code>.
               </p>
             </CardContent>
           </Card>
