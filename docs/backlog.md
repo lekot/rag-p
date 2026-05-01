@@ -146,24 +146,37 @@
    - `COHERE_AMNEZIA_CONF` (multi-line, содержимое локального `cohere.awg.conf` в корне репо — gitignored).
    - `RAGP_PGBACKUP_S3_*` — **больше не обязательны**: deploy-compose.yml по умолчанию переиспользует `RAGP_S3_*` (тот же bucket, объекты разводятся префиксом `pg-backups/`). Задавать отдельные `RAGP_PGBACKUP_S3_*` только если хочется выделить отдельный bucket.
    - `GRAFANA_*` / `ALERTMANAGER_*` — **не нужны**, observability через Prometheus/Grafana отменили (хостер мониторит сервер).
-   - **SMTP для password reset** (без них письмо со ссылкой не отправляется — link только в логах API):
-     ```
-     gh secret set RAGP_SMTP_HOST --env production --body "smtp.example.com"
-     gh secret set RAGP_SMTP_USER --env production --body "noreply@lekottt.ru"
-     gh secret set RAGP_SMTP_PASSWORD --env production --body "<app-password>"
-     gh secret set RAGP_SMTP_FROM --env production --body "RAG-P <noreply@lekottt.ru>"
-     ```
-     Опционально через `gh variable set` (не секреты): `RAGP_SMTP_PORT` (default 587), `RAGP_SMTP_USE_TLS` (default true), `RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES` (default 60).
+   - **SMTP secrets — опционально.** `RAGP_SMTP_HOST/PORT/USER/PASSWORD/FROM/USE_TLS` стали optional после self-hosted maddy SMTP в compose. Дефолты роутят через in-stack `smtp` (plaintext :587 во внутренней docker-сети, без auth/TLS, FROM=`noreply@lekottt.ru`). Переопределяй секреты только при relay через внешнего провайдера (Yandex 360, SendGrid и т.п.).
 
 2. **Selectel S3** — bucket `rag-p-pg-backups` создавать **не нужно**: pg-backup пишет в существующий app bucket под префиксом `pg-backups/` (см. `RAGP_PGBACKUP_PREFIX` в `deploy/compose/postgres-backup/backup.sh`). Те же ключи `RAGP_S3_ACCESS_KEY_ID` / `RAGP_S3_SECRET_ACCESS_KEY` покрывают и app uploads, и pg backups.
 
-3. **YooKassa** — поставить `RAGP_YOOKASSA_REQUIRE_IP_CHECK=true` и `RAGP_YOOKASSA_REVALIDATE_PAYMENT=true` в `.env` на хосте (defaults в коде = true, но фактический `.env` мог быть скопирован раньше).
+3. **DNS records for lekottt.ru** — добавить у регистратора (без них письма уйдут в спам или вернутся как «non-deliverable»):
 
-4. **Smoke** — после deploy:
+   ```
+   mail.lekottt.ru.        IN A    <HOST_IP>
+   lekottt.ru.             IN TXT  "v=spf1 mx a:mail.lekottt.ru ip4:<HOST_IP> -all"
+   default._domainkey.lekottt.ru. IN TXT "v=DKIM1; k=rsa; p=<DKIM_PUBLIC_KEY>"
+   _dmarc.lekottt.ru.      IN TXT  "v=DMARC1; p=quarantine; rua=mailto:postmaster@lekottt.ru"
+   ```
+
+   - `<HOST_IP>` — публичный IPv4 prod-сервера (тот же, что у `lekottt.ru` сейчас).
+   - `<DKIM_PUBLIC_KEY>` — генерируется maddy при первом отправленном письме. После первого деплоя получить значение командой:
+     ```
+     docker exec rag-p-smtp-1 cat /data/dkim_keys/lekottt.ru_default.dns
+     ```
+     Файл содержит готовую TXT-запись (`v=DKIM1; k=rsa; p=...`) — скопировать целиком в значение DNS-записи `default._domainkey.lekottt.ru`.
+   - **PTR (reverse DNS):** Selectel обычно ставит PTR per-сервер автоматически. Если `dig -x <HOST_IP>` не возвращает `mail.lekottt.ru` — открыть тикет в Selectel: «прошу установить PTR для `<HOST_IP>` = `mail.lekottt.ru`».
+   - **Egress port 25:** Selectel часто блокирует исходящий 25/tcp по умолчанию. Если очередь maddy не уменьшается (`docker exec rag-p-smtp-1 ls /data/queue`) — тикет в Selectel «прошу разблокировать исходящий tcp/25 для отправки транзакционной почты». Альтернатива — переключиться на внешний relay (Yandex 360 — 5 ящиков бесплатно с SMTP-credentials для своего домена).
+
+3. **Selectel S3** — создать bucket `rag-p-pg-backups` (или префикс в существующем).
+
+4. **YooKassa** — поставить `RAGP_YOOKASSA_REQUIRE_IP_CHECK=true` и `RAGP_YOOKASSA_REVALIDATE_PAYMENT=true` в `.env` на хосте (defaults в коде = true, но фактический `.env` мог быть скопирован раньше).
+
+5. **Smoke** — после deploy:
    - `curl https://api.lekottt.ru/healthz` → ok.
    - `curl -X POST https://api.lekottt.ru/api/v1/billing/webhook/yookassa -d '{}'` → теперь должен вернуть 403 ip_not_allowed (а не 200 как раньше).
    - Через UI: signup → /pricing редирект → upload .txt → /rag/query.
 
-5. **n8n publish** — `cd integrations/n8n && npm publish --access public` если решено публиковать.
+6. **n8n publish** — `cd integrations/n8n && npm publish --access public` если решено публиковать.
 
-6. **Сохранить cohere.awg.conf** в безопасном месте (1Password, etc) — он gitignored, при потере локально нужно будет регенерировать из `cohere.vpn` URI.
+7. **Сохранить cohere.awg.conf** в безопасном месте (1Password, etc) — он gitignored, при потере локально нужно будет регенерировать из `cohere.vpn` URI.

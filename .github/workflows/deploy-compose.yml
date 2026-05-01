@@ -68,7 +68,8 @@ jobs:
           sudo -u ragp-deploy mkdir -p \
             "$COMPOSE_DIR/postgres/initdb" \
             "$COMPOSE_DIR/cohere-egress" \
-            "$COMPOSE_DIR/postgres-backup"
+            "$COMPOSE_DIR/postgres-backup" \
+            "$COMPOSE_DIR/smtp"
 
           install_as_deploy() {
             local src="$1" dst="$2" mode="${3:-644}"
@@ -86,6 +87,7 @@ jobs:
           install_as_deploy deploy/compose/postgres-backup/Dockerfile   "$COMPOSE_DIR/postgres-backup/Dockerfile"
           install_as_deploy deploy/compose/postgres-backup/backup.sh    "$COMPOSE_DIR/postgres-backup/backup.sh"  755
           install_as_deploy deploy/compose/postgres-backup/restore.sh   "$COMPOSE_DIR/postgres-backup/restore.sh" 755
+          install_as_deploy deploy/compose/smtp/maddy.conf              "$COMPOSE_DIR/smtp/maddy.conf"
 
       - name: Provision cohere AmneziaWG conf
         env:
@@ -135,13 +137,17 @@ jobs:
           RAGP_PGBACKUP_S3_REGION: ${{ vars.RAGP_PGBACKUP_S3_REGION || vars.RAGP_S3_REGION || 'ru-1' }}
           RAGP_PGBACKUP_PREFIX: ${{ vars.RAGP_PGBACKUP_PREFIX || 'pg-backups/' }}
           RAGP_COHERE_HTTP_PROXY: ${{ vars.RAGP_COHERE_HTTP_PROXY || 'http://cohere-egress:8888' }}
-          RAGP_SMTP_HOST: ${{ secrets.RAGP_SMTP_HOST }}
-          RAGP_SMTP_PORT: ${{ vars.RAGP_SMTP_PORT || 587 }}
+          # SMTP defaults route through the in-stack `smtp` (maddy) service on
+          # the internal docker network — no auth, no TLS, plaintext on :587.
+          # Set the secrets/vars below only when relaying via an external
+          # provider (Yandex 360, SendGrid, etc) instead of self-hosted maddy.
+          RAGP_SMTP_HOST: ${{ secrets.RAGP_SMTP_HOST || 'smtp' }}
+          RAGP_SMTP_PORT: ${{ vars.RAGP_SMTP_PORT || '587' }}
           RAGP_SMTP_USER: ${{ secrets.RAGP_SMTP_USER }}
           RAGP_SMTP_PASSWORD: ${{ secrets.RAGP_SMTP_PASSWORD }}
-          RAGP_SMTP_FROM: ${{ secrets.RAGP_SMTP_FROM }}
-          RAGP_SMTP_USE_TLS: ${{ vars.RAGP_SMTP_USE_TLS || 'true' }}
-          RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES: ${{ vars.RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES || 60 }}
+          RAGP_SMTP_FROM: ${{ secrets.RAGP_SMTP_FROM || 'noreply@lekottt.ru' }}
+          RAGP_SMTP_USE_TLS: ${{ vars.RAGP_SMTP_USE_TLS || 'false' }}
+          RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES: ${{ vars.RAGP_PASSWORD_RESET_TOKEN_TTL_MINUTES || '60' }}
           RAGP_API_IMAGE: rag-p-api:${{ steps.tag.outputs.value }}
           RAGP_WEB_IMAGE: rag-p-web:${{ steps.tag.outputs.value }}
         run: |

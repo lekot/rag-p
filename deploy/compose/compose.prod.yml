@@ -66,6 +66,8 @@ services:
         condition: service_healthy
       cohere-egress:
         condition: service_healthy
+      smtp:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -139,6 +141,8 @@ services:
       ollama:
         condition: service_healthy
       cohere-egress:
+        condition: service_healthy
+      smtp:
         condition: service_healthy
     networks:
       - internal
@@ -275,6 +279,40 @@ services:
     networks:
       - internal
 
+  # Self-hosted SMTP relay (maddy) for transactional email — password reset,
+  # billing notifications.  Sender-only role: accepts plaintext SMTP from the
+  # internal docker network (no auth, no TLS), signs with DKIM, delivers to
+  # remote MXes via port 25 egress.  No host port is published — only the
+  # `internal` network can reach :587.
+  #
+  # First boot generates a DKIM keypair under /data/dkim_keys/.  After deploy,
+  # read the public key for DNS with:
+  #     docker exec rag-p-smtp-1 cat /data/dkim_keys/lekottt.ru_default.dns
+  # and paste the value as a TXT record at default._domainkey.lekottt.ru.
+  #
+  # Outbound port 25 must be unblocked at the hosting provider (Selectel often
+  # blocks it by default — file a ticket if delivery hangs in queue).
+  smtp:
+    image: foxcpp/maddy:latest
+    restart: unless-stopped
+    environment:
+      MADDY_HOSTNAME: mail.lekottt.ru
+      MADDY_DOMAIN: lekottt.ru
+    volumes:
+      - smtp_data:/data
+      - ./smtp/maddy.conf:/data/maddy.conf:ro
+    healthcheck:
+      # `maddy` image ships busybox `nc`; -z exits 0 once the listener is up.
+      test: ["CMD-SHELL", "nc -z localhost 587"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    expose:
+      - "587"
+    networks:
+      - internal
+
 networks:
   public:
   internal:
@@ -284,3 +322,4 @@ volumes:
   caddy_config:
   postgres_data:
   ollama_models:
+  smtp_data:
