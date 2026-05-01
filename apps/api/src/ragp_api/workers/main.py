@@ -35,6 +35,7 @@ from ragp_api.workers.tasks import (
     expire_subscriptions_task,
     mark_experiment_failed_on_crash,
     mark_stale_experiments_failed,
+    notify_subscription_lifecycle_task,
     run_experiment_task,
 )
 
@@ -211,11 +212,20 @@ class WorkerMaintenanceSettings:
     """
 
     queue_name = "rag.maintenance"
-    functions = [aggregate_usage_daily, expire_subscriptions_task, mark_stale_experiments_failed]
+    functions = [
+        aggregate_usage_daily,
+        expire_subscriptions_task,
+        mark_stale_experiments_failed,
+        notify_subscription_lifecycle_task,
+    ]
     cron_jobs = [
         cron(aggregate_usage_daily, hour=1, minute=0, run_at_startup=False),
         # Daily: expire subscriptions whose period has ended.
         cron(expire_subscriptions_task, hour=0, minute=10, run_at_startup=False),
+        # Daily: notify org owners about upcoming/just-passed subscription expiry.
+        # Runs at 00:30 UTC, after expire_subscriptions_task has flipped any
+        # past-due rows to status=expired.
+        cron(notify_subscription_lifecycle_task, hour=0, minute=30, run_at_startup=False),
         # Watchdog: scan for queued/running experiments whose heartbeat went
         # stale and mark them failed.  Runs every two minutes.
         cron(
