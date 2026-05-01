@@ -67,6 +67,15 @@ jobs:
           cd apps/api
           uv run pytest tests/ -x --tb=short
 
+      - name: Reclaim workspace disk
+        # Self-hosted runner: \`actions/checkout\` only clears tracked paths.
+        # \`uv sync\` lays down a 5+ GB \`.venv\` (torch, scipy,
+        # sentence-transformers) and \`mypy --strict\` warms a 400 MB
+        # \`.mypy_cache\` which both linger between runs and fill the disk.
+        if: always()
+        run: |
+          rm -rf .venv apps/api/.venv apps/api/.mypy_cache .mypy_cache
+
   lint-typecheck-web:
     name: Web lint + typecheck
     runs-on: [self-hosted, ci]
