@@ -158,6 +158,192 @@ async def expire_subscriptions_task(ctx: dict[str, Any]) -> None:
     logger.info("expire_subscriptions_task: expired %d subscriptions", count)
 
 
+# ---------------------------------------------------------------------------
+# Subscription lifecycle email notifications (cron)
+# ---------------------------------------------------------------------------
+
+# Notify users about plan expiry: a warning N days before the period ends and
+# a notification once the period has elapsed.  Idempotent across cron runs via
+# Redis SETNX keys with a TTL slightly longer than the notification window.
+
+_EXPIRING_NOTICE_DAYS = 3
+_EXPIRING_TTL_SECONDS = 4 * 24 * 3600  # 4 days
+_EXPIRED_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+
+async def _redis_setnx_with_ttl(key: str, ttl_seconds: int) -> bool:
+    """Try to claim *key* in Redis with TTL.  Returns True iff we won the race.
+
+    Workers do not share the FastAPI app.state — open a short-lived connection
+    per call.  Falls back to ``True`` (proceed) if Redis is unreachable so a
+    worker outage does not silence emails forever; duplicates are far less bad
+    than missed notifications and admins still see the cron error in logs.
+    """
+    import contextlib  # noqa: PLC0415
+
+    import redis.asyncio as aioredis  # noqa: PLC0415
+
+    from ragp_api.settings import settings  # noqa: PLC0415
+
+    client: Any = None
+    try:
+        client = aioredis.Redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            decode_responses=False,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        # SET key value NX EX ttl — atomic claim.
+        result = await client.set(key, b"1", nx=True, ex=ttl_seconds)
+        return bool(result)
+    except Exception:
+        logger.warning("redis SETNX failed for %s — proceeding without idempotency", key)
+        return True
+    finally:
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
+
+
+async def notify_subscription_lifecycle_task(ctx: dict[str, Any]) -> dict[str, int]:
+    """Cron task: send expiring/expired emails to org owners.
+
+    Runs daily.  For each org subscription:
+    - Active and ending within ``_EXPIRING_NOTICE_DAYS`` -> expiring email.
+    - Just expired (status=expired and period_end is today) -> expired email.
+
+    Idempotency: a Redis key per (org_id, period_end, kind) prevents the same
+    notice firing twice across daily runs.
+
+    Returns a dict ``{"expiring": N, "expired": M}`` for tests/metrics.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from ragp_api.db.models import OrgMember, OrgSubscription, Plan, User  # noqa: PLC0415
+    from ragp_api.services.audit import log_audit_event  # noqa: PLC0415
+    from ragp_api.services.email import (  # noqa: PLC0415
+        send_subscription_expired_email,
+        send_subscription_expiring_email,
+    )
+
+    now = datetime.now(UTC)
+    expiring_cutoff = now + timedelta(days=_EXPIRING_NOTICE_DAYS)
+    expired_cutoff = now - timedelta(days=1)
+
+    sent_expiring = 0
+    sent_expired = 0
+
+    async with async_session() as db:
+        # ---- Expiring soon (active subscriptions within window) ----
+        active_result = await db.execute(
+            select(OrgSubscription).where(
+                OrgSubscription.status == "active",
+                OrgSubscription.current_period_end >= now,
+                OrgSubscription.current_period_end <= expiring_cutoff,
+            )
+        )
+        for sub in active_result.scalars().all():
+            period_end = sub.current_period_end
+            if period_end.tzinfo is None:
+                period_end = period_end.replace(tzinfo=UTC)
+            key = f"email:expiring:{sub.org_id}:{period_end.date().isoformat()}"
+            if not await _redis_setnx_with_ttl(key, _EXPIRING_TTL_SECONDS):
+                continue
+
+            owner_email = await db.scalar(
+                select(User.email)
+                .join(OrgMember, OrgMember.user_id == User.id)
+                .where(OrgMember.org_id == sub.org_id, OrgMember.role == "owner")
+                .order_by(OrgMember.created_at)
+                .limit(1)
+            )
+            if not owner_email:
+                continue
+
+            plan = await db.scalar(select(Plan).where(Plan.id == sub.plan_id))
+            plan_label = plan.name if plan is not None else sub.plan_id
+            days_left = max(0, (period_end - now).days)
+            try:
+                await send_subscription_expiring_email(
+                    owner_email,
+                    plan_label,
+                    period_end.isoformat(),
+                    days_left,
+                )
+                await log_audit_event(
+                    db,
+                    org_id=sub.org_id,
+                    user_id=None,
+                    event_type="email.sent",
+                    resource_type="email",
+                    resource_id=None,
+                    metadata={
+                        "kind": "subscription_expiring",
+                        "plan_id": sub.plan_id,
+                        "expires_at": period_end.isoformat(),
+                        "days_left": days_left,
+                    },
+                )
+                sent_expiring += 1
+            except Exception:
+                logger.exception("expiring email failed for org %s", sub.org_id)
+
+        # ---- Just-expired (status=expired and ended in the last 24h) ----
+        expired_result = await db.execute(
+            select(OrgSubscription).where(
+                OrgSubscription.status == "expired",
+                OrgSubscription.current_period_end >= expired_cutoff,
+                OrgSubscription.current_period_end <= now,
+            )
+        )
+        for sub in expired_result.scalars().all():
+            period_end = sub.current_period_end
+            if period_end.tzinfo is None:
+                period_end = period_end.replace(tzinfo=UTC)
+            key = f"email:expired:{sub.org_id}:{period_end.date().isoformat()}"
+            if not await _redis_setnx_with_ttl(key, _EXPIRED_TTL_SECONDS):
+                continue
+
+            owner_email = await db.scalar(
+                select(User.email)
+                .join(OrgMember, OrgMember.user_id == User.id)
+                .where(OrgMember.org_id == sub.org_id, OrgMember.role == "owner")
+                .order_by(OrgMember.created_at)
+                .limit(1)
+            )
+            if not owner_email:
+                continue
+
+            plan = await db.scalar(select(Plan).where(Plan.id == sub.plan_id))
+            plan_label = plan.name if plan is not None else sub.plan_id
+            try:
+                await send_subscription_expired_email(owner_email, plan_label)
+                await log_audit_event(
+                    db,
+                    org_id=sub.org_id,
+                    user_id=None,
+                    event_type="email.sent",
+                    resource_type="email",
+                    resource_id=None,
+                    metadata={"kind": "subscription_expired", "plan_id": sub.plan_id},
+                )
+                sent_expired += 1
+            except Exception:
+                logger.exception("expired email failed for org %s", sub.org_id)
+
+        await db.commit()
+
+    logger.info(
+        "notify_subscription_lifecycle_task: expiring=%d expired=%d",
+        sent_expiring,
+        sent_expired,
+    )
+    return {"expiring": sent_expiring, "expired": sent_expired}
+
+
 async def run_experiment_task(
     ctx: dict[str, Any],
     envelope: dict[str, Any] | None = None,

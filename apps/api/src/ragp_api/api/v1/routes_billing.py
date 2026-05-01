@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     BillingTransaction,
+    OrgMember,
     OrgRole,
     OrgSubscription,
     Plan,
@@ -28,6 +29,10 @@ from ragp_api.deps_auth import require_session_user
 from ragp_api.security.yookassa_webhook import verify_yookassa_request
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.billing import get_balance, topup_balance
+from ragp_api.services.email import (
+    send_payment_received_email,
+    send_subscription_activated_email,
+)
 from ragp_api.services.fx import get_usd_to_rub_rate
 from ragp_api.services.permissions import require_role
 from ragp_api.services.subscription import get_active_subscription, start_subscription
@@ -455,6 +460,52 @@ async def list_subscription_events(
 # ---------------------------------------------------------------------------
 
 
+async def _get_org_owner_email(db: AsyncSession, org_id: str) -> str | None:
+    """Return the email of the owner of *org_id*, or None if not found.
+
+    Used by the webhook to address transactional billing emails. Picks the
+    earliest-created owner if there are multiple (rare — owner role is unique
+    per org in practice).
+    """
+    result = await db.execute(
+        select(User.email)
+        .join(OrgMember, OrgMember.user_id == User.id)
+        .where(OrgMember.org_id == org_id, OrgMember.role == OrgRole.owner.value)
+        .order_by(OrgMember.created_at)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _notify_billing_email(
+    db: AsyncSession,
+    *,
+    org_id: str,
+    email_kind: str,
+    coro: Any,
+    metadata: dict[str, Any],
+) -> None:
+    """Dispatch a billing email and record an ``email.sent`` audit event.
+
+    Fail-safe: any exception is logged but never propagated, so the webhook
+    response is not blocked by SMTP problems.  *coro* is the awaitable
+    returned by one of the email helpers in services.email.
+    """
+    try:
+        await coro
+        await log_audit_event(
+            db,
+            org_id=org_id,
+            user_id=None,
+            event_type="email.sent",
+            resource_type="email",
+            resource_id=None,
+            metadata={"kind": email_kind, **metadata},
+        )
+    except Exception:
+        logger.exception("Failed to dispatch billing email kind=%s org=%s", email_kind, org_id)
+
+
 def _payments_match(webhook_obj: dict[str, Any], authoritative: dict[str, Any]) -> bool:
     """Compare the webhook claim against the authoritative payment object.
 
@@ -598,6 +649,29 @@ async def yookassa_webhook(
                     "payment_id": payment_id,
                 },
             )
+
+            # Best-effort transactional emails to the org owner.  Failures here
+            # never break the webhook response (idempotency / fail-safe).
+            owner_email = await _get_org_owner_email(db, org_id_str)
+            if owner_email:
+                plan_obj = await db.scalar(select(Plan).where(Plan.id == plan_id))
+                plan_label = plan_obj.name if plan_obj is not None else plan_id
+                expires_at_str = sub.current_period_end.isoformat()
+                await _notify_billing_email(
+                    db,
+                    org_id=org_id_str,
+                    email_kind="payment_received",
+                    coro=send_payment_received_email(owner_email, float(amount_rub), plan_label),
+                    metadata={"plan_id": plan_id, "amount_rub": float(amount_rub)},
+                )
+                await _notify_billing_email(
+                    db,
+                    org_id=org_id_str,
+                    email_kind="subscription_activated",
+                    coro=send_subscription_activated_email(owner_email, plan_label, expires_at_str),
+                    metadata={"plan_id": plan_id, "expires_at": expires_at_str},
+                )
+
             await db.commit()
         except IntegrityError:
             await db.rollback()
