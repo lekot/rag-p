@@ -144,10 +144,10 @@
 
 1. **GitHub Secrets** — добавить:
    - `COHERE_AMNEZIA_CONF` (multi-line, содержимое локального `cohere.awg.conf` в корне репо — gitignored).
-   - `RAGP_PGBACKUP_S3_*` если bucket для backup'ов отдельный (или переиспользовать существующий `RAGP_S3_*`).
+   - `RAGP_PGBACKUP_S3_*` — **больше не обязательны**: deploy-compose.yml по умолчанию переиспользует `RAGP_S3_*` (тот же bucket, объекты разводятся префиксом `pg-backups/`). Задавать отдельные `RAGP_PGBACKUP_S3_*` только если хочется выделить отдельный bucket.
    - `GRAFANA_*` / `ALERTMANAGER_*` — **не нужны**, observability через Prometheus/Grafana отменили (хостер мониторит сервер).
 
-2. **Selectel S3** — создать bucket `rag-p-pg-backups` (или префикс в существующем).
+2. **Selectel S3** — bucket `rag-p-pg-backups` создавать **не нужно**: pg-backup пишет в существующий app bucket под префиксом `pg-backups/` (см. `RAGP_PGBACKUP_PREFIX` в `deploy/compose/postgres-backup/backup.sh`). Те же ключи `RAGP_S3_ACCESS_KEY_ID` / `RAGP_S3_SECRET_ACCESS_KEY` покрывают и app uploads, и pg backups.
 
 3. **YooKassa** — поставить `RAGP_YOOKASSA_REQUIRE_IP_CHECK=true` и `RAGP_YOOKASSA_REVALIDATE_PAYMENT=true` в `.env` на хосте (defaults в коде = true, но фактический `.env` мог быть скопирован раньше).
 
