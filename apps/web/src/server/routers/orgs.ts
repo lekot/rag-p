@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL } from "../api-url";
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 

@@ -2,8 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure } from "../trpc";
 import { apiFetchWithCookies } from "../api-client";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL } from "../api-url";
 
 const UserSchema = z.object({
   id: z.string(),

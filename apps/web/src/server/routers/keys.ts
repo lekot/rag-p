@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { router, publicProcedure } from "../trpc";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL } from "../api-url";
 
 const ScopeSchema = z.enum(["read", "write", "admin"]);
 export type ApiKeyScope = z.infer<typeof ScopeSchema>;
