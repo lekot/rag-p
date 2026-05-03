@@ -468,7 +468,7 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             await db.commit()
             logger.info("chunk_document: done doc=%s chunks=%d", document_id, len(chunk_objs))
 
-        except Exception as exc:
+        except Exception:
             logger.exception("chunk_document: failed doc=%s", document_id)
             try:
                 doc.status = "failed"
