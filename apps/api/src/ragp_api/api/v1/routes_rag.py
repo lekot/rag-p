@@ -492,7 +492,9 @@ async def get_usage_quota(
 
     plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
     plan = plan_result.scalar_one_or_none()
-    rpm_limit = plan.rpm_per_key if plan and plan.rpm_per_key > 0 else settings.rate_limit_per_key_rpm
+    rpm_limit = (
+        plan.rpm_per_key if plan and plan.rpm_per_key > 0 else settings.rate_limit_per_key_rpm
+    )
     plan_name = plan.name if plan else None
 
     # Count current usage in the sliding window
