@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Dataset, Organization, Pipeline, PipelineVersion, Run
+from ragp_api.db.models import ApiKey, Dataset, Organization, Pipeline, PipelineVersion, Plan, Run
 from ragp_api.db.redis import get_redis
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import get_api_key_org, require_scope
@@ -439,4 +439,76 @@ async def rag_query(
             generator="litellm-generator",
             model=default_model,
         ),
+    )
+
+
+class UsageQuotaOut(BaseModel):
+    remaining_queries: int
+    total_quota: int | None
+    plan_name: str | None
+    has_active_subscription: bool
+
+
+@router.get("/usage/quota", response_model=UsageQuotaOut)
+async def get_usage_quota(
+    db: AsyncSession = Depends(get_db),
+    auth: tuple[Organization, ApiKey] | None = Depends(get_api_key_org),
+    redis: Any = Depends(get_redis),
+) -> UsageQuotaOut:
+    """Return remaining query quota for the authenticated API key's org.
+
+    Authentication: API Key (same as /rag/query).
+    Response includes remaining queries in the current window and plan info.
+    """
+    from sqlalchemy import select
+
+    from ragp_api.services.subscription import get_active_subscription
+
+    if auth is None:
+        raise HTTPException(status_code=401, detail="API key required")
+
+    org, api_key = auth
+
+    if not settings.enforce_subscription_quotas:
+        return UsageQuotaOut(
+            remaining_queries=-1,
+            total_quota=None,
+            plan_name=None,
+            has_active_subscription=True,
+        )
+
+    try:
+        sub = await get_active_subscription(db, org.id)
+    except Exception:
+        sub = None
+
+    if sub is None:
+        return UsageQuotaOut(
+            remaining_queries=0,
+            total_quota=0,
+            plan_name=None,
+            has_active_subscription=False,
+        )
+
+    plan_result = await db.execute(select(Plan).where(Plan.id == sub.plan_id))
+    plan = plan_result.scalar_one_or_none()
+    rpm_limit = plan.rpm_per_key if plan and plan.rpm_per_key > 0 else settings.rate_limit_per_key_rpm
+    plan_name = plan.name if plan else None
+
+    # Count current usage in the sliding window
+    key_redis_key = f"rl:key:{api_key.id}"
+    try:
+        now_ms = time.time()
+        window_start = now_ms - 60
+        count = await redis.zcount(key_redis_key, window_start, now_ms) if redis else 0
+    except Exception:
+        count = 0
+
+    remaining = max(0, rpm_limit - count)
+
+    return UsageQuotaOut(
+        remaining_queries=remaining,
+        total_quota=rpm_limit if rpm_limit < 1e9 else None,
+        plan_name=plan_name,
+        has_active_subscription=True,
     )

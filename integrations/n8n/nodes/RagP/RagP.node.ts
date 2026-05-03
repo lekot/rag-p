@@ -75,6 +75,12 @@ export class RagP implements INodeType {
 						description: 'Fetch dataset metadata and indexing status',
 						action: 'Get a dataset',
 					},
+					{
+						name: 'Get Usage Quota',
+						value: 'getUsage',
+						description: 'Get remaining query quota and plan info',
+						action: 'Get usage quota',
+					},
 				],
 				default: 'query',
 			},
@@ -204,6 +210,15 @@ export class RagP implements INodeType {
 						this,
 						'GET',
 						`/api/v1/datasets/${encodeURIComponent(datasetId)}`,
+						undefined,
+						{},
+						{ itemIndex: i },
+					);
+				} else if (operation === 'getUsage') {
+					response = await ragPApiRequest.call(
+						this,
+						'GET',
+						'/api/v1/rag/usage/quota',
 						undefined,
 						{},
 						{ itemIndex: i },
