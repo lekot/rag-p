@@ -37,11 +37,25 @@ class LiteLLMEmbedder(Embedder):
         from ragp_api.settings import settings
 
         model: str = self.params["model"]
-        kwargs: dict[str, Any] = {"model": model, "input": texts}
-        # Route through cohere-egress proxy if configured (bypasses geo-blocks)
+        # litellm ignores the `proxy` kwarg for aembedding, but respects
+        # HTTPS_PROXY / HTTP_PROXY env vars.  Set them temporarily so that
+        # traffic is routed through the cohere-egress VPN sidecar.
+        old_https_proxy = os.environ.get("HTTPS_PROXY")
+        old_http_proxy = os.environ.get("HTTP_PROXY")
         if settings.cohere_http_proxy:
-            kwargs["proxy"] = settings.cohere_http_proxy
-        response = await litellm.aembedding(**kwargs)
+            os.environ["HTTPS_PROXY"] = settings.cohere_http_proxy
+            os.environ["HTTP_PROXY"] = settings.cohere_http_proxy
+        try:
+            response = await litellm.aembedding(model=model, input=texts)
+        finally:
+            if old_https_proxy is not None:
+                os.environ["HTTPS_PROXY"] = old_https_proxy
+            else:
+                os.environ.pop("HTTPS_PROXY", None)
+            if old_http_proxy is not None:
+                os.environ["HTTP_PROXY"] = old_http_proxy
+            else:
+                os.environ.pop("HTTP_PROXY", None)
         # response.data is untyped in litellm; each item has an "embedding" list[float]
         embeddings: list[list[float]] = [
             cast(list[float], item["embedding"]) for item in response.data
