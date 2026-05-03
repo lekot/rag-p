@@ -350,13 +350,20 @@ async def test_delete_dataset_cleans_runtime_dependents(
     )
     assert upload_resp.status_code == 201, upload_resp.text
     document_id = upload_resp.json()["document_id"]
-    chunk = (
-        (await db_session.execute(select(Chunk).where(Chunk.document_id == document_id)))
-        .scalars()
-        .first()
+
+    # Chunking is async — manually create a chunk for the document
+    chunk_id = str(uuid.uuid4())
+    chunk = Chunk(
+        id=chunk_id,
+        document_id=document_id,
+        organization_id=organization_id,
+        text="delete runtime refs chunk",
+        embedding=None,
+        metadata_json={"chunk_index": 0},
     )
-    assert chunk is not None
-    chunk_id = chunk.id
+    db_session.add(chunk)
+    await db_session.commit()
+    await db_session.refresh(chunk)
 
     pipeline = Pipeline(
         id=str(uuid.uuid4()),
