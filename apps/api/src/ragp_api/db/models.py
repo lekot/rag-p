@@ -256,7 +256,7 @@ class Chunk(Base):
         String(36), ForeignKey("organizations.id"), nullable=False
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

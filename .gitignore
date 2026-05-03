@@ -77,3 +77,7 @@ kind-config.local.yaml
 *.swp
 *.bak
 *~
+
+
+.playwright-mcp/
+.tmp-deploy-*/
