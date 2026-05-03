@@ -421,7 +421,7 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             chunker_cls = get_plugin("chunker", "recursive-character")
             if chunker_cls is None:
                 raise RuntimeError("Default chunker recursive-character not registered")
-            chunker = cast(Chunker, chunker_cls({}))
+            chunker = cast(Chunker, chunker_cls({"chunk_size": 4000, "chunk_overlap": 200}))
             raw_chunks = await chunker.chunk(text)
 
             # Build Chunk objects
