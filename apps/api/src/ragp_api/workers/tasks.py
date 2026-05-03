@@ -448,20 +448,22 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             cohere_key = os.environ.get("COHERE_API_KEY", "")
             openai_key = os.environ.get("OPENAI_API_KEY", "")
             embedder: Embedder | None = None
-            if ollama_host:
-                cls = get_plugin("embedder", "ollama-embedder")
+            # Prefer fast API embedders (OpenAI → Cohere) over local Ollama.
+            # Ollama is only used as a last resort (CPU, very slow).
+            if openai_key:
+                cls = get_plugin("embedder", "litellm-embedder")
                 if cls is not None:
-                    embedder = cast(Embedder, cls({"model": "bge-m3"}))
+                    embedder = cast(Embedder, cls({"model": "openai/text-embedding-3-small"}))
             elif cohere_key:
                 cls = get_plugin("embedder", "cohere-embedder")
                 if cls is not None:
                     embedder = cast(
                         Embedder, cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
                     )
-            elif openai_key:
-                cls = get_plugin("embedder", "litellm-embedder")
+            elif ollama_host:
+                cls = get_plugin("embedder", "ollama-embedder")
                 if cls is not None:
-                    embedder = cast(Embedder, cls({"model": "openai/text-embedding-3-small"}))
+                    embedder = cast(Embedder, cls({"model": "bge-m3"}))
 
             if embedder is not None:
                 texts = [c.text for c in chunk_objs]
