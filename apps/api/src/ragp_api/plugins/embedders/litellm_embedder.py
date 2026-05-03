@@ -1,5 +1,6 @@
 """LiteLLMEmbedder — OpenAI/Cohere/Ollama embeddings via LiteLLM."""
 
+import os
 from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Embedder, HealthStatus
