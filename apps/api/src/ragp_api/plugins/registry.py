@@ -61,6 +61,11 @@ def list_plugins() -> list[dict[str, Any]]:
 
 def bootstrap() -> None:
     """Import all built-in plugins so they self-register."""
+    # BGE reranker requires sentence-transformers (optional dep).
+    # Only register it if the package is available — avoids showing a
+    # broken plugin in the UI and prevents runtime errors.
+    import importlib.util  # noqa: PLC0415
+
     from ragp_api.plugins.chunkers import markdown, recursive  # noqa: F401
     from ragp_api.plugins.embedders import (  # noqa: F401
         cohere_embedder,
@@ -69,10 +74,6 @@ def bootstrap() -> None:
     )
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401
     from ragp_api.plugins.rerankers import cohere  # noqa: F401
-    # BGE reranker requires sentence-transformers (optional dep).
-    # Only register it if the package is available — avoids showing a
-    # broken plugin in the UI and prevents runtime errors.
-    import importlib.util  # noqa: PLC0415
     if importlib.util.find_spec("sentence_transformers") is not None:
         from ragp_api.plugins.rerankers import bge  # noqa: F401
     from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401
