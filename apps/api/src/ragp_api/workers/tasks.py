@@ -404,6 +404,7 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
     logger.info("chunk_document: start doc=%s len=%d", document_id, len(text))
 
     async with async_session() as db:
+        doc: Document | None = None
         try:
             # Resolve document
             doc_result = await db.execute(select(Document).where(Document.id == document_id))
@@ -470,11 +471,12 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
 
         except Exception:
             logger.exception("chunk_document: failed doc=%s", document_id)
-            try:
-                doc.status = "failed"
-                await db.commit()
-            except Exception:
-                pass
+            if doc is not None:
+                try:
+                    doc.status = "failed"
+                    await db.commit()
+                except Exception:
+                    pass
 
 
 async def aggregate_usage_daily(ctx: dict[str, Any]) -> None:
