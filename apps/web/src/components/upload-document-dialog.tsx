@@ -2,15 +2,11 @@
 
 import { useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Form from "@rjsf/core";
-import validator from "@rjsf/validator-ajv8";
-import type { RJSFSchema } from "@rjsf/utils";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -54,15 +50,12 @@ export function UploadDocumentDialog({
   const [datasetName, setDatasetName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [chunkerName, setChunkerName] = useState("recursive-character");
-  const [chunkerParams, setChunkerParams] = useState<Record<string, unknown>>({});
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [statusText, setStatusText] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const { data: plugins } = trpc.plugins.list.useQuery();
-  const chunkers = plugins?.filter((p) => p.kind === "chunker") ?? [];
-  const selectedChunker = chunkers.find((c) => c.name === chunkerName);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   const createDatasetMutation = trpc.datasets.create.useMutation();
 
@@ -72,8 +65,12 @@ export function UploadDocumentDialog({
       if (!nextOpen) {
         setDatasetName("");
         setFile(null);
-        setChunkerName("recursive-character");
-        setChunkerParams({});
+        setUploadProgress(0);
+        setStatusText("");
+        if (xhrRef.current) {
+          xhrRef.current.abort();
+          xhrRef.current = null;
+        }
       }
       onOpenChange(nextOpen);
     },
@@ -123,6 +120,9 @@ export function UploadDocumentDialog({
     }
 
     setIsUploading(true);
+    setUploadProgress(0);
+    setStatusText("Uploading to S3...");
+
     try {
       // Resolve target dataset id
       let targetDatasetId = initialDatasetId;
@@ -132,40 +132,60 @@ export function UploadDocumentDialog({
         void utils.datasets.list.invalidate();
       }
 
-      // Build multipart form
+      // Upload via XMLHttpRequest for progress tracking
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("chunker_name", chunkerName);
-      if (Object.keys(chunkerParams).length > 0) {
-        formData.append("chunker_params", JSON.stringify(chunkerParams));
-      }
 
-      const res = await fetch(
-        `/api/datasets/${targetDatasetId}/documents`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText);
-        throw new Error(`Upload failed (${res.status}): ${text}`);
-      }
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
 
-      toast({ title: "Document uploaded successfully" });
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            let msg = `Upload failed (${xhr.status})`;
+            try {
+              const body = JSON.parse(xhr.responseText);
+              msg = body.detail || msg;
+            } catch {}
+            reject(new Error(msg));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.open("POST", `/api/datasets/${targetDatasetId}/documents`);
+        xhr.send(formData);
+      });
+
+      setUploadProgress(100);
+      setStatusText("Uploaded! Chunking in background...");
+
+      toast({ title: "Document uploaded", description: "Chunking & embedding will complete in a few seconds." });
       void utils.datasets.byId.invalidate({ id: targetDatasetId });
       void utils.datasets.documents.list.invalidate({ datasetId: targetDatasetId });
-      handleOpenChange(false);
-      router.refresh();
-      router.push(`/datasets/${targetDatasetId}`);
+
+      // Close dialog after short delay so user sees 100%
+      setTimeout(() => {
+        handleOpenChange(false);
+        router.refresh();
+        router.push(`/datasets/${targetDatasetId}`);
+      }, 800);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       toast({ title: "Upload error", description: message, variant: "destructive" });
-    } finally {
+      setStatusText("Error");
       setIsUploading(false);
     }
   };
+
+  const progressPercent = isUploading ? Math.min(uploadProgress, 100) : 0;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -220,53 +240,21 @@ export function UploadDocumentDialog({
             />
           </div>
 
-          {/* Chunker selector */}
-          <div>
-            <Label htmlFor="chunker-select-upload">Chunker</Label>
-            <Select
-              value={chunkerName}
-              onValueChange={(v) => {
-                setChunkerName(v);
-                setChunkerParams({});
-              }}
-            >
-              <SelectTrigger id="chunker-select-upload">
-                <SelectValue placeholder="Select chunker" />
-              </SelectTrigger>
-              <SelectContent>
-                {chunkers.length === 0 ? (
-                  <SelectItem value="recursive-character">recursive-character</SelectItem>
-                ) : (
-                  chunkers.map((c) => (
-                    <SelectItem key={c.name} value={c.name}>
-                      {c.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Chunker params via RJSF */}
-          {selectedChunker &&
-            Object.keys(selectedChunker.params_schema).length > 0 && (
-              <div>
-                <Label>Chunker parameters</Label>
-                <Form
-                  schema={selectedChunker.params_schema as RJSFSchema}
-                  validator={validator}
-                  formData={chunkerParams}
-                  onChange={({ formData }) =>
-                    setChunkerParams((formData as Record<string, unknown>) ?? {})
-                  }
-                  // suppress default submit button
-                  uiSchema={{ "ui:submitButtonOptions": { norender: true } }}
-                >
-                  {/* no children = no submit button */}
-                  <span />
-                </Form>
+          {/* Progress bar — visible only during upload */}
+          {isUploading && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{statusText}</span>
+                <span>{progressPercent}%</span>
               </div>
-            )}
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-primary h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           <Button
             onClick={() => void handleSubmit()}

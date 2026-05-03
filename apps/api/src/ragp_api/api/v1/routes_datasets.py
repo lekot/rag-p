@@ -528,18 +528,9 @@ async def get_document(
 # ---------------------------------------------------------------------------
 
 
-class ChunkPreview(BaseModel):
-    index: int
-    text: str
-    len: int
-    metadata: dict[str, Any]
-
-
 class UploadDocumentResponse(BaseModel):
     document_id: str
-    chunk_count: int
-    embedded: bool
-    chunks_preview: list[ChunkPreview]
+    status: str
 
 
 @router.post("/{dataset_id}/documents", status_code=201, response_model=UploadDocumentResponse)
@@ -547,8 +538,6 @@ async def upload_document(
     dataset_id: str,
     request: Request,
     file: UploadFile,
-    chunker_name: str = Form(default="recursive-character"),
-    chunker_params: str = Form(default="{}"),
     db: AsyncSession = Depends(get_db),
     organization_id: str = Depends(get_current_organization_id),
     _scope: None = Depends(require_scope("write")),
@@ -607,30 +596,6 @@ async def upload_document(
 
     text = parse_to_text(filename, content_type, raw)
 
-    # Parse chunker params
-    try:
-        params_override: dict[str, Any] = json.loads(chunker_params)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid chunker_params JSON: {exc}") from exc
-
-    # Resolve chunker plugin
-    chunker_cls = get_plugin("chunker", chunker_name)
-    if chunker_cls is None:
-        raise HTTPException(status_code=422, detail=f"Unknown chunker: {chunker_name}")
-
-    # Validate params against schema
-    schema = chunker_cls.params_schema
-    default_params: dict[str, Any] = schema.get("default", {})
-    merged_params = {**default_params, **params_override}
-    try:
-        jsonschema.validate(instance=merged_params, schema=schema)
-    except jsonschema.ValidationError as exc:
-        raise HTTPException(
-            status_code=422, detail=f"Invalid chunker params: {exc.message}"
-        ) from exc
-
-    chunker = cast(Chunker, chunker_cls(merged_params))
-
     # Create document record
     now = datetime.now(tz=UTC)
     document_id = str(uuid.uuid4())
@@ -665,84 +630,9 @@ async def upload_document(
         storage_backend=storage_ref.backend,
         object_key=storage_ref.key,
         parsed_at=now,
-        status="parsed",
+        status="pending",
     )
     db.add(doc)
-    await db.flush()
-
-    # Chunk the text
-    raw_chunks = await chunker.chunk(text)
-
-    # Build Chunk objects (embedding NULL for now)
-    chunk_objs = []
-    for i, rc in enumerate(raw_chunks):
-        meta: dict[str, Any] = {"chunk_index": i}
-        if isinstance(rc.get("metadata"), dict):
-            meta.update(rc["metadata"])
-        chunk_objs.append(
-            Chunk(
-                id=str(uuid.uuid4()),
-                document_id=doc.id,
-                organization_id=organization_id,
-                text=rc["text"],
-                embedding=None,
-                metadata_json=meta,
-            )
-        )
-    db.add_all(chunk_objs)
-
-    # Pick an embedder by what credentials/services are reachable.
-    # Order: local Ollama → Cohere → OpenAI/litellm. All produce 1024-dim by default.
-    embedded = False
-    ollama_host = os.environ.get("OLLAMA_HOST", "")
-    cohere_key = os.environ.get("COHERE_API_KEY", "")
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    embedder: Embedder | None = None
-    if ollama_host:
-        embedder_cls = get_plugin("embedder", "ollama-embedder")
-        if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
-    elif cohere_key:
-        embedder_cls = get_plugin("embedder", "cohere-embedder")
-        if embedder_cls is not None:
-            embedder = cast(
-                Embedder,
-                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"}),
-            )
-    elif openai_key:
-        embedder_cls = get_plugin("embedder", "litellm-embedder")
-        if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
-    if embedder is not None:
-        try:
-            texts = [c.text for c in chunk_objs]
-            vectors = await embedder.embed(texts)
-            for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
-                actual_dim = len(vec)
-                if actual_dim != settings.vector_dim:
-                    raise ValueError(
-                        f"Embedder returned {actual_dim}-dim vector, "
-                        f"but the database expects {settings.vector_dim} dimensions "
-                        f"(RAGP_VECTOR_DIM={settings.vector_dim}). "
-                        "Change RAGP_VECTOR_DIM and run a DB migration, "
-                        "or use an embedder that produces the matching dimension."
-                    )
-                chunk_obj.embedding = vec
-            embedded = True
-        except Exception as exc:
-            logger.warning("Embedding failed during upload: %s", exc)
-            # embedding is optional — proceed without it
-
-    # Build preview (first 5 chunks)
-    preview = [
-        ChunkPreview(
-            index=c.metadata_json.get("chunk_index", i) if c.metadata_json else i,
-            text=c.text[:200],
-            len=len(c.text),
-            metadata=c.metadata_json or {},
-        )
-        for i, c in enumerate(chunk_objs[:5])
-    ]
 
     await log_audit_event(
         db,
@@ -756,11 +646,20 @@ async def upload_document(
     )
     await db.commit()
 
+    # Queue async chunking job
+    try:
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        pool = await create_pool(RedisSettings(host=settings.redis_host, port=settings.redis_port))
+        await pool.enqueue_job("chunk_document", document_id=document_id, text=text)
+        await pool.aclose()
+    except Exception as exc:
+        logger.warning("Failed to queue chunking job for doc %s: %s", document_id, exc)
+
     return UploadDocumentResponse(
         document_id=doc.id,
-        chunk_count=len(chunk_objs),
-        embedded=embedded,
-        chunks_preview=preview,
+        status="pending",
     )
 
 

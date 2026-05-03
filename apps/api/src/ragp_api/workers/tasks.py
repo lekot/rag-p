@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -383,6 +384,98 @@ async def run_experiment_task(
         await run_experiment_inline(experiment, db)
 
     logger.info("Experiment task completed for experiment_id=%s", experiment_id)
+
+
+async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> None:
+    """ARQ task: chunk and embed a document in the background.
+
+    Uses the default recursive-character chunker, then embeds via the
+    first available embedder (Ollama → Cohere → OpenAI).
+    Updates document status to "indexed" on success or "failed" on error.
+    """
+    from typing import cast
+
+    from sqlalchemy import select
+
+    from ragp_api.db.models import Chunk, Document
+    from ragp_api.plugins.base import Chunker, Embedder
+    from ragp_api.plugins.registry import get_plugin
+    from ragp_api.settings import settings
+
+    logger.info("chunk_document: start doc=%s len=%d", document_id, len(text))
+
+    async with async_session() as db:
+        try:
+            # Resolve document
+            doc_result = await db.execute(select(Document).where(Document.id == document_id))
+            doc = doc_result.scalar_one_or_none()
+            if doc is None:
+                logger.error("chunk_document: document %s not found", document_id)
+                return
+
+            # Chunk
+            chunker_cls = get_plugin("chunker", "recursive-character")
+            if chunker_cls is None:
+                raise RuntimeError("Default chunker recursive-character not registered")
+            chunker = cast(Chunker, chunker_cls({}))
+            raw_chunks = await chunker.chunk(text)
+
+            # Build Chunk objects
+            chunk_objs = []
+            for i, rc in enumerate(raw_chunks):
+                meta: dict[str, Any] = {"chunk_index": i}
+                if isinstance(rc.get("metadata"), dict):
+                    meta.update(rc["metadata"])
+                chunk_objs.append(
+                    Chunk(
+                        id=str(uuid.uuid4()),
+                        document_id=doc.id,
+                        organization_id=doc.organization_id,
+                        text=rc["text"],
+                        embedding=None,
+                        metadata_json=meta,
+                    )
+                )
+            db.add_all(chunk_objs)
+            await db.flush()
+
+            # Embed
+            ollama_host = os.environ.get("OLLAMA_HOST", "")
+            cohere_key = os.environ.get("COHERE_API_KEY", "")
+            openai_key = os.environ.get("OPENAI_API_KEY", "")
+            embedder: Embedder | None = None
+            if ollama_host:
+                cls = get_plugin("embedder", "ollama-embedder")
+                if cls is not None:
+                    embedder = cast(Embedder, cls({"model": "bge-m3"}))
+            elif cohere_key:
+                cls = get_plugin("embedder", "cohere-embedder")
+                if cls is not None:
+                    embedder = cast(
+                        Embedder, cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
+                    )
+            elif openai_key:
+                cls = get_plugin("embedder", "litellm-embedder")
+                if cls is not None:
+                    embedder = cast(Embedder, cls({"model": "openai/text-embedding-3-small"}))
+
+            if embedder is not None:
+                texts = [c.text for c in chunk_objs]
+                vectors = await embedder.embed(texts)
+                for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
+                    chunk_obj.embedding = vec
+
+            doc.status = "indexed"
+            await db.commit()
+            logger.info("chunk_document: done doc=%s chunks=%d", document_id, len(chunk_objs))
+
+        except Exception as exc:
+            logger.exception("chunk_document: failed doc=%s", document_id)
+            try:
+                doc.status = "failed"
+                await db.commit()
+            except Exception:
+                pass
 
 
 async def aggregate_usage_daily(ctx: dict[str, Any]) -> None:

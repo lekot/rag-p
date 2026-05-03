@@ -32,6 +32,7 @@ from prometheus_client import Counter, Histogram, start_http_server
 from ragp_api.settings import settings
 from ragp_api.workers.tasks import (
     aggregate_usage_daily,
+    chunk_document,
     expire_subscriptions_task,
     mark_experiment_failed_on_crash,
     mark_stale_experiments_failed,
@@ -162,12 +163,11 @@ class WorkerLiveSettings:
 class WorkerIngestSettings:
     """ARQ worker for the ``rag.ingest`` queue.
 
-    No ingest task functions exist in the codebase yet.  The functions list
-    will be populated once ``run_dataset_ingest_task`` is implemented.
+    Handles async document chunking + embedding after file upload.
     """
 
     queue_name = "rag.ingest"
-    functions: list[Any] = []
+    functions: list[Any] = [chunk_document]
     redis_settings = _redis_settings()
     max_jobs = 2
     job_timeout = 1800  # 30 minutes — large file uploads can be slow

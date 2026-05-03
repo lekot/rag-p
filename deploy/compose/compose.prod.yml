@@ -113,11 +113,23 @@ services:
     networks:
       - internal
 
-  # worker-ingest is intentionally not started — there are no async ingest
-  # tasks registered yet (run_dataset_ingest_task does not exist).  ARQ
-  # refuses to start a worker with an empty functions list:
-  #     RuntimeError: at least one function or cron_job must be registered
-  # Re-enable this service once an ingest task function lands.
+  worker-ingest:
+    image: ${RAGP_API_IMAGE:-ghcr.io/lekot/rag-p-api:staging-latest}
+    restart: unless-stopped
+    command: ["arq", "ragp_api.workers.main.WorkerIngestSettings"]
+    env_file:
+      - ./.env
+    environment:
+      RAGP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "9090"
+    networks:
+      - internal
 
   worker-maintenance:
     image: ${RAGP_API_IMAGE:-ghcr.io/lekot/rag-p-api:staging-latest}
