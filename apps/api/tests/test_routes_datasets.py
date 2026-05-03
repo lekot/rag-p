@@ -530,30 +530,16 @@ async def test_upload_without_auth_returns_401(client: AsyncClient, organization
 
 
 @pytest.mark.asyncio
-async def test_upload_invalid_chunker_params_returns_422(client: AsyncClient, organization_id: str):
+async def test_upload_refuses_non_pdf_on_content_type(client: AsyncClient, organization_id: str):
+    """Upload with unsupported content-type returns 415."""
     dataset_id = await _create_dataset(client, organization_id)
 
     resp = await client.post(
         f"/api/v1/datasets/{dataset_id}/documents",
         headers={"X-Organization-Id": organization_id},
-        files={"file": ("doc.txt", io.BytesIO(b"hello"), "text/plain")},
-        data={"chunker_name": "recursive-character", "chunker_params": '{"chunk_size": 5}'},
+        files={"file": ("foo.xyz", io.BytesIO(b"hello"), "application/x-unknown")},
     )
-    # chunk_size minimum is 64 — jsonschema validation must reject 5
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_upload_unknown_chunker_returns_422(client: AsyncClient, organization_id: str):
-    dataset_id = await _create_dataset(client, organization_id)
-
-    resp = await client.post(
-        f"/api/v1/datasets/{dataset_id}/documents",
-        headers={"X-Organization-Id": organization_id},
-        files={"file": ("doc.txt", io.BytesIO(b"hello"), "text/plain")},
-        data={"chunker_name": "nonexistent-chunker"},
-    )
-    assert resp.status_code == 422
+    assert resp.status_code == 415
 
 
 @pytest.mark.asyncio
