@@ -400,7 +400,6 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
     from ragp_api.db.models import Chunk, Document
     from ragp_api.plugins.base import Chunker, Embedder
     from ragp_api.plugins.registry import get_plugin
-    from ragp_api.settings import settings
 
     logger.info("chunk_document: start doc=%s len=%d", document_id, len(text))
 
