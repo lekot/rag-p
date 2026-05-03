@@ -33,11 +33,14 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0.0",
     "prometheus-client>=0.20.0",
     "yookassa>=3.5.0",
-    "sentence-transformers>=2.7.0",
     "aiosmtplib>=3.0.0",
 ]
 
 [project.optional-dependencies]
+reranker-bge = [
+    "sentence-transformers>=2.7.0",
+]
+
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
