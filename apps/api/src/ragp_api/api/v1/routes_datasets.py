@@ -644,16 +644,19 @@ async def upload_document(
     )
     await db.commit()
 
-    # Queue async chunking job
+    # Queue async chunking job on the rag.ingest queue.
     try:
         from arq import create_pool
         from arq.connections import RedisSettings
 
-        pool = await create_pool(RedisSettings(host=settings.redis_host, port=settings.redis_port))
+        pool = await create_pool(
+            RedisSettings(host=settings.redis_host, port=settings.redis_port),
+            default_queue_name="rag.ingest",
+        )
         await pool.enqueue_job("chunk_document", document_id=document_id, text=text)
         await pool.aclose()
-    except Exception as exc:
-        logger.warning("Failed to queue chunking job for doc %s: %s", document_id, exc)
+    except Exception:
+        logger.exception("Failed to queue chunking job for doc %s", document_id)
 
     return UploadDocumentResponse(
         document_id=doc.id,
