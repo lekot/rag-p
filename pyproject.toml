@@ -1,9 +1,6 @@
 [tool.uv.workspace]
 members = ["apps/api"]
 
-[tool.uv]
-required-version = "3.12"
-
 [tool.ruff]
 target-version = "py312"
 line-length = 100
