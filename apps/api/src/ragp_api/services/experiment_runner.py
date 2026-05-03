@@ -3,6 +3,7 @@
 import itertools
 import logging
 import math
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,6 +31,84 @@ def _metric_error(code: str, message: str) -> dict[str, Any]:
         "error": message,
         "composite_score": 0.0,
     }
+
+
+async def _rechunk_documents_for_slot(
+    db: AsyncSession,
+    dataset_id: str,
+    organization_id: str,
+    plugin_name: str,
+    params: dict[str, Any],
+) -> None:
+    """Re-chunk documents in a dataset if they were chunked with a different chunker.
+
+    Compares ``plugin_name`` against each document's stored ``chunker_name``.
+    Documents chunked with a different chunker (or not chunked at all) get their
+    existing chunks deleted and re-chunked with the new chunker.
+    """
+    from typing import cast
+
+    from ragp_api.plugins.base import Chunker
+    from ragp_api.plugins.registry import get_plugin
+
+    # Find docs that need re-chunking
+    doc_result = await db.execute(
+        select(Document).where(
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+            (Document.chunker_name != plugin_name) | (Document.chunker_name.is_(None)),
+        )
+    )
+    docs_to_rechunk = list(doc_result.scalars().all())
+    if not docs_to_rechunk:
+        return
+
+    chunker_cls = get_plugin("chunker", plugin_name)
+    if chunker_cls is None:
+        raise ValueError(f"Chunker plugin not found: {plugin_name}")
+    chunker = cast(Chunker, chunker_cls(params))
+
+    for doc in docs_to_rechunk:
+        # Reconstruct text from existing chunks (order by chunk_index)
+        existing = (await db.execute(
+            select(Chunk).where(Chunk.document_id == doc.id)
+        )).scalars().all()
+        if not existing:
+            logger.warning("No existing chunks for doc %s, skipping re-chunk", doc.id)
+            continue
+
+        text = "\n\n".join(c.text for c in existing)
+
+        # Delete existing chunks
+        await db.execute(
+            Chunk.__table__.delete().where(Chunk.document_id == doc.id)  # type: ignore[attr-defined]
+        )
+
+        # Chunk
+        raw_chunks = await chunker.chunk(text)
+        chunk_objs = []
+        for i, rc in enumerate(raw_chunks):
+            meta: dict[str, Any] = {"chunk_index": i}
+            if isinstance(rc.get("metadata"), dict):
+                meta.update(rc["metadata"])
+            chunk_objs.append(
+                Chunk(
+                    id=str(uuid.uuid4()),
+                    document_id=doc.id,
+                    organization_id=organization_id,
+                    text=rc["text"],
+                    embedding=None,
+                    metadata_json=meta,
+                )
+            )
+
+        if chunk_objs:
+            db.add_all(chunk_objs)
+
+        doc.chunker_name = plugin_name
+        doc.status = "indexed"
+
+    await db.commit()
 
 
 def build_combinations(plugin_grid: dict[str, list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
@@ -347,6 +426,21 @@ async def run_experiment_inline(
         combinations = build_combinations(experiment.plugin_grid_json)
         dataset_id: str = experiment.dataset_id
         organization_id: str = experiment.organization_id
+
+        # Re-chunk documents if the pipeline uses a different chunker than
+        # the one that was used at upload time.  Uses the first pipeline
+        # combo's chunker as the reference (all combos share the same slot).
+        if combinations and "chunkers" in experiment.plugin_grid_json:
+            first_chunker = experiment.plugin_grid_json["chunkers"][0]
+            await _rechunk_documents_for_slot(
+                db,
+                dataset_id=dataset_id,
+                organization_id=organization_id,
+                plugin_name=first_chunker["plugin_name"],
+                params=first_chunker.get("params", {}),
+            )
+            _touch()
+            await db.commit()
 
         # Check whether golden Q&A exists for this dataset
         golden_items = await _load_golden_items(db, dataset_id)

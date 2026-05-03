@@ -466,6 +466,7 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
                     chunk_obj.embedding = vec
 
             doc.status = "indexed"
+            doc.chunker_name = "recursive-character"
             await db.commit()
             logger.info("chunk_document: done doc=%s chunks=%d", document_id, len(chunk_objs))
 
