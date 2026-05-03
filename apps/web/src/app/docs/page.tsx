@@ -439,23 +439,14 @@ export default function DocsPage() {
                 <strong>Get Dataset</strong> в любом workflow. Без кода.
               </p>
               <p className="text-muted-foreground">
-                Полная документация и changelog —{" "}
-                <a
-                  href="https://github.com/Lekot/rag-p/tree/main/integrations/n8n"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline text-foreground hover:text-primary"
-                >
-                  README в репозитории
-                </a>{" "}
-                и{" "}
+                README, changelog и полная документация —{" "}
                 <a
                   href="https://www.npmjs.com/package/n8n-nodes-rag-p"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline text-foreground hover:text-primary"
                 >
-                  npm
+                  на странице пакета npm
                 </a>
                 .
               </p>
