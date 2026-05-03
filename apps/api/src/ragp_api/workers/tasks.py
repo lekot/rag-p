@@ -458,7 +458,11 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             candidates: list[tuple[str, str, dict[str, Any]]] = []
             if openai_key:
                 candidates.append(
-                    ("litellm-embedder", "openai/text-embedding-3-small", {"model": "openai/text-embedding-3-small"})
+                    (
+                        "litellm-embedder",
+                        "openai/text-embedding-3-small",
+                        {"model": "openai/text-embedding-3-small"},
+                    )
                 )
             if cohere_key:
                 candidates.append(
@@ -474,7 +478,10 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             for plugin_name, label, params in candidates:
                 cls = get_plugin("embedder", plugin_name)
                 if cls is None:
-                    logger.warning("chunk_document: embedder %s not registered, skipping", plugin_name)
+                    logger.warning(
+                        "chunk_document: embedder %s not registered, skipping",
+                        plugin_name,
+                    )
                     continue
                 try:
                     embedder = cast(Embedder, cls(params))
