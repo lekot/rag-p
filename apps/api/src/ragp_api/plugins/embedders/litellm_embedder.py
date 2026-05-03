@@ -47,7 +47,20 @@ class LiteLLMEmbedder(Embedder):
             os.environ["HTTPS_PROXY"] = settings.cohere_http_proxy
             os.environ["HTTP_PROXY"] = settings.cohere_http_proxy
         try:
-            response = await litellm.aembedding(model=model, input=texts)
+            # OpenAI limits: ~2048 texts per request, ~300K tokens.
+            # Batch in groups to stay under the limit.
+            MAX_TEXTS_PER_BATCH = 100
+            all_embeddings: list[list[float]] = []
+            for i in range(0, len(texts), MAX_TEXTS_PER_BATCH):
+                batch = texts[i : i + MAX_TEXTS_PER_BATCH]
+                response = await litellm.aembedding(model=model, input=batch)
+                batch_embeddings: list[list[float]] = [
+                    cast(list[float], item["embedding"]) for item in response.data
+                ]
+                all_embeddings.extend(batch_embeddings)
+            if self._dim_cache is None and all_embeddings:
+                self._dim_cache = len(all_embeddings[0])
+            return all_embeddings
         finally:
             if old_https_proxy is not None:
                 os.environ["HTTPS_PROXY"] = old_https_proxy
@@ -57,15 +70,6 @@ class LiteLLMEmbedder(Embedder):
                 os.environ["HTTP_PROXY"] = old_http_proxy
             else:
                 os.environ.pop("HTTP_PROXY", None)
-        # response.data is untyped in litellm; each item has an "embedding" list[float]
-        embeddings: list[list[float]] = [
-            cast(list[float], item["embedding"]) for item in response.data
-        ]
-
-        if self._dim_cache is None and embeddings:
-            self._dim_cache = len(embeddings[0])
-
-        return embeddings
 
     @property
     def dim(self) -> int:
