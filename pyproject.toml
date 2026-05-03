@@ -74,3 +74,8 @@ ignore_missing_imports = true
 module = ["fakeredis", "fakeredis.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# sentence-transformers is optional (extra reranker-bge); no py.typed marker
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+

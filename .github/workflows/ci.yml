@@ -52,7 +52,7 @@ jobs:
         # Exclude heavy optional groups (reranker-bge pulls PyTorch +
         # 600+ MB of nvidia-cuda libs). CI has no GPU — skip.
         # For BGE tests locally: uv sync --all-packages --dev --extra reranker-bge
-        run: uv sync --all-packages --dev
+        run: uv sync --all-packages --extra dev
 
       - name: ruff format
         run: uvx ruff@0.6.9 format apps/api
