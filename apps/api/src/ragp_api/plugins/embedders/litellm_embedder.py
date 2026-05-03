@@ -53,7 +53,9 @@ class LiteLLMEmbedder(Embedder):
             all_embeddings: list[list[float]] = []
             for i in range(0, len(texts), MAX_TEXTS_PER_BATCH):
                 batch = texts[i : i + MAX_TEXTS_PER_BATCH]
-                response = await litellm.aembedding(model=model, input=batch)
+                response = await litellm.aembedding(
+                    model=model, input=batch, dimensions=1024
+                )
                 batch_embeddings: list[list[float]] = [
                     cast(list[float], item["embedding"]) for item in response.data
                 ]
@@ -78,7 +80,7 @@ class LiteLLMEmbedder(Embedder):
         if self._dim_cache is not None:
             return self._dim_cache
         # TODO: query model metadata to determine dimension
-        return 1536  # sensible default for text-embedding-3-small
+        return 1024  # text-embedding-3-small with dimensions=1024
 
     async def cost_estimate(self, sample_input: Any) -> CostEstimate:
         texts: list[str] = sample_input if isinstance(sample_input, list) else [str(sample_input)]
