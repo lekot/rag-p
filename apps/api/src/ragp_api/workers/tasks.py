@@ -443,33 +443,56 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             db.add_all(chunk_objs)
             await db.flush()
 
-            # Embed
+            # Embed — try embedders in priority order with fallback.
+            #   OpenAI ($0.02/M) > Cohere ($0.10/M) > Ollama (free, slow)
+            # Each embedder is attempted; if it fails (403, timeout, etc.)
+            # the next one is tried.  Ollama is the ultimate fallback.
             ollama_host = os.environ.get("OLLAMA_HOST", "")
             cohere_key = os.environ.get("COHERE_API_KEY", "")
             openai_key = os.environ.get("OPENAI_API_KEY", "")
-            embedder: Embedder | None = None
-            # Prefer fast API embedders (OpenAI → Cohere) over local Ollama.
-            # Ollama is only used as a last resort (CPU, very slow).
-            if openai_key:
-                cls = get_plugin("embedder", "litellm-embedder")
-                if cls is not None:
-                    embedder = cast(Embedder, cls({"model": "openai/text-embedding-3-small"}))
-            elif cohere_key:
-                cls = get_plugin("embedder", "cohere-embedder")
-                if cls is not None:
-                    embedder = cast(
-                        Embedder, cls({"model": "embed-multilingual-v3.0", "input_type": "search_document"})
-                    )
-            elif ollama_host:
-                cls = get_plugin("embedder", "ollama-embedder")
-                if cls is not None:
-                    embedder = cast(Embedder, cls({"model": "bge-m3"}))
 
-            if embedder is not None:
-                texts = [c.text for c in chunk_objs]
-                vectors = await embedder.embed(texts)
+            embedder: Embedder | None = None
+            texts = [c.text for c in chunk_objs]
+            vectors: list[list[float]] | None = None
+
+            candidates: list[tuple[str, str, dict[str, Any]]] = []
+            if openai_key:
+                candidates.append(
+                    ("litellm-embedder", "openai/text-embedding-3-small", {"model": "openai/text-embedding-3-small"})
+                )
+            if cohere_key:
+                candidates.append(
+                    (
+                        "cohere-embedder",
+                        "embed-multilingual-v3.0",
+                        {"model": "embed-multilingual-v3.0", "input_type": "search_document"},
+                    )
+                )
+            if ollama_host:
+                candidates.append(("ollama-embedder", "bge-m3", {"model": "bge-m3"}))
+
+            for plugin_name, label, params in candidates:
+                cls = get_plugin("embedder", plugin_name)
+                if cls is None:
+                    logger.warning("chunk_document: embedder %s not registered, skipping", plugin_name)
+                    continue
+                try:
+                    embedder = cast(Embedder, cls(params))
+                    vectors = await embedder.embed(texts)
+                    logger.info("chunk_document: embedded %d chunks via %s", len(texts), label)
+                    break  # success — stop trying further embedders
+                except Exception as exc:
+                    logger.warning(
+                        "chunk_document: embedder %s failed (%s), trying next", label, exc
+                    )
+                    vectors = None
+                    continue
+
+            if vectors is not None:
                 for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
                     chunk_obj.embedding = vec
+            else:
+                raise RuntimeError("All embedders failed — cannot index document")
 
             doc.status = "indexed"
             doc.chunker_name = "recursive-character"
