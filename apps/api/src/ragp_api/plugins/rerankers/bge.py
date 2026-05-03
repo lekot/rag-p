@@ -41,7 +41,7 @@ def _load_model(model_name: str, device: str) -> Any:
         return cached
 
     try:
-        from sentence_transformers import CrossEncoder
+        from sentence_transformers import CrossEncoder  # type: ignore[import]
     except ImportError as exc:  # pragma: no cover - import guard
         logger.error("sentence-transformers is not installed: %s", exc)
         raise RuntimeError(
@@ -151,7 +151,7 @@ class BGEReranker(Reranker):
 
     async def health_check(self) -> HealthStatus:
         try:
-            import sentence_transformers  # noqa: F401
+            import sentence_transformers  # type: ignore[import]  # noqa: F401
         except ImportError:
             return HealthStatus(ok=False, detail="sentence-transformers package not installed")
 
