@@ -121,6 +121,10 @@ services:
       - ./.env
     environment:
       RAGP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RAGP_REDIS_HOST: redis
+      RAGP_REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_HOST: http://ollama:11434
     depends_on:
       postgres:
         condition: service_healthy
