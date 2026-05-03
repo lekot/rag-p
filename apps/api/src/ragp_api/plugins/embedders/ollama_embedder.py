@@ -1,6 +1,5 @@
 """OllamaEmbedder — embeddings via local Ollama HTTP API."""
 
-import logging
 import os
 from typing import Any, ClassVar
 
@@ -54,48 +53,24 @@ class OllamaEmbedder(Embedder):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         host = self._host()
         model: str = self.params["model"]
-        # Use Ollama batch API (/api/embed) with groups of 50 texts.
-        # Sending all texts at once overwhelms Ollama (500 error).
-        # Falls back to per-text /api/embeddings for older Ollama versions.
-        batch_size = 50
-        all_vectors: list[list[float]] = [None] * len(texts)  # type: ignore[assignment]
+        # Ollama /api/embed (batch) crashes on this server with bge-m3.
+        # Use per-text /api/embeddings which is slow (~7s per chunk on CPU)
+        # but stable.
+        # TODO: batch via /api/embed once Ollama is upgraded or GPU is available.
+        out: list[list[float]] = []
         async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-            for batch_start in range(0, len(texts), batch_size):
-                batch = texts[batch_start : batch_start + batch_size]
-                try:
-                    resp = await client.post(
-                        f"{host}/api/embed",
-                        json={"model": model, "input": batch},
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    vectors = data.get("embeddings") or []
-                    if len(vectors) != len(batch):
-                        raise RuntimeError(
-                            f"ollama returned {len(vectors)} embeddings, expected {len(batch)}"
-                        )
-                    for i, v in enumerate(vectors):
-                        all_vectors[batch_start + i] = list(v)
-                except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code != 404:
-                        raise
-                    # Fallback: older Ollama without /api/embed
-                    logger = logging.getLogger(__name__)
-                    logger.warning(
-                        "Ollama /api/embed not available (404), falling back to /api/embeddings"
-                    )
-                    for i, t in enumerate(batch):
-                        resp = await client.post(
-                            f"{host}/api/embeddings",
-                            json={"model": model, "prompt": t},
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                        vec = data.get("embedding") or (data.get("embeddings") or [None])[0]
-                        if vec is None:
-                            raise RuntimeError(f"ollama returned no embedding for text len={len(t)}")
-                        all_vectors[batch_start + i] = list(vec)
-        return all_vectors  # type: ignore[return-value]
+            for t in texts:
+                resp = await client.post(
+                    f"{host}/api/embeddings",
+                    json={"model": model, "prompt": t},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                vec = data.get("embedding") or (data.get("embeddings") or [None])[0]
+                if vec is None:
+                    raise RuntimeError(f"ollama returned no embedding for text len={len(t)}")
+                out.append(list(vec))
+        return out
 
     @property
     def dim(self) -> int:

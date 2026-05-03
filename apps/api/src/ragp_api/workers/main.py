@@ -170,7 +170,7 @@ class WorkerIngestSettings:
     functions: list[Any] = [chunk_document]
     redis_settings = _redis_settings()
     max_jobs = 2
-    job_timeout = 7200  # 2 hours — Ollama batch embedding for large docs
+    job_timeout = 14400  # 4 hours — Ollama CPU embedding is ~7s per chunk
     on_startup = on_startup
     on_job_start = on_job_start
     on_job_end = on_job_complete
