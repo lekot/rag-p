@@ -151,25 +151,20 @@ async def test_dataset_routes_scope_to_session_org_not_client_supplied_org(
 
 
 @pytest.mark.asyncio
-async def test_upload_txt_creates_chunks(client: AsyncClient, organization_id: str):
+async def test_upload_txt_creates_document(client: AsyncClient, organization_id: str):
     dataset_id = await _create_dataset(client, organization_id)
-    sample = "Hello world. " * 200  # ~2600 chars — enough for multiple chunks
+    sample = "Hello world. " * 200
 
     resp = await client.post(
         f"/api/v1/datasets/{dataset_id}/documents",
         headers={"X-Organization-Id": organization_id},
         files={"file": ("doc.txt", io.BytesIO(sample.encode()), "text/plain")},
-        data={"chunker_name": "recursive-character", "chunker_params": "{}"},
     )
     assert resp.status_code == 201
     body = resp.json()
     assert body["document_id"]
-    assert body["chunk_count"] > 0
-    assert isinstance(body["chunks_preview"], list)
-    assert len(body["chunks_preview"]) <= 5
-    assert body["chunks_preview"][0]["len"] > 0
-    # No OPENAI_API_KEY in test env → embedded must be False
-    assert body["embedded"] is False
+    assert body["status"] == "pending"
+    # Chunking is async now — no chunk_count or chunks_preview in the response
 
 
 @pytest.mark.asyncio
@@ -462,7 +457,8 @@ async def test_upload_md_file(client: AsyncClient, organization_id: str):
         data={"chunker_name": "recursive-character"},
     )
     assert resp.status_code == 201
-    assert resp.json()["chunk_count"] > 0
+    assert resp.json()["document_id"]
+    assert resp.json()["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -474,10 +470,10 @@ async def test_upload_json_file(client: AsyncClient, organization_id: str):
         f"/api/v1/datasets/{dataset_id}/documents",
         headers={"X-Organization-Id": organization_id},
         files={"file": ("kb.json", io.BytesIO(content.encode()), "application/json")},
-        data={"chunker_name": "recursive-character"},
     )
     assert resp.status_code == 201
-    assert resp.json()["chunk_count"] > 0
+    assert resp.json()["document_id"]
+    assert resp.json()["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -583,7 +579,6 @@ async def test_get_document_returns_chunks(client: AsyncClient, organization_id:
     )
     assert upload_resp.status_code == 201
     doc_id = upload_resp.json()["document_id"]
-    expected_count = upload_resp.json()["chunk_count"]
 
     get_resp = await client.get(
         f"/api/v1/datasets/{dataset_id}/documents/{doc_id}",
@@ -592,14 +587,10 @@ async def test_get_document_returns_chunks(client: AsyncClient, organization_id:
     assert get_resp.status_code == 200
     body = get_resp.json()
     assert body["id"] == doc_id
-    assert body["status"] == "parsed"
-    assert body["chunk_count"] == expected_count
-    assert len(body["chunks"]) == expected_count
-    for chunk in body["chunks"]:
-        assert "text" in chunk
-        assert "len" in chunk
-        assert "has_embedding" in chunk
-        assert chunk["has_embedding"] is False  # no key in test env
+    # Chunking is async — document exists but has no chunks yet
+    assert body["status"] == "pending"
+    assert body["chunk_count"] == 0
+    assert body["chunks"] == []
 
 
 @pytest.mark.asyncio
@@ -654,8 +645,8 @@ async def test_list_documents_after_upload(client: AsyncClient, organization_id:
     docs = resp.json()
     assert len(docs) == 2
     for doc in docs:
-        assert doc["chunk_count"] > 0
-        assert doc["status"] == "parsed"
+        # Chunking is async — chunk_count is 0 initially
+        assert doc["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -1181,7 +1172,8 @@ async def test_upload_pdf_extracts_text(client: AsyncClient, organization_id: st
     )
     assert resp.status_code == 201
     body = resp.json()
-    assert body["chunk_count"] > 0
+    assert body["document_id"]
+    assert body["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -1199,11 +1191,11 @@ async def test_upload_docx_extracts_text(client: AsyncClient, organization_id: s
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
         },
-        data={"chunker_name": "recursive-character"},
     )
     assert resp.status_code == 201
     body = resp.json()
-    assert body["chunk_count"] > 0
+    assert body["document_id"]
+    assert body["status"] == "pending"
 
 
 @pytest.mark.asyncio
