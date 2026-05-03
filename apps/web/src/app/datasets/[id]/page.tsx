@@ -483,6 +483,13 @@ function DocumentRow({ datasetId, docId, sourceUri, parsedAt, chunkCount, status
     { datasetId, docId },
     { enabled: isOpen }
   );
+  const utils = trpc.useUtils();
+  const deleteMutation = trpc.datasets.deleteDocument.useMutation({
+    onSuccess: () => {
+      utils.datasets.byId.invalidate({ id: datasetId });
+      utils.datasets.documents.list.invalidate({ datasetId });
+    },
+  });
 
   const statusVariant = STATUS_VARIANT[status] ?? "secondary";
 
@@ -505,11 +512,24 @@ function DocumentRow({ datasetId, docId, sourceUri, parsedAt, chunkCount, status
         <TableCell className="text-xs text-primary">
           {isOpen ? "Collapse" : "Expand"}
         </TableCell>
+        <TableCell className="w-10">
+          <button
+            className="text-destructive hover:text-destructive/80"
+            title="Delete document"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!window.confirm("Удалить документ вместе с чанками?")) return;
+              deleteMutation.mutate({ datasetId, documentId: docId });
+            }}
+          >
+            ✕
+          </button>
+        </TableCell>
       </TableRow>
 
       {isOpen && (
         <TableRow>
-          <TableCell colSpan={5} className="bg-muted/20 px-4 py-3">
+          <TableCell colSpan={6} className="bg-muted/20 px-4 py-3">
             {isLoading && (
               <p className="text-xs text-muted-foreground">Loading chunks…</p>
             )}
@@ -636,6 +656,8 @@ export default function DatasetDetailPage() {
                   <TableHead>Parsed at</TableHead>
                   <TableHead>Chunks</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead></TableHead>
+                  <TableHead></TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>

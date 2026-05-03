@@ -277,6 +277,61 @@ async def delete_dataset(
     await db.commit()
 
 
+@router.delete("/{dataset_id}/documents/{document_id}", status_code=204)
+async def delete_document(
+    dataset_id: str,
+    document_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_current_organization_id),
+    _scope: None = Depends(require_scope("write")),
+) -> None:
+    """Delete a single document — removes S3 object, chunks, and DB record."""
+    result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    # Remove from S3
+    try:
+        await delete_raw_documents(
+            [ObjectStorageRef(backend=doc.storage_backend, key=doc.object_key)]
+        )
+    except ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "object_storage_delete_failed",
+                "message": "Не удалось удалить исходный документ из S3.",
+            },
+        ) from exc
+
+    # Clean up database
+    await db.execute(delete(Chunk).where(Chunk.document_id == document_id))
+    await db.delete(doc)
+
+    if doc.raw_size_bytes and doc.raw_size_bytes > 0:
+        await release_storage(db, organization_id, doc.raw_size_bytes)
+
+    await log_audit_event(
+        db,
+        org_id=organization_id,
+        user_id=None,
+        event_type="document.delete",
+        resource_type="document",
+        resource_id=document_id,
+        metadata={"source_uri": doc.source_uri, "size_bytes": doc.raw_size_bytes},
+        request=request,
+    )
+    await db.commit()
+
+
 @router.post("/{dataset_id}/generate", status_code=202)
 async def generate_dataset(
     dataset_id: str,
