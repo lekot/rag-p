@@ -632,6 +632,18 @@ export default function DocsPage() {
                         <code>{`{ id, name, documents_count, indexed_status }`}</code>
                       </td>
                     </tr>
+                    <tr className="border-t align-top">
+                      <td className="px-3 py-2 font-mono">
+                        Get Usage Quota
+                        <span className="ml-1 text-[10px] text-green-600 font-medium">NEW</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <em>нет параметров</em>
+                      </td>
+                      <td className="px-3 py-2">
+                        <code>{`{ remaining_queries, total_quota, plan_name, has_active_subscription }`}</code>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
