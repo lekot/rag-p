@@ -170,7 +170,7 @@ class WorkerIngestSettings:
     functions: list[Any] = [chunk_document]
     redis_settings = _redis_settings()
     max_jobs = 2
-    job_timeout = 1800  # 30 minutes — large file uploads can be slow
+    job_timeout = 7200  # 2 hours — Ollama batch embedding for large docs
     on_startup = on_startup
     on_job_start = on_job_start
     on_job_end = on_job_complete

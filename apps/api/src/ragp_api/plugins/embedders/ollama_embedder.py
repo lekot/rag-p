@@ -1,5 +1,6 @@
 """OllamaEmbedder — embeddings via local Ollama HTTP API."""
 
+import logging
 import os
 from typing import Any, ClassVar
 
@@ -53,23 +54,43 @@ class OllamaEmbedder(Embedder):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         host = self._host()
         model: str = self.params["model"]
-        out: list[list[float]] = []
-        # Ollama /api/embed accepts batch via "input" since 0.2.x. We send each
-        # text independently to stay compatible with older versions and to
-        # surface per-text errors.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-            for t in texts:
+        # Use Ollama batch API (/api/embed) for much faster throughput.
+        # Falls back to per-text /api/embeddings for older Ollama versions.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+            try:
                 resp = await client.post(
-                    f"{host}/api/embeddings",
-                    json={"model": model, "prompt": t},
+                    f"{host}/api/embed",
+                    json={"model": model, "input": texts},
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                vec = data.get("embedding") or (data.get("embeddings") or [None])[0]
-                if vec is None:
-                    raise RuntimeError(f"ollama returned no embedding for text len={len(t)}")
-                out.append(vec)
-        return out
+                vectors = data.get("embeddings") or []
+                if len(vectors) != len(texts):
+                    raise RuntimeError(
+                        f"ollama returned {len(vectors)} embeddings, expected {len(texts)}"
+                    )
+                return [list(v) for v in vectors]
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+                # Fallback: older Ollama without /api/embed
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Ollama /api/embed not available (404), falling back to /api/embeddings"
+                )
+                out: list[list[float]] = []
+                for t in texts:
+                    resp = await client.post(
+                        f"{host}/api/embeddings",
+                        json={"model": model, "prompt": t},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    vec = data.get("embedding") or (data.get("embeddings") or [None])[0]
+                    if vec is None:
+                        raise RuntimeError(f"ollama returned no embedding for text len={len(t)}")
+                    out.append(list(vec))
+                return out
 
     @property
     def dim(self) -> int:
