@@ -1,13 +1,11 @@
 import hashlib
-import json
 import logging
 import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import jsonschema
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +24,7 @@ from ragp_api.db.models import (
 )
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_organization, require_scope
-from ragp_api.plugins.base import Chunker, Embedder, Generator, Retriever
+from ragp_api.plugins.base import Embedder, Generator, Retriever
 from ragp_api.plugins.registry import get_plugin
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.file_parsers import parse_to_text
