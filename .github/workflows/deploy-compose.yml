@@ -117,6 +117,7 @@ jobs:
           RAGP_YOOKASSA_WEBHOOK_SECRET: ${{ secrets.RAGP_YOOKASSA_WEBHOOK_SECRET }}
           RAGP_YOOKASSA_INN: ${{ secrets.RAGP_YOOKASSA_INN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           RAGP_S3_ENDPOINT_URL: ${{ vars.RAGP_S3_ENDPOINT_URL || 'https://s3.ru-1.storage.selcloud.ru' }}
@@ -175,6 +176,7 @@ jobs:
           RAGP_YOOKASSA_TAXATION_SYSTEM=6
           RAGP_YOOKASSA_INN=${RAGP_YOOKASSA_INN}
           OPENAI_API_KEY=${OPENAI_API_KEY}
+          DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
           ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
           COHERE_API_KEY=${COHERE_API_KEY}
           RAGP_S3_ENDPOINT_URL=${RAGP_S3_ENDPOINT_URL}

@@ -125,7 +125,7 @@ services:
       RAGP_REDIS_PORT: 6379
       REDIS_URL: redis://redis:6379/0
       OLLAMA_HOST: http://ollama:11434
-      RAGP_COHERE_HTTP_PROXY: \${RAGP_COHERE_HTTP_PROXY:-http://cohere-egress:8888}
+      RAGP_COHERE_HTTP_PROXY: ${RAGP_COHERE_HTTP_PROXY:-http://cohere-egress:8888}
     depends_on:
       postgres:
         condition: service_healthy
