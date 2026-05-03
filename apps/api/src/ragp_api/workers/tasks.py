@@ -413,6 +413,10 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
                 logger.error("chunk_document: document %s not found", document_id)
                 return
 
+            # Mark as chunking so the UI can show progress
+            doc.status = "chunking"
+            await db.commit()
+
             # Chunk
             chunker_cls = get_plugin("chunker", "recursive-character")
             if chunker_cls is None:

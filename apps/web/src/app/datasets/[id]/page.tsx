@@ -547,7 +547,16 @@ export default function DatasetDetailPage() {
   );
 
   const { data: documents, isLoading: docsLoading } =
-    trpc.datasets.documents.list.useQuery({ datasetId: params.id });
+    trpc.datasets.documents.list.useQuery(
+      { datasetId: params.id },
+      {
+        // Poll every 3s while any document is still processing
+        refetchInterval: (query) => {
+          const docs = query.state.data ?? [];
+          return docs.some((d) => d.status === "pending" || d.status === "chunking") ? 3000 : false;
+        },
+      },
+    );
   const deleteMutation = trpc.datasets.delete.useMutation({
     onSuccess: () => {
       toast({ title: "Dataset deleted" });
