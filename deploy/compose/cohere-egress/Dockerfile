@@ -57,6 +57,7 @@ RUN apk add --no-cache \
       curl \
       iproute2 \
       iptables \
+      openresolv \
       tinyproxy \
  && update-ca-certificates
 

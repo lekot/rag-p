@@ -26,9 +26,15 @@ start_amneziawg() {
     fi
 
     log "starting AmneziaWG interface ${INTERFACE} from ${CONF}"
-    if ! awg-quick up "$CONF"; then
-        log "awg-quick up failed; continuing without VPN — cohere calls will reach the network unproxied"
-        return 0
+    # awg-quick may fail on resolvconf (DNS setup) which is non-fatal —
+    # the tunnel itself is already configured at that point.
+    if ! awg-quick up "$CONF" 2>&1; then
+        if ip link show "$INTERFACE" >/dev/null 2>&1; then
+            log "awg-quick exited non-zero but ${INTERFACE} is UP — continuing"
+        else
+            log "awg-quick up failed; continuing without VPN"
+            return 0
+        fi
     fi
 
     # Return-path routing for docker-bridge clients.
