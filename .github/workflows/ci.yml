@@ -49,7 +49,10 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-packages --all-extras
+        # Exclude heavy optional groups (reranker-bge pulls PyTorch +
+        # 600+ MB of nvidia-cuda libs). CI has no GPU — skip.
+        # For BGE tests locally: uv sync --all-packages --dev --extra reranker-bge
+        run: uv sync --all-packages --dev
 
       - name: ruff format
         run: uvx ruff@0.6.9 format apps/api
@@ -72,9 +75,8 @@ jobs:
 
       - name: Reclaim workspace disk
         # Self-hosted runner: \`actions/checkout\` only clears tracked paths.
-        # \`uv sync\` lays down a 5+ GB \`.venv\` (torch, scipy,
-        # sentence-transformers) and \`mypy --strict\` warms a 400 MB
-        # \`.mypy_cache\` which both linger between runs and fill the disk.
+        # \`mypy --strict\` warms a 400 MB \`.mypy_cache\` which lingers
+        # between runs and fills the disk (PyTorch skipped via --dev, no --extra reranker-bge).
         if: always()
         run: |
           rm -rf .venv apps/api/.venv apps/api/.mypy_cache .mypy_cache
