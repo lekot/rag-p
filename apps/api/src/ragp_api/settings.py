@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     # Password reset token TTL.
     password_reset_token_ttl_minutes: int = 60
 
+    # Embedding vector dimension. Must match the pgvector column size defined in
+    # db/models.py. Change this value AND run a DB migration if you need to
+    # support models with a different embedding dimension.
+    # Currently 1024 for bge-m3 (default in compose production).
+    vector_dim: int = 1024
+
     # Per-tenant queue fairness (sliding window rate limits).
     # Controls how many jobs one tenant may enqueue per rolling window.
     # ENV names follow the RAGP_ prefix convention.

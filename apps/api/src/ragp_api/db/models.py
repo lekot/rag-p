@@ -256,6 +256,10 @@ class Chunk(Base):
         String(36), ForeignKey("organizations.id"), nullable=False
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Vector dimension must match RAGP_VECTOR_DIM in settings.py.
+    # Currently 1024 for bge-m3 (default in compose production).
+    # Change requires a DB migration (ALTER COLUMN TYPE) AND updating
+    # settings.vector_dim to match.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

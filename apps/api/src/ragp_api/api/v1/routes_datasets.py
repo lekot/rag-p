@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
@@ -51,6 +52,8 @@ from ragp_api.services.subscription import (
 )
 from ragp_api.services.usage import record_usage_event
 from ragp_api.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -715,11 +718,20 @@ async def upload_document(
             texts = [c.text for c in chunk_objs]
             vectors = await embedder.embed(texts)
             for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
+                actual_dim = len(vec)
+                if actual_dim != settings.vector_dim:
+                    raise ValueError(
+                        f"Embedder returned {actual_dim}-dim vector, "
+                        f"but the database expects {settings.vector_dim} dimensions "
+                        f"(RAGP_VECTOR_DIM={settings.vector_dim}). "
+                        "Change RAGP_VECTOR_DIM and run a DB migration, "
+                        "or use an embedder that produces the matching dimension."
+                    )
                 chunk_obj.embedding = vec
             embedded = True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Embedding failed during upload: %s", exc)
             # embedding is optional — proceed without it
-            pass
 
     # Build preview (first 5 chunks)
     preview = [
