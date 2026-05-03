@@ -34,8 +34,14 @@ class LiteLLMEmbedder(Embedder):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         import litellm
 
+        from ragp_api.settings import settings
+
         model: str = self.params["model"]
-        response = await litellm.aembedding(model=model, input=texts)
+        kwargs: dict[str, Any] = {"model": model, "input": texts}
+        # Route through cohere-egress proxy if configured (bypasses geo-blocks)
+        if settings.cohere_http_proxy:
+            kwargs["proxy"] = settings.cohere_http_proxy
+        response = await litellm.aembedding(**kwargs)
         # response.data is untyped in litellm; each item has an "embedding" list[float]
         embeddings: list[list[float]] = [
             cast(list[float], item["embedding"]) for item in response.data
