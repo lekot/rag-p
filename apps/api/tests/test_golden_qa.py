@@ -285,6 +285,84 @@ async def test_golden_sample_size_capped_at_50(client: AsyncClient, organization
     assert resp.status_code == 201
 
 
+@pytest.mark.asyncio
+async def test_regenerate_golden_replaces_items(client: AsyncClient, organization_id: str):
+    """POST /datasets/{id}/golden/regenerate clears old items and creates new ones."""
+    dataset_id = await _create_dataset(client, organization_id)
+    await _upload_document(client, dataset_id, organization_id)
+
+    # Generate initial golden items
+    mock_1 = _mock_litellm_response("Q1?", "A1.")
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_1)):
+        post_resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 2},
+        )
+    assert post_resp.status_code == 201
+    initial_ids = {item["id"] for item in post_resp.json()["items"]}
+    assert len(initial_ids) > 0
+
+    # Regenerate with different LLM output
+    mock_2 = _mock_litellm_response("Q2?", "A2.")
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_2)):
+        regen_resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden/regenerate",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 2},
+        )
+    assert regen_resp.status_code == 201
+    regen_data = regen_resp.json()
+    regen_ids = {item["id"] for item in regen_data["items"]}
+
+    # New items should be different (new UUIDs, new Q&A)
+    assert regen_ids.isdisjoint(initial_ids)
+    for item in regen_data["items"]:
+        assert item["question"] == "Q2?"
+        assert item["answer"] == "A2."
+
+    # GET confirms only new items exist
+    get_resp = await client.get(
+        f"/api/v1/datasets/{dataset_id}/golden",
+        headers={"X-Organization-Id": organization_id},
+    )
+    assert get_resp.status_code == 200
+    get_ids = {item["id"] for item in get_resp.json()}
+    assert get_ids == regen_ids
+
+
+@pytest.mark.asyncio
+async def test_regenerate_golden_enforces_ownership(client: AsyncClient, organization_id: str):
+    """Regenerate for a dataset of another org returns 404."""
+    dataset_id = await _create_dataset(client, organization_id)
+
+    resp = await client.post(
+        f"/api/v1/datasets/{dataset_id}/golden/regenerate",
+        headers={"X-Organization-Id": "wrong-org"},
+        json={"sample_size": 5},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_regenerate_golden_handles_empty_dataset(client: AsyncClient, organization_id: str):
+    """Regenerate on a dataset with no chunks returns 201 with empty items."""
+    dataset_id = await _create_dataset(client, organization_id)
+    # No documents uploaded — dataset is empty
+
+    mock_resp = _mock_litellm_response()
+    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/golden/regenerate",
+            headers={"X-Organization-Id": organization_id},
+            json={"sample_size": 10},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["count"] == 0
+    assert data["items"] == []
+
+
 # ---------------------------------------------------------------------------
 # Experiment runner — golden path
 # ---------------------------------------------------------------------------

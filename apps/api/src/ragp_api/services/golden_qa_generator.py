@@ -76,7 +76,7 @@ async def generate_golden_qa(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=200,
+                max_tokens=2000,
             )
             raw = cast(str, response.choices[0].message.content) or ""
             # Strip markdown code fences if present

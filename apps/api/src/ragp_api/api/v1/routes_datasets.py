@@ -313,6 +313,12 @@ async def delete_document(
         ) from exc
 
     # Clean up database
+    # Delete golden QA items whose source chunks belong to this document —
+    # otherwise evaluation metrics break (retrieval_hit always 0 for orphaned items)
+    chunk_ids_subq = select(Chunk.id).where(Chunk.document_id == document_id)
+    await db.execute(
+        delete(DatasetGoldenItem).where(DatasetGoldenItem.source_chunk_id.in_(chunk_ids_subq))
+    )
     await db.execute(delete(Chunk).where(Chunk.document_id == document_id))
     await db.delete(doc)
 
@@ -429,6 +435,69 @@ async def generate_golden(
         resource_type="dataset",
         resource_id=dataset_id,
         metadata={"count": len(out_items)},
+    )
+    await db.commit()
+    return GenerateGoldenOut(items=out_items, count=len(out_items))
+
+
+@router.post("/{dataset_id}/golden/regenerate", status_code=201, response_model=GenerateGoldenOut)
+async def regenerate_golden(
+    dataset_id: str,
+    body: GenerateGoldenIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    organization_id: str = Depends(get_current_organization_id),
+    _scope: None = Depends(require_scope("write")),
+) -> GenerateGoldenOut:
+    """Delete all existing golden Q&A pairs for a dataset and regenerate them."""
+    ds_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.organization_id == organization_id)
+    )
+    if ds_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    # Delete all existing golden items
+    await db.execute(
+        delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
+    )
+
+    sample_size = max(1, min(body.sample_size, 50))
+    try:
+        pairs = await generate_golden_qa(
+            dataset_id=dataset_id,
+            organization_id=organization_id,
+            db=db,
+            sample_size=sample_size,
+        )
+    except GoldenGenerationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "golden_generation_failed",
+                "message": "Не удалось перегенерировать Golden Q&A. Проверьте настройки LLM.",
+            },
+        ) from exc
+    db_items = await save_golden_items(dataset_id=dataset_id, pairs=pairs, db=db)
+
+    out_items = [
+        GoldenItemOut(
+            id=item.id,
+            question=item.question,
+            answer=item.answer,
+            source_chunk_id=item.source_chunk_id,
+            created_at=item.created_at.isoformat(),
+        )
+        for item in db_items
+    ]
+    await log_audit_event(
+        db,
+        org_id=organization_id,
+        user_id=None,
+        event_type="golden.regenerate",
+        resource_type="dataset",
+        resource_id=dataset_id,
+        metadata={"count": len(out_items)},
+        request=request,
     )
     await db.commit()
     return GenerateGoldenOut(items=out_items, count=len(out_items))
