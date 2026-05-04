@@ -26,7 +26,7 @@ class RunOut(BaseModel):
     query: str | None
     status: str
     metrics: dict[str, Any] | None
-    trace: list[dict[str, Any]] | None = None
+    trace: dict[str, Any] | None = None
     answer: str | None = None
     contexts: list[dict[str, Any]] | None = None
     started_at: datetime | None
@@ -122,7 +122,7 @@ async def create_run(
         query=run.query,
         status=run.status,
         metrics=run.metrics_json,
-        trace=traces_raw.get("traces", []),
+        trace=traces_raw,
         answer=traces_raw.get("answer"),
         contexts=traces_raw.get("contexts"),
         started_at=run.started_at,
@@ -146,7 +146,7 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
         query=run.query,
         status=run.status,
         metrics=run.metrics_json,
-        trace=traces_raw.get("traces", []),
+        trace=traces_raw,
         answer=traces_raw.get("answer"),
         contexts=traces_raw.get("contexts"),
         started_at=run.started_at,
@@ -176,7 +176,7 @@ async def list_runs(
             query=r.query,
             status=r.status,
             metrics=r.metrics_json,
-            trace=(r.traces_json or {}).get("traces", []),
+            trace=(r.traces_json or {}),
             answer=(r.traces_json or {}).get("answer"),
             contexts=(r.traces_json or {}).get("contexts"),
             started_at=r.started_at,

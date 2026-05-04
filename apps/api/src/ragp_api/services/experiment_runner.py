@@ -15,6 +15,7 @@ from ragp_api.services.subscription import (
     NoActiveSubscriptionError,
     QuotaExceededError,
     consume_q,
+    get_active_subscription,
     release_q,
 )
 from ragp_api.services.usage import record_usage_event
@@ -192,6 +193,28 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _build_partial_metrics(
+    ctx_scores: list[float],
+    sim_scores: list[float],
+) -> dict[str, Any]:
+    """Build metrics dict from partial scores (e.g. after quota exceeded)."""
+    if not ctx_scores:
+        return _metric_error("quota_exceeded", "Quota exceeded before any scores computed")
+    avg_ctx = sum(ctx_scores) / len(ctx_scores)
+    avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
+    composite = 0.5 * avg_ctx + 0.5 * avg_sim if avg_sim is not None else avg_ctx
+    m: dict[str, Any] = {
+        "status": "completed",
+        "context_relevance": round(avg_ctx, 4),
+        "context_recall": round(avg_ctx, 4),
+        "composite_score": round(composite, 4),
+    }
+    if avg_sim is not None:
+        m["answer_similarity"] = round(avg_sim, 4)
+        m["answer_relevance"] = round(avg_sim, 4)
+    return m
+
+
 async def _golden_metrics(
     nodes: list[dict[str, Any]],
     golden_items: list[DatasetGoldenItem],
@@ -281,7 +304,11 @@ async def _golden_metrics(
         query_vec: list[float] | None = None
         if embedder is not None:
             try:
+                await consume_q(db, organization_id, count=1)
                 query_vec = (await embedder.embed([query]))[0]
+            except QuotaExceededError:
+                logger.warning("Quota exceeded during golden eval, stopping")
+                return _build_partial_metrics(ctx_scores, sim_scores), traces
             except Exception:
                 query_vec = None  # BM25-only fallback
 
@@ -310,6 +337,7 @@ async def _golden_metrics(
         # Context relevance — embed expected_answer, compare with each chunk
         if embedder is not None:
             try:
+                await consume_q(db, organization_id, count=1)
                 answer_vec = (await embedder.embed([item.answer]))[0]
                 chunk_vecs = await embedder.embed([r["text"][:1000] for r in results[:5]])
                 max_sim = (
@@ -319,6 +347,9 @@ async def _golden_metrics(
                 )
                 item_trace["context_relevance"] = round(max_sim, 4)
                 ctx_scores.append(max_sim)
+            except QuotaExceededError:
+                logger.warning("Quota exceeded during golden eval, stopping")
+                return _build_partial_metrics(ctx_scores, sim_scores), traces
             except Exception as exc:
                 logger.warning(
                     "Embedder failed for golden item %s, falling back to substring match: %s",
@@ -340,6 +371,7 @@ async def _golden_metrics(
         # Answer similarity — only when both generator and embedder are available
         if generator is not None and embedder is not None:
             try:
+                await consume_q(db, organization_id, count=1)
                 gen_result = await generator.generate(query=query, contexts=results)
                 generated_answer = gen_result.get("answer", "")
                 item_trace["generated_answer"] = generated_answer
@@ -348,6 +380,9 @@ async def _golden_metrics(
                     sim = _cosine_similarity(vecs[0], vecs[1])
                     item_trace["similarity"] = round(sim, 4)
                     sim_scores.append(sim)
+            except QuotaExceededError:
+                logger.warning("Quota exceeded during golden eval, stopping")
+                return _build_partial_metrics(ctx_scores, sim_scores), traces
             except Exception as exc:
                 logger.debug("Answer similarity failed for golden item %s: %s", item.id, exc)
 
@@ -378,7 +413,7 @@ async def _golden_metrics(
         metrics["answer_relevance"] = round(avg_sim, 4)
     if retrieval_failures:
         metrics["warning"] = f"{retrieval_failures} golden item(s) failed during retrieval"
-    return metrics, traces
+    return _build_partial_metrics(ctx_scores, sim_scores), traces
 
 
 async def _self_test_metric(
@@ -532,17 +567,10 @@ async def run_experiment_inline(
         if not use_golden:
             chunks = await _load_dataset_chunks(db, dataset_id, organization_id)
 
-        # Each golden item incurs ~4 API calls (embed query + embed answer +
-        # embed chunks + optionally generate).  Reserve accordingly.
-        _EST_CALLS_PER_GOLDEN_ITEM = 4
-        units_per_combo = (
-            len(golden_items) * _EST_CALLS_PER_GOLDEN_ITEM
-            if use_golden
-            else min(len(chunks), _SELF_TEST_SAMPLE_LIMIT)
-        )
-        reserved_units = max(1, len(combinations) * max(1, units_per_combo))
+        # Verify active subscription exists (will fail early if missing).
+        # Actual per-request quota deduction happens inside _golden_metrics.
         try:
-            await consume_q(db, organization_id, count=reserved_units)
+            await get_active_subscription(db, organization_id)
             _touch()
             await db.commit()
         except NoActiveSubscriptionError:
