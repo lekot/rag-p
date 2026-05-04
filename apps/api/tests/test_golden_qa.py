@@ -466,6 +466,6 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
     assert val == 1.0
     assert metrics["composite_score"] == 1.0
     consume_mock.assert_awaited_once()
-    assert consume_mock.await_args.kwargs["count"] == 1
+    assert consume_mock.await_args.kwargs["count"] == 4  # 1 item × 4 calls
     usage_mock.assert_awaited_once()
     assert usage_mock.await_args.kwargs["quota_reserved"] is True
