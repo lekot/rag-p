@@ -150,7 +150,8 @@ async def generate_golden_qa(
             raw = data["choices"][0]["message"]["content"]
             parsed = _parse_deepseek_response(raw)
             if parsed is None:
-                logger.debug("Empty or invalid response for doc %s — skipping", doc.id)
+                logger.debug("Invalid or empty response for doc %s — skipping", doc.id)
+                failures += 1
                 continue
             pairs.append(parsed)
         except json.JSONDecodeError as exc:
