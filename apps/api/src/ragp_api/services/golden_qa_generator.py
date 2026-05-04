@@ -108,7 +108,7 @@ async def generate_golden_qa(
     failures = 0
     for chunk in chunks:
         prompt = _QA_PROMPT.format(chunk_text=chunk.text)
-        body: dict[str, object] = {
+        body = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
