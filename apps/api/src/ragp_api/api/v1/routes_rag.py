@@ -102,15 +102,18 @@ async def _check_limits_and_commit_quota(
 
 
 async def _resolve_embedder() -> tuple[Embedder | None, str]:
-    """Return (embedder, embedder_name) using environment priority."""
+    """Return (embedder, embedder_name) using environment priority: OpenAI → Cohere → Ollama."""
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
 
-    if ollama_host:
-        cls = get_plugin("embedder", "ollama-embedder")
+    if openai_key:
+        cls = get_plugin("embedder", "litellm-embedder")
         if cls is not None:
-            return cast(Embedder, cls({"model": "bge-m3"})), "ollama-embedder"
+            return (
+                cast(Embedder, cls({"model": "openai/text-embedding-3-small"})),
+                "litellm-embedder",
+            )
     elif cohere_key:
         cls = get_plugin("embedder", "cohere-embedder")
         if cls is not None:
@@ -121,13 +124,10 @@ async def _resolve_embedder() -> tuple[Embedder | None, str]:
                 ),
                 "cohere-embedder",
             )
-    elif openai_key:
-        cls = get_plugin("embedder", "litellm-embedder")
+    elif ollama_host:
+        cls = get_plugin("embedder", "ollama-embedder")
         if cls is not None:
-            return (
-                cast(Embedder, cls({"model": "openai/text-embedding-3-small"})),
-                "litellm-embedder",
-            )
+            return cast(Embedder, cls({"model": "bge-m3"})), "ollama-embedder"
     return None, "none"
 
 

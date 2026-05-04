@@ -871,15 +871,15 @@ async def search_dataset(
 
     await _reserve_dataset_query_quota(db, organization_id)
 
-    # Build embedder (same priority as ingest: Ollama → Cohere → OpenAI)
+    # Build embedder (priority: OpenAI → Cohere → Ollama)
     ollama_host = os.environ.get("OLLAMA_HOST", "")
     cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     embedder: Embedder | None = None
-    if ollama_host:
-        embedder_cls = get_plugin("embedder", "ollama-embedder")
+    if openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
+            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
     elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
@@ -887,10 +887,10 @@ async def search_dataset(
                 Embedder,
                 embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
             )
-    elif openai_key:
-        embedder_cls = get_plugin("embedder", "litellm-embedder")
+    elif ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
-            embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
+            embedder = cast(Embedder, embedder_cls({"model": "bge-m3"}))
 
     query_vec: list[float] | None = None
     if embedder is not None:
@@ -972,11 +972,11 @@ class AskOut(BaseModel):
 async def _build_default_embedder(
     ollama_host: str, cohere_key: str, openai_key: str
 ) -> "Embedder | None":
-    """Build embedder using environment priority: Ollama → Cohere → OpenAI."""
-    if ollama_host:
-        embedder_cls = get_plugin("embedder", "ollama-embedder")
+    """Build embedder using environment priority: OpenAI → Cohere → Ollama."""
+    if openai_key:
+        embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
-            return cast(Embedder, embedder_cls({"model": "bge-m3"}))
+            return cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
     elif cohere_key:
         embedder_cls = get_plugin("embedder", "cohere-embedder")
         if embedder_cls is not None:
@@ -984,10 +984,10 @@ async def _build_default_embedder(
                 Embedder,
                 embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
             )
-    elif openai_key:
-        embedder_cls = get_plugin("embedder", "litellm-embedder")
+    elif ollama_host:
+        embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
-            return cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
+            return cast(Embedder, embedder_cls({"model": "bge-m3"}))
     return None
 
 
