@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -63,7 +64,7 @@ async def _call_deepseek(
         return await client.post(url, json=body, headers=headers)
 
 
-def _sample_document_text(document: Document, chunks: list[Chunk]) -> str:
+def _sample_document_text(document: Document, chunks: Sequence[Chunk]) -> str:
     """Build a text sample from a document for QA generation.
 
     Uses the first _DOC_TEXT_MAX_CHARS from the reconstructed document text.
