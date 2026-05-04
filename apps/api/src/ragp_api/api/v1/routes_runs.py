@@ -38,8 +38,8 @@ async def create_run(
     body: RunCreateIn,
     db: AsyncSession = Depends(get_db),
 ) -> RunOut:
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
+    pl_result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = pl_result.scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
     if pipeline.current_version_id is None:
