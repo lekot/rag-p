@@ -18,7 +18,7 @@ from ragp_api.settings import settings
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PATCH_POST = "httpx.AsyncClient.post"
+_PATCH_DEEPSEEK = "ragp_api.services.golden_qa_generator._call_deepseek"
 
 
 async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "GoldenDS") -> str:
@@ -101,7 +101,7 @@ async def test_generate_golden_qa_creates_items(db_session: AsyncSession, organi
     await db_session.commit()
 
     mock_resp = _mock_deepseek_response()
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_resp)):
         pairs = await generate_golden_qa(
             dataset_id=ds_id,
             organization_id=organization_id,
@@ -152,7 +152,7 @@ async def test_generate_golden_qa_handles_invalid_json(
     bad_resp.json.return_value = {"choices": [{"message": {"content": "NOT VALID JSON AT ALL"}}]}
 
     with (
-        patch(_PATCH_POST, new=AsyncMock(return_value=bad_resp)),
+        patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=bad_resp)),
         pytest.raises(GoldenGenerationError),
     ):
         await generate_golden_qa(
@@ -196,7 +196,7 @@ async def test_generate_golden_qa_extractive_fallback_when_llm_fails(
     old_mode = settings.llm_fallback_mode
     settings.llm_fallback_mode = "extractive"
     try:
-        with patch(_PATCH_POST, new=AsyncMock(side_effect=RuntimeError("no llm"))):
+        with patch(_PATCH_DEEPSEEK, new=AsyncMock(side_effect=RuntimeError("no llm"))):
             pairs = await generate_golden_qa(
                 dataset_id=ds_id,
                 organization_id=organization_id,
@@ -227,7 +227,7 @@ async def test_get_golden_returns_items(client: AsyncClient, organization_id: st
     await _upload_document(client, dataset_id, organization_id)
 
     mock_resp = _mock_deepseek_response("What is alpha?", "Alpha is text.")
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_resp)):
         post_resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -276,7 +276,7 @@ async def test_golden_sample_size_capped_at_50(client: AsyncClient, organization
     dataset_id = await _create_dataset(client, organization_id)
 
     mock_resp = _mock_deepseek_response()
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_resp)):
         resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -319,7 +319,7 @@ async def test_regenerate_golden_replaces_items(
 
     # Generate initial golden items
     mock_1 = _mock_deepseek_response("Q1?", "A1.")
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_1)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_1)):
         post_resp = await client.post(
             f"/api/v1/datasets/{ds_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -331,7 +331,7 @@ async def test_regenerate_golden_replaces_items(
 
     # Regenerate with different LLM output
     mock_2 = _mock_deepseek_response("Q2?", "A2.")
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_2)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_2)):
         regen_resp = await client.post(
             f"/api/v1/datasets/{ds_id}/golden/regenerate",
             headers={"X-Organization-Id": organization_id},
@@ -377,7 +377,7 @@ async def test_regenerate_golden_handles_empty_dataset(client: AsyncClient, orga
     # No documents uploaded — dataset is empty
 
     mock_resp = _mock_deepseek_response()
-    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
+    with patch(_PATCH_DEEPSEEK, new=AsyncMock(return_value=mock_resp)):
         resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden/regenerate",
             headers={"X-Organization-Id": organization_id},

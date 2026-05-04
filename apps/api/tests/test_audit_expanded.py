@@ -155,7 +155,7 @@ async def test_dataset_delete_audit_event(
 # ---------------------------------------------------------------------------
 
 
-_PATCH_POST = "httpx.AsyncClient.post"
+_PATCH_DEEPSEEK = "ragp_api.services.golden_qa_generator._call_deepseek"
 
 
 def _deepseek_mock(question: str = "Q?", answer: str = "A.") -> MagicMock:
@@ -184,7 +184,7 @@ async def test_golden_generate_audit_event(
     dataset_id = await _create_dataset(client, org_id)
     await _upload_document(client, dataset_id, org_id)
 
-    with patch(_PATCH_POST, new_callable=AsyncMock, return_value=_deepseek_mock()):
+    with patch(_PATCH_DEEPSEEK, new_callable=AsyncMock, return_value=_deepseek_mock()):
         resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden",
             headers={"X-Organization-Id": org_id},

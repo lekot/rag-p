@@ -57,6 +57,16 @@ def _parse_deepseek_response(raw: str, chunk_id: str) -> dict[str, str] | None:
     return {"question": question, "answer": answer, "source_chunk_id": chunk_id}
 
 
+async def _call_deepseek(
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, str | int | float | list[dict[str, str]]],
+) -> httpx.Response:
+    """Single DeepSeek API call — isolated for testability."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        return await client.post(url, json=body, headers=headers)
+
+
 async def generate_golden_qa(
     dataset_id: str,
     organization_id: str,
@@ -96,45 +106,44 @@ async def generate_golden_qa(
 
     pairs: list[dict[str, str]] = []
     failures = 0
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for chunk in chunks:
-            prompt = _QA_PROMPT.format(chunk_text=chunk.text)
-            body = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            }
-            try:
-                resp = await client.post(url, json=body, headers=headers)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "DeepSeek API returned %d for chunk %s: %s",
-                        resp.status_code,
-                        chunk.id,
-                        resp.text[:500],
-                    )
-                    failures += 1
-                    if settings.llm_fallback_mode == "extractive":
-                        pairs.append(_extractive_pair(chunk))
-                    continue
-                data = resp.json()
-                raw = data["choices"][0]["message"]["content"]
-                parsed = _parse_deepseek_response(raw, chunk.id)
-                if parsed is None:
-                    logger.debug("Empty question/answer for chunk %s — skipping", chunk.id)
-                    continue
-                pairs.append(parsed)
-            except json.JSONDecodeError as exc:
+    for chunk in chunks:
+        prompt = _QA_PROMPT.format(chunk_text=chunk.text)
+        body: dict[str, object] = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        }
+        try:
+            resp = await _call_deepseek(url, headers, body)
+            if resp.status_code != 200:
+                logger.warning(
+                    "DeepSeek API returned %d for chunk %s: %s",
+                    resp.status_code,
+                    chunk.id,
+                    resp.text[:500],
+                )
                 failures += 1
-                logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
                 if settings.llm_fallback_mode == "extractive":
                     pairs.append(_extractive_pair(chunk))
-            except httpx.HTTPError as exc:
-                failures += 1
-                logger.warning("HTTP error for chunk %s: %s — skipping", chunk.id, exc)
-                if settings.llm_fallback_mode == "extractive":
-                    pairs.append(_extractive_pair(chunk))
+                continue
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            parsed = _parse_deepseek_response(raw, chunk.id)
+            if parsed is None:
+                logger.debug("Empty question/answer for chunk %s — skipping", chunk.id)
+                continue
+            pairs.append(parsed)
+        except json.JSONDecodeError as exc:
+            failures += 1
+            logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
+            if settings.llm_fallback_mode == "extractive":
+                pairs.append(_extractive_pair(chunk))
+        except httpx.HTTPError as exc:
+            failures += 1
+            logger.warning("HTTP error for chunk %s: %s — skipping", chunk.id, exc)
+            if settings.llm_fallback_mode == "extractive":
+                pairs.append(_extractive_pair(chunk))
 
     if not pairs and failures:
         raise GoldenGenerationError("LLM did not generate valid golden Q&A pairs")
