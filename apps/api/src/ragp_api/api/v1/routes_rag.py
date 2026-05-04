@@ -102,9 +102,8 @@ async def _check_limits_and_commit_quota(
 
 
 async def _resolve_embedder() -> tuple[Embedder | None, str]:
-    """Return (embedder, embedder_name) using environment priority: OpenAI → Cohere → Ollama."""
+    """Return (embedder, embedder_name) using environment priority: OpenAI → Ollama."""
     ollama_host = os.environ.get("OLLAMA_HOST", "")
-    cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
 
     if openai_key:
@@ -113,16 +112,6 @@ async def _resolve_embedder() -> tuple[Embedder | None, str]:
             return (
                 cast(Embedder, cls({"model": "openai/text-embedding-3-small"})),
                 "litellm-embedder",
-            )
-    elif cohere_key:
-        cls = get_plugin("embedder", "cohere-embedder")
-        if cls is not None:
-            return (
-                cast(
-                    Embedder,
-                    cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
-                ),
-                "cohere-embedder",
             )
     elif ollama_host:
         cls = get_plugin("embedder", "ollama-embedder")

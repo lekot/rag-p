@@ -863,22 +863,14 @@ async def search_dataset(
 
     await _reserve_dataset_query_quota(db, organization_id)
 
-    # Build embedder (priority: OpenAI → Cohere → Ollama)
+    # Build embedder (priority: OpenAI → Ollama)
     ollama_host = os.environ.get("OLLAMA_HOST", "")
-    cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     embedder: Embedder | None = None
     if openai_key:
         embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
             embedder = cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
-    elif cohere_key:
-        embedder_cls = get_plugin("embedder", "cohere-embedder")
-        if embedder_cls is not None:
-            embedder = cast(
-                Embedder,
-                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
-            )
     elif ollama_host:
         embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
@@ -961,21 +953,12 @@ class AskOut(BaseModel):
     usage: AskUsage
 
 
-async def _build_default_embedder(
-    ollama_host: str, cohere_key: str, openai_key: str
-) -> "Embedder | None":
-    """Build embedder using environment priority: OpenAI → Cohere → Ollama."""
+async def _build_default_embedder(ollama_host: str, openai_key: str) -> "Embedder | None":
+    """Build embedder using environment priority: OpenAI → Ollama."""
     if openai_key:
         embedder_cls = get_plugin("embedder", "litellm-embedder")
         if embedder_cls is not None:
             return cast(Embedder, embedder_cls({"model": "openai/text-embedding-3-small"}))
-    elif cohere_key:
-        embedder_cls = get_plugin("embedder", "cohere-embedder")
-        if embedder_cls is not None:
-            return cast(
-                Embedder,
-                embedder_cls({"model": "embed-multilingual-v3.0", "input_type": "search_query"}),
-            )
     elif ollama_host:
         embedder_cls = get_plugin("embedder", "ollama-embedder")
         if embedder_cls is not None:
@@ -1000,7 +983,6 @@ async def ask_dataset(
     await _reserve_dataset_query_quota(db, organization_id)
 
     ollama_host = os.environ.get("OLLAMA_HOST", "")
-    cohere_key = os.environ.get("COHERE_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
 
     # --- Pipeline-aware path ---
@@ -1101,7 +1083,7 @@ async def ask_dataset(
         )
 
     # --- Default hardcoded path ---
-    embedder = await _build_default_embedder(ollama_host, cohere_key, openai_key)
+    embedder = await _build_default_embedder(ollama_host, openai_key)
 
     query_vec: list[float] | None = None
     if embedder is not None:
