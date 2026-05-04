@@ -446,9 +446,7 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
 
     with (
         patch("ragp_api.plugins.registry.get_plugin", return_value=mock_retriever_cls),
-        patch(
-            "ragp_api.services.experiment_runner.consume_q", new=AsyncMock()
-        ),
+        patch("ragp_api.services.experiment_runner.consume_q", new=AsyncMock()),
         patch(
             "ragp_api.services.experiment_runner.get_active_subscription",
             new=AsyncMock(return_value=MagicMock()),
