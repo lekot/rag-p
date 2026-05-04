@@ -23,7 +23,8 @@ class PluginBase(ABC):
     params_schema: ClassVar[dict[str, Any]]
 
     def __init__(self, params: dict[str, Any]) -> None:
-        self.params = params
+        defaults = self.params_schema.get("default", {}) if self.params_schema else {}
+        self.params = {**defaults, **params}
 
     @abstractmethod
     async def cost_estimate(self, sample_input: Any) -> CostEstimate: ...

@@ -320,8 +320,16 @@ async def _golden_metrics(
                 item_trace["context_relevance"] = round(max_sim, 4)
                 ctx_scores.append(max_sim)
             except Exception as exc:
-                logger.warning("Context relevance failed for item %s: %s", item.id, exc)
-                ctx_scores.append(0.0)
+                logger.warning(
+                    "Embedder failed for golden item %s, falling back to substring match: %s",
+                    item.id,
+                    exc,
+                )
+                # Fall back to substring match
+                item_trace["context_relevance"] = (
+                    1.0 if item.answer in " ".join(r["text"] for r in results) else 0.0
+                )
+                ctx_scores.append(item_trace["context_relevance"])
         else:
             # No embedder — fall back to simple substring match
             item_trace["context_relevance"] = (
