@@ -90,7 +90,15 @@ class LiteLLMGenerator(Generator):
     }
 
     async def generate(self, query: str, contexts: list[dict[str, Any]]) -> dict[str, Any]:
+        import os as _os
+
         import litellm
+
+        # litellm looks for DEEPSEEK_API_KEY in the environment, but we
+        # store it via pydantic-settings as RAGP_DEEPSEEK_API_KEY.
+        # Forward it so litellm can authenticate.
+        if settings.deepseek_api_key and not _os.environ.get("DEEPSEEK_API_KEY"):
+            _os.environ["DEEPSEEK_API_KEY"] = settings.deepseek_api_key
 
         model: str = self.params["model"]
         temperature: float = self.params.get("temperature", 0.0)
