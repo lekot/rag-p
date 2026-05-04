@@ -444,12 +444,6 @@ async def run_experiment_inline(
         # combo's chunker as the reference (all combos share the same slot).
         if combinations and "chunkers" in experiment.plugin_grid_json:
             first_chunker = experiment.plugin_grid_json["chunkers"][0]
-            # Re-chunking deletes old chunks, which would set source_chunk_id
-            # to NULL on all golden items via ON DELETE SET NULL, invalidating
-            # every hit.  Delete golden items together with their chunks.
-            await db.execute(
-                delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
-            )
             await _rechunk_documents_for_slot(
                 db,
                 dataset_id=dataset_id,
@@ -460,17 +454,18 @@ async def run_experiment_inline(
             _touch()
             await db.commit()
 
-        # Check whether golden Q&A exists for this dataset
-        # Golden items whose source_chunk_id is NULL are orphaned (chunks were
-        # deleted by re-chunking or document removal).  Filter them out so the
-        # experiment falls back to self-test instead of always hitting 0.0.
-        # Also clean them up from the DB so the list doesn't grow stale.
+        # Re-chunking (above) deletes old chunks → ON DELETE SET NULL destroys
+        # source_chunk_id on golden items.  Clean up orphaned items (NULL
+        # source_chunk_id) so the experiment falls back to self-test instead
+        # of returning composite_score=0.0 on broken pointers.
         await db.execute(
             delete(DatasetGoldenItem).where(
                 DatasetGoldenItem.dataset_id == dataset_id,
                 DatasetGoldenItem.source_chunk_id.is_(None),
             )
         )
+
+        # Check whether golden Q&A exists for this dataset
         golden_items = await _load_golden_items(db, dataset_id)
         use_golden = len(golden_items) > 0
 
