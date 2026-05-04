@@ -21,12 +21,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Drop FK to chunks.id first, then drop the column
-    op.drop_constraint(
-        "dataset_golden_items_source_chunk_id_fkey",
-        "dataset_golden_items",
-        type_="foreignkey",
+    # Drop FK first (may not exist on some envs), then the column
+    conn = op.get_bind()
+    # Check if the FK constraint exists
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.table_constraints "
+            "WHERE constraint_name = 'dataset_golden_items_source_chunk_id_fkey' "
+            "AND table_name = 'dataset_golden_items'"
+        )
     )
+    if result.scalar():
+        op.drop_constraint(
+            "dataset_golden_items_source_chunk_id_fkey",
+            "dataset_golden_items",
+            type_="foreignkey",
+        )
+    # Drop column (safe to run even if already dropped)
     op.drop_column("dataset_golden_items", "source_chunk_id")
 
 

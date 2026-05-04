@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "0018"
-down_revision = "0017"
+down_revision = "0017_password_reset_tokens"
 branch_labels = None
 depends_on = None
 
