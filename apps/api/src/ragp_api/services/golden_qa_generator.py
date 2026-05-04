@@ -3,12 +3,11 @@
 import json
 import logging
 import uuid
+from typing import Any
 
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from typing import Any
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
 from ragp_api.settings import settings
