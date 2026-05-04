@@ -7,10 +7,9 @@ EXPECTED_NAMES = {
     "recursive-character",
     "markdown-aware",
     "litellm-embedder",
-    "cohere-embedder",
     "ollama-embedder",
     "pgvector-hybrid",
-    "cohere",
+    "deepseek-rerank",
     "bge-reranker",
     "litellm-generator",
 }
