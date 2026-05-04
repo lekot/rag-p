@@ -53,6 +53,7 @@ class LeaderboardCombinationOut(BaseModel):
     error: str | None = None
     warning: str | None = None
     nodes: list[dict[str, Any]] = []
+    traces: list[dict[str, Any]] = []
 
 
 class LeaderboardOut(BaseModel):
@@ -225,6 +226,7 @@ async def get_leaderboard(
                 error=metrics.get("error"),
                 warning=metrics.get("warning"),
                 nodes=nodes,
+                traces=entry.get("traces", []),
             )
         )
 

@@ -51,6 +51,7 @@ const LeaderboardCombinationSchema = z.object({
   error_code: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   warning: z.string().nullable().optional(),
+  traces: z.array(z.record(z.unknown())).optional(),
 });
 
 export type LeaderboardCombination = z.infer<typeof LeaderboardCombinationSchema>;

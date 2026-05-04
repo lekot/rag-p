@@ -3,6 +3,7 @@
 import itertools
 import logging
 import math
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -192,18 +193,38 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _answer_in_text(answer: str, text: str) -> bool:
+    """Check if *answer* appears as a whole word / phrase in *text*.
+
+    Uses ``\\b`` word boundaries to avoid false positives like
+    "Paris" matching inside "Parisian" or "Particular".
+    """
+    if not answer or not text:
+        return False
+    try:
+        pattern = re.compile(r"\b" + re.escape(answer.lower().strip()) + r"\b", re.DOTALL)
+        return bool(pattern.search(text.lower()))
+    except re.error:
+        # Fall back to plain substring if regex fails (e.g. empty answer)
+        return answer.lower() in text.lower()
+
+
 async def _golden_metrics(
     nodes: list[dict[str, Any]],
     golden_items: list[DatasetGoldenItem],
     organization_id: str,
     dataset_id: str,
     db: AsyncSession,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Evaluate a pipeline combo against golden Q&A pairs.
 
+    Returns (metrics_dict, traces) where traces is a list of per-item trace
+    dicts with ``query``, ``retrieved_chunks``, and optionally ``generated_answer``.
+
     Metrics (no LLM-as-judge):
-    - retrieval_hit: 1.0 if golden answer text appears in any top-k chunk; 0.0 otherwise.
+    - retrieval_hit: 1.0 if golden answer text appears (word-boundary match)
+      in any top-k chunk; 0.0 otherwise.
     - answer_similarity: cosine similarity embed(generated_answer) vs embed(expected_answer)
       (only when generator node present).
     - composite_score = 0.5*avg_hit + 0.5*avg_similarity  (or avg_hit when no generator).
@@ -218,13 +239,16 @@ async def _golden_metrics(
     embedder_node = next((n for n in nodes if n["plugin_kind"] == "embedder"), None)
 
     if retriever_node is None:
-        return _metric_error("missing_retriever", "Pipeline has no retriever node")
+        return _metric_error("missing_retriever", "Pipeline has no retriever node"), []
 
     retriever_cls = get_plugin("retriever", retriever_node["plugin_name"])
     if retriever_cls is None:
-        return _metric_error(
-            "unknown_retriever",
-            f"Retriever plugin is not registered: {retriever_node['plugin_name']}",
+        return (
+            _metric_error(
+                "unknown_retriever",
+                f"Retriever plugin is not registered: {retriever_node['plugin_name']}",
+            ),
+            [],
         )
 
     retriever_params = dict(retriever_node.get("params", {}))
@@ -247,9 +271,19 @@ async def _golden_metrics(
     hit_scores: list[float] = []
     sim_scores: list[float] = []
     retrieval_failures = 0
+    traces: list[dict[str, Any]] = []
 
     for item in golden_items:
         query = item.question
+        item_trace: dict[str, Any] = {
+            "golden_item_id": item.id,
+            "query": query,
+            "expected_answer": item.answer,
+            "retrieved_chunks": [],
+            "generated_answer": None,
+            "retrieval_hit": 0.0,
+            "similarity": None,
+        }
 
         # Embed query — if embedder fails, fall back to BM25-only
         query_vec: list[float] | None = None
@@ -273,10 +307,17 @@ async def _golden_metrics(
             logger.warning("Retriever failed for golden item %s: %s", item.id, exc)
             retrieval_failures += 1
             hit_scores.append(0.0)
+            traces.append(item_trace)
             continue
 
-        # Retrieval hit — golden answer must appear in at least one chunk
-        hit = 1.0 if any(item.answer in r["text"] for r in results) else 0.0
+        item_trace["retrieved_chunks"] = [
+            {"id": r["id"], "text": r["text"][:300], "score": r.get("score", 0.0)}
+            for r in results[:5]
+        ]
+
+        # Retrieval hit — golden answer as word-boundary match
+        hit = 1.0 if any(_answer_in_text(item.answer, r["text"]) for r in results) else 0.0
+        item_trace["retrieval_hit"] = hit
         hit_scores.append(hit)
 
         # Answer similarity — only when both generator and embedder are available
@@ -284,14 +325,18 @@ async def _golden_metrics(
             try:
                 gen_result = await generator.generate(query=query, contexts=results)
                 generated_answer = gen_result.get("answer", "")
+                item_trace["generated_answer"] = generated_answer
                 vecs = await embedder.embed([generated_answer, item.answer])
                 sim = _cosine_similarity(vecs[0], vecs[1])
+                item_trace["similarity"] = round(sim, 4)
                 sim_scores.append(sim)
             except Exception as exc:
                 logger.debug("Answer similarity failed for golden item %s: %s", item.id, exc)
 
+        traces.append(item_trace)
+
     if not hit_scores:
-        return _metric_error("no_golden_scores", "Golden evaluation produced no scores")
+        return _metric_error("no_golden_scores", "Golden evaluation produced no scores"), traces
 
     avg_hit = sum(hit_scores) / len(hit_scores)
     avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
@@ -308,7 +353,7 @@ async def _golden_metrics(
         metrics["answer_relevance"] = round(avg_sim, 4)
     if retrieval_failures:
         metrics["warning"] = f"{retrieval_failures} golden item(s) failed during retrieval"
-    return metrics
+    return metrics, traces
 
 
 async def _self_test_metric(
@@ -497,9 +542,10 @@ async def run_experiment_inline(
 
         leaderboard = []
         for nodes in combinations:
+            traces: list[dict[str, Any]] = []
             try:
                 if use_golden:
-                    metrics = await _golden_metrics(
+                    metrics, traces = await _golden_metrics(
                         nodes, golden_items, organization_id, dataset_id, db
                     )
                 else:
@@ -514,6 +560,7 @@ async def run_experiment_inline(
                 {
                     "nodes": nodes,
                     "metrics": metrics,
+                    "traces": traces,
                     "composite_score": metrics.get("composite_score", 0.0),
                 }
             )
