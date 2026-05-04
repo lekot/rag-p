@@ -140,9 +140,9 @@ async def generate_golden_qa(
             logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
             if settings.llm_fallback_mode == "extractive":
                 pairs.append(_extractive_pair(chunk))
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             failures += 1
-            logger.warning("HTTP error for chunk %s: %s — skipping", chunk.id, exc)
+            logger.warning("DeepSeek API call failed for chunk %s: %s — skipping", chunk.id, exc)
             if settings.llm_fallback_mode == "extractive":
                 pairs.append(_extractive_pair(chunk))
 
