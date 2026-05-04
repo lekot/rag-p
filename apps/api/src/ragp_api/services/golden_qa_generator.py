@@ -8,6 +8,8 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from typing import Any
+
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
 from ragp_api.settings import settings
 
@@ -60,7 +62,7 @@ def _parse_deepseek_response(raw: str, chunk_id: str) -> dict[str, str] | None:
 async def _call_deepseek(
     url: str,
     headers: dict[str, str],
-    body: dict[str, str | int | float | list[dict[str, str]]],
+    body: dict[str, Any],
 ) -> httpx.Response:
     """Single DeepSeek API call — isolated for testability."""
     async with httpx.AsyncClient(timeout=60.0) as client:
