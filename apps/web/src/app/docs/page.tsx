@@ -33,7 +33,7 @@ const RESPONSE_EXAMPLE = `{
   ],
   "usage": { "prompt_tokens": 312, "completion_tokens": 87 },
   "trace": {
-    "embedder": "cohere-embedder",
+    "embedder": "litellm-embedder",
     "retriever": "pgvector-hybrid",
     "generator": "litellm-generator",
     "model": "deepseek/deepseek-v4-flash"

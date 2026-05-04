@@ -60,24 +60,29 @@ def list_plugins() -> list[dict[str, Any]]:
 
 
 def bootstrap() -> None:
-    """Import all built-in plugins so they self-register."""
-    # BGE reranker requires sentence-transformers (optional dep).
-    # Only register it if the package is available — avoids showing a
-    # broken plugin in the UI and prevents runtime errors.
+    """Import all built-in plugins so they self-register.
+
+    Plugins that require an API key are only registered when the
+    corresponding env var is set — keeps the UI clean and prevents
+    users from selecting broken plugins.
+    """
     import importlib.util  # noqa: PLC0415
+    import os
 
     from ragp_api.plugins.chunkers import markdown, recursive  # noqa: F401
     from ragp_api.plugins.embedders import (  # noqa: F401
-        cohere_embedder,
         litellm_embedder,
         ollama_embedder,
     )
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401
-    from ragp_api.plugins.rerankers import (
-        cohere,  # noqa: F401
-        deepseek,  # noqa: F401
-    )
+    from ragp_api.plugins.rerankers import deepseek  # noqa: F401
+    from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401
 
+    # Cohere plugins — only register when API key is configured
+    if os.environ.get("COHERE_API_KEY"):
+        from ragp_api.plugins.embedders import cohere_embedder  # noqa: F401
+        from ragp_api.plugins.rerankers import cohere  # noqa: F401
+
+    # BGE reranker requires sentence-transformers (optional dep).
     if importlib.util.find_spec("sentence_transformers") is not None:
         from ragp_api.plugins.rerankers import bge  # noqa: F401
-    from ragp_api.plugins.retrievers import pgvector_hybrid  # noqa: F401

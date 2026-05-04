@@ -11,6 +11,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import {
   Select,
@@ -195,6 +196,29 @@ export default function NewExperimentPage() {
           {createMutation.error.message}
         </p>
       )}
+
+      <Card className="border-muted bg-muted/50">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">How quota is consumed</CardTitle>
+          <CardDescription>
+            Each golden QA item in the experiment triggers 3–4 API calls:
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground space-y-1">
+          <p>• <strong>Embedder</strong> — embeds query + expected answer + each chunk
+            (OpenAI text-embedding-3-small, ~3 calls per item)</p>
+          <p>• <strong>Generator</strong> — LLM answer generation
+            (DeepSeek V4 Flash, ~1 call per item if selected)</p>
+          <p className="mt-2">
+            Total quota = (embedder calls + generator calls) × golden items × combinations.
+            Compute cost is deducted from your subscription plan quota in real time.
+          </p>
+          <p className="text-muted-foreground/60 mt-1">
+            Quota is consumed per API call, not per experiment.
+            If an embedder or generator API fails, the item is skipped and quota is conserved.
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="flex justify-end gap-2">
         <Button
