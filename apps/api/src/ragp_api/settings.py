@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     default_embedding_model: str = "openai/text-embedding-3-small"
     llm_fallback_mode: str = "disabled"  # disabled | extractive
 
+    # DeepSeek API (used directly by golden QA generator, bypasses litellm)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+
     # Billing — welcome bonus for new organizations (ENV: RAGP_STARTING_BALANCE_USD).
     # Default 0: every new account must top up via /pricing → ЮKassa to use anything.
     starting_balance_usd: Decimal = Decimal("0")

@@ -5,6 +5,7 @@ import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ from ragp_api.settings import settings
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PATCH_ACOMPLETION = "ragp_api.services.golden_qa_generator.litellm.acompletion"
+_PATCH_POST = "httpx.AsyncClient.post"
 
 
 async def _create_dataset(client: AsyncClient, organization_id: str, name: str = "GoldenDS") -> str:
@@ -46,17 +47,20 @@ async def _upload_document(
     return resp.json()["document_id"]
 
 
-def _mock_litellm_response(
+def _mock_deepseek_response(
     question: str = "What is this?", answer: str = "It is alpha."
 ) -> MagicMock:
-    """Build a mock litellm response that returns a valid JSON Q&A."""
-    content = json.dumps({"question": question, "answer": answer})
-    msg = MagicMock()
-    msg.content = content
-    choice = MagicMock()
-    choice.message = msg
-    resp = MagicMock()
-    resp.choices = [choice]
+    """Build a mock httpx Response that returns a valid DeepSeek JSON Q&A."""
+    content = json.dumps(
+        {
+            "choices": [
+                {"message": {"content": json.dumps({"question": question, "answer": answer})}}
+            ]
+        }
+    )
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = 200
+    resp.json.return_value = json.loads(content)
     return resp
 
 
@@ -96,8 +100,8 @@ async def test_generate_golden_qa_creates_items(db_session: AsyncSession, organi
     db_session.add_all(chunks)
     await db_session.commit()
 
-    mock_resp = _mock_litellm_response()
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+    mock_resp = _mock_deepseek_response()
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
         pairs = await generate_golden_qa(
             dataset_id=ds_id,
             organization_id=organization_id,
@@ -143,15 +147,12 @@ async def test_generate_golden_qa_handles_invalid_json(
     db_session.add(chunk)
     await db_session.commit()
 
-    bad_msg = MagicMock()
-    bad_msg.content = "NOT VALID JSON AT ALL"
-    bad_choice = MagicMock()
-    bad_choice.message = bad_msg
-    bad_resp = MagicMock()
-    bad_resp.choices = [bad_choice]
+    bad_resp = MagicMock(spec=httpx.Response)
+    bad_resp.status_code = 200
+    bad_resp.json.return_value = {"choices": [{"message": {"content": "NOT VALID JSON AT ALL"}}]}
 
     with (
-        patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=bad_resp)),
+        patch(_PATCH_POST, new=AsyncMock(return_value=bad_resp)),
         pytest.raises(GoldenGenerationError),
     ):
         await generate_golden_qa(
@@ -195,7 +196,7 @@ async def test_generate_golden_qa_extractive_fallback_when_llm_fails(
     old_mode = settings.llm_fallback_mode
     settings.llm_fallback_mode = "extractive"
     try:
-        with patch(_PATCH_ACOMPLETION, new=AsyncMock(side_effect=RuntimeError("no llm"))):
+        with patch(_PATCH_POST, new=AsyncMock(side_effect=RuntimeError("no llm"))):
             pairs = await generate_golden_qa(
                 dataset_id=ds_id,
                 organization_id=organization_id,
@@ -225,8 +226,8 @@ async def test_get_golden_returns_items(client: AsyncClient, organization_id: st
     dataset_id = await _create_dataset(client, organization_id)
     await _upload_document(client, dataset_id, organization_id)
 
-    mock_resp = _mock_litellm_response("What is alpha?", "Alpha is text.")
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+    mock_resp = _mock_deepseek_response("What is alpha?", "Alpha is text.")
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
         post_resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -274,8 +275,8 @@ async def test_golden_sample_size_capped_at_50(client: AsyncClient, organization
     """sample_size > 50 is silently capped to 50 (no error)."""
     dataset_id = await _create_dataset(client, organization_id)
 
-    mock_resp = _mock_litellm_response()
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+    mock_resp = _mock_deepseek_response()
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
         resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -317,8 +318,8 @@ async def test_regenerate_golden_replaces_items(
     await db_session.commit()
 
     # Generate initial golden items
-    mock_1 = _mock_litellm_response("Q1?", "A1.")
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_1)):
+    mock_1 = _mock_deepseek_response("Q1?", "A1.")
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_1)):
         post_resp = await client.post(
             f"/api/v1/datasets/{ds_id}/golden",
             headers={"X-Organization-Id": organization_id},
@@ -329,8 +330,8 @@ async def test_regenerate_golden_replaces_items(
     assert len(initial_ids) > 0
 
     # Regenerate with different LLM output
-    mock_2 = _mock_litellm_response("Q2?", "A2.")
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_2)):
+    mock_2 = _mock_deepseek_response("Q2?", "A2.")
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_2)):
         regen_resp = await client.post(
             f"/api/v1/datasets/{ds_id}/golden/regenerate",
             headers={"X-Organization-Id": organization_id},
@@ -375,8 +376,8 @@ async def test_regenerate_golden_handles_empty_dataset(client: AsyncClient, orga
     dataset_id = await _create_dataset(client, organization_id)
     # No documents uploaded — dataset is empty
 
-    mock_resp = _mock_litellm_response()
-    with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_resp)):
+    mock_resp = _mock_deepseek_response()
+    with patch(_PATCH_POST, new=AsyncMock(return_value=mock_resp)):
         resp = await client.post(
             f"/api/v1/datasets/{dataset_id}/golden/regenerate",
             headers={"X-Organization-Id": organization_id},
