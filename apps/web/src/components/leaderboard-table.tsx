@@ -154,7 +154,7 @@ export function LeaderboardTable({ combinations }: Props) {
                 </Badge>
               </TableCell>
               <TableCell className="text-right font-mono">
-                {formatScore(metricValue(row, ["retrieval_hit", "hit_rate"]))}
+                {formatScore(metricValue(row, ["retrieval_hit", "hit_rate", "context_relevance"]))}
               </TableCell>
               <TableCell className="text-right font-mono">
                 {formatScore(metricValue(row, ["answer_similarity", "answer_relevance"]))}

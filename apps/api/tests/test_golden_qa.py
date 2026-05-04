@@ -460,9 +460,10 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
 
     entry = experiment.leaderboard_json[0]
     metrics = entry["metrics"]
-    assert "retrieval_hit" in metrics
-    # Hit should be 1.0 since mock chunk contains "Paris"
-    assert metrics["retrieval_hit"] == 1.0
+    assert "context_relevance" in metrics or "retrieval_hit" in metrics
+    # Fallback substring match should find "Paris" in mock chunk
+    val = metrics.get("context_relevance", metrics.get("retrieval_hit", 0.0))
+    assert val == 1.0
     assert metrics["composite_score"] == 1.0
     consume_mock.assert_awaited_once()
     assert consume_mock.await_args.kwargs["count"] == 1

@@ -3,7 +3,6 @@
 import itertools
 import logging
 import math
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -193,22 +192,6 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _answer_in_text(answer: str, text: str) -> bool:
-    """Check if *answer* appears as a whole word / phrase in *text*.
-
-    Uses ``\\b`` word boundaries to avoid false positives like
-    "Paris" matching inside "Parisian" or "Particular".
-    """
-    if not answer or not text:
-        return False
-    try:
-        pattern = re.compile(r"\b" + re.escape(answer.lower().strip()) + r"\b", re.DOTALL)
-        return bool(pattern.search(text.lower()))
-    except re.error:
-        # Fall back to plain substring if regex fails (e.g. empty answer)
-        return answer.lower() in text.lower()
-
-
 async def _golden_metrics(
     nodes: list[dict[str, Any]],
     golden_items: list[DatasetGoldenItem],
@@ -217,17 +200,18 @@ async def _golden_metrics(
     db: AsyncSession,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Evaluate a pipeline combo against golden Q&A pairs.
+    Evaluate a pipeline combo against golden Q&A pairs using embeddings.
 
-    Returns (metrics_dict, traces) where traces is a list of per-item trace
-    dicts with ``query``, ``retrieved_chunks``, and optionally ``generated_answer``.
+    Returns (metrics_dict, traces).
 
-    Metrics (no LLM-as-judge):
-    - retrieval_hit: 1.0 if golden answer text appears (word-boundary match)
-      in any top-k chunk; 0.0 otherwise.
-    - answer_similarity: cosine similarity embed(generated_answer) vs embed(expected_answer)
-      (only when generator node present).
-    - composite_score = 0.5*avg_hit + 0.5*avg_similarity  (or avg_hit when no generator).
+    Metrics:
+    - context_relevance: max cosine similarity between embedded *expected_answer*
+      and each retrieved chunk's embedded text.  Measures how well the retrieved
+      context covers the expected answer semantically (no string matching).
+    - answer_similarity: cosine similarity between embedded *generated_answer*
+      and embedded *expected_answer* (only when generator + embedder available).
+    - composite_score = 0.5*avg_context_relevance + 0.5*avg_answer_similarity
+      (or avg_context_relevance when no generator).
     """
     from typing import cast
 
@@ -254,7 +238,7 @@ async def _golden_metrics(
     retriever_params = dict(retriever_node.get("params", {}))
     retriever_params["session"] = db
 
-    # Build embedder if available (for answer_similarity)
+    # Build embedder (required for semantic comparison)
     embedder: Embedder | None = None
     if embedder_node is not None:
         embedder_cls = get_plugin("embedder", embedder_node["plugin_name"])
@@ -268,7 +252,7 @@ async def _golden_metrics(
         if generator_cls is not None:
             generator = cast(Generator, generator_cls(dict(generator_node.get("params", {}))))
 
-    hit_scores: list[float] = []
+    ctx_scores: list[float] = []
     sim_scores: list[float] = []
     retrieval_failures = 0
     traces: list[dict[str, Any]] = []
@@ -281,7 +265,7 @@ async def _golden_metrics(
             "expected_answer": item.answer,
             "retrieved_chunks": [],
             "generated_answer": None,
-            "retrieval_hit": 0.0,
+            "context_relevance": 0.0,
             "similarity": None,
         }
 
@@ -306,7 +290,7 @@ async def _golden_metrics(
         except Exception as exc:
             logger.warning("Retriever failed for golden item %s: %s", item.id, exc)
             retrieval_failures += 1
-            hit_scores.append(0.0)
+            ctx_scores.append(0.0)
             traces.append(item_trace)
             continue
 
@@ -315,10 +299,27 @@ async def _golden_metrics(
             for r in results[:5]
         ]
 
-        # Retrieval hit — golden answer as word-boundary match
-        hit = 1.0 if any(_answer_in_text(item.answer, r["text"]) for r in results) else 0.0
-        item_trace["retrieval_hit"] = hit
-        hit_scores.append(hit)
+        # Context relevance — embed expected_answer, compare with each chunk
+        if embedder is not None:
+            try:
+                answer_vec = (await embedder.embed([item.answer]))[0]
+                chunk_vecs = await embedder.embed([r["text"][:1000] for r in results[:5]])
+                max_sim = (
+                    max(_cosine_similarity(answer_vec, cv) for cv in chunk_vecs)
+                    if chunk_vecs
+                    else 0.0
+                )
+                item_trace["context_relevance"] = round(max_sim, 4)
+                ctx_scores.append(max_sim)
+            except Exception as exc:
+                logger.debug("Context relevance failed for item %s: %s", item.id, exc)
+                ctx_scores.append(0.0)
+        else:
+            # No embedder — fall back to simple substring match
+            item_trace["context_relevance"] = (
+                1.0 if item.answer in " ".join(r["text"] for r in results) else 0.0
+            )
+            ctx_scores.append(item_trace["context_relevance"])
 
         # Answer similarity — only when both generator and embedder are available
         if generator is not None and embedder is not None:
@@ -326,26 +327,27 @@ async def _golden_metrics(
                 gen_result = await generator.generate(query=query, contexts=results)
                 generated_answer = gen_result.get("answer", "")
                 item_trace["generated_answer"] = generated_answer
-                vecs = await embedder.embed([generated_answer, item.answer])
-                sim = _cosine_similarity(vecs[0], vecs[1])
-                item_trace["similarity"] = round(sim, 4)
-                sim_scores.append(sim)
+                if generated_answer.strip():
+                    vecs = await embedder.embed([generated_answer, item.answer])
+                    sim = _cosine_similarity(vecs[0], vecs[1])
+                    item_trace["similarity"] = round(sim, 4)
+                    sim_scores.append(sim)
             except Exception as exc:
                 logger.debug("Answer similarity failed for golden item %s: %s", item.id, exc)
 
         traces.append(item_trace)
 
-    if not hit_scores:
+    if not ctx_scores:
         return _metric_error("no_golden_scores", "Golden evaluation produced no scores"), traces
 
-    avg_hit = sum(hit_scores) / len(hit_scores)
+    avg_ctx = sum(ctx_scores) / len(ctx_scores)
     avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
-    composite = 0.5 * avg_hit + 0.5 * avg_sim if avg_sim is not None else avg_hit
+    composite = 0.5 * avg_ctx + 0.5 * avg_sim if avg_sim is not None else avg_ctx
 
     metrics: dict[str, Any] = {
         "status": "completed",
-        "retrieval_hit": round(avg_hit, 4),
-        "context_recall": round(avg_hit, 4),
+        "context_relevance": round(avg_ctx, 4),
+        "context_recall": round(avg_ctx, 4),
         "composite_score": round(composite, 4),
     }
     if avg_sim is not None:

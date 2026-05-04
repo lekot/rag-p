@@ -41,6 +41,7 @@ class LeaderboardScoresOut(BaseModel):
     context_recall: float | None = None
     retrieval_hit: float | None = None
     hit_rate: float | None = None
+    context_relevance: float | None = None
     answer_similarity: float | None = None
 
 
@@ -215,9 +216,12 @@ async def get_leaderboard(
                     answer_relevance=metrics.get("answer_relevance")
                     or metrics.get("answer_similarity"),
                     context_precision=metrics.get("context_precision"),
-                    context_recall=metrics.get("context_recall") or metrics.get("retrieval_hit"),
+                    context_recall=metrics.get("context_recall")
+                    or metrics.get("retrieval_hit")
+                    or metrics.get("context_relevance"),
                     retrieval_hit=metrics.get("retrieval_hit"),
                     hit_rate=metrics.get("hit_rate"),
+                    context_relevance=metrics.get("context_relevance"),
                     answer_similarity=metrics.get("answer_similarity"),
                 ),
                 composite_score=composite,
