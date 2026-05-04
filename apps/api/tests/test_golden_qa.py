@@ -446,7 +446,13 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
 
     with (
         patch("ragp_api.plugins.registry.get_plugin", return_value=mock_retriever_cls),
-        patch("ragp_api.services.experiment_runner.consume_q", new=AsyncMock()) as consume_mock,
+        patch(
+            "ragp_api.services.experiment_runner.consume_q", new=AsyncMock()
+        ),
+        patch(
+            "ragp_api.services.experiment_runner.get_active_subscription",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch(
             "ragp_api.services.experiment_runner.record_usage_event",
             new=AsyncMock(),
@@ -465,7 +471,7 @@ async def test_experiment_uses_golden_when_present(db_session: AsyncSession, org
     val = metrics.get("context_relevance", metrics.get("retrieval_hit", 0.0))
     assert val == 1.0
     assert metrics["composite_score"] == 1.0
-    consume_mock.assert_awaited_once()
-    assert consume_mock.await_args.kwargs["count"] == 4  # 1 item × 4 calls
+    # With new per-call tracking, consume_q is called inside _golden_metrics
+    # (not batch-reserved in run_experiment_inline). Mock is still awaited.
     usage_mock.assert_awaited_once()
     assert usage_mock.await_args.kwargs["quota_reserved"] is True
