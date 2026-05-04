@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import (
     AuditEvent,
+    Chunk,
+    Document,
     OrgSubscription,
     Plan,
 )
@@ -180,13 +182,33 @@ async def test_golden_generate_audit_event(
     """POST /datasets/{id}/golden creates golden.generate audit with count."""
     data = await _signup(client, "audit_golden_x@example.com", org_name="GoldenAuditOrg")
     org_id = data["organization"]["id"]
+    from ragp_api.db.models import Dataset
 
-    dataset_id = await _create_dataset(client, org_id)
-    await _upload_document(client, dataset_id, org_id)
+    ds_id = str(uuid.uuid4())
+    ds = Dataset(id=ds_id, organization_id=org_id, name="audit-gs", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=org_id,
+        dataset_id=ds_id,
+        source_uri="upload://audit.txt",
+        status="indexed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    c = Chunk(
+        id=str(uuid.uuid4()),
+        document_id=doc.id,
+        organization_id=org_id,
+        text="Audit test chunk. " * 30,
+    )
+    db_session.add(c)
+    await db_session.commit()
 
     with patch(_PATCH_DEEPSEEK, new_callable=AsyncMock, return_value=_deepseek_mock()):
         resp = await client.post(
-            f"/api/v1/datasets/{dataset_id}/golden",
+            f"/api/v1/datasets/{ds_id}/golden",
             headers={"X-Organization-Id": org_id},
             json={"sample_size": 1},
         )
@@ -201,7 +223,7 @@ async def test_golden_generate_audit_event(
     )
     event = result.scalar_one_or_none()
     assert event is not None, "golden.generate audit event not found"
-    assert event.resource_id == dataset_id
+    assert event.resource_id == ds_id
     assert event.resource_type == "dataset"
     assert event.metadata_json.get("count") == returned_count
 

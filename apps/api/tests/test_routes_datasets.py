@@ -402,7 +402,6 @@ async def test_delete_dataset_cleans_runtime_dependents(
                 dataset_id=dataset_id,
                 question="golden q",
                 answer="golden a",
-                source_chunk_id=chunk_id,
             ),
             Experiment(
                 id=str(uuid.uuid4()),

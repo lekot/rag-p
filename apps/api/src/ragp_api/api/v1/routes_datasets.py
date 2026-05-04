@@ -313,12 +313,8 @@ async def delete_document(
         ) from exc
 
     # Clean up database
-    # Delete golden QA items whose source chunks belong to this document —
-    # otherwise evaluation metrics break (retrieval_hit always 0 for orphaned items)
-    chunk_ids_subq = select(Chunk.id).where(Chunk.document_id == document_id)
-    await db.execute(
-        delete(DatasetGoldenItem).where(DatasetGoldenItem.source_chunk_id.in_(chunk_ids_subq))
-    )
+    # Golden items are now content-based (no source_chunk_id), so deleting a
+    # document does not orphan them.  Only delete the chunks and the document.
     await db.execute(delete(Chunk).where(Chunk.document_id == document_id))
     await db.delete(doc)
 
@@ -375,7 +371,6 @@ class GoldenItemOut(BaseModel):
     id: str
     question: str
     answer: str
-    source_chunk_id: str | None
     created_at: str
 
 
@@ -422,7 +417,6 @@ async def generate_golden(
             id=item.id,
             question=item.question,
             answer=item.answer,
-            source_chunk_id=item.source_chunk_id,
             created_at=item.created_at.isoformat(),
         )
         for item in db_items
@@ -482,7 +476,6 @@ async def regenerate_golden(
             id=item.id,
             question=item.question,
             answer=item.answer,
-            source_chunk_id=item.source_chunk_id,
             created_at=item.created_at.isoformat(),
         )
         for item in db_items
@@ -525,7 +518,6 @@ async def list_golden(
             id=item.id,
             question=item.question,
             answer=item.answer,
-            source_chunk_id=item.source_chunk_id,
             created_at=item.created_at.isoformat(),
         )
         for item in items

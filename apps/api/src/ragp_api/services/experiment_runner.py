@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Experiment
@@ -203,7 +203,7 @@ async def _golden_metrics(
     Evaluate a pipeline combo against golden Q&A pairs.
 
     Metrics (no LLM-as-judge):
-    - retrieval_hit: 1.0 if source_chunk_id in top-k retrieved chunks; 0.0 otherwise.
+    - retrieval_hit: 1.0 if golden answer text appears in any top-k chunk; 0.0 otherwise.
     - answer_similarity: cosine similarity embed(generated_answer) vs embed(expected_answer)
       (only when generator node present).
     - composite_score = 0.5*avg_hit + 0.5*avg_similarity  (or avg_hit when no generator).
@@ -275,9 +275,8 @@ async def _golden_metrics(
             hit_scores.append(0.0)
             continue
 
-        # Retrieval hit
-        result_ids = [r["id"] for r in results]
-        hit = 1.0 if item.source_chunk_id and item.source_chunk_id in result_ids else 0.0
+        # Retrieval hit — golden answer must appear in at least one chunk
+        hit = 1.0 if any(item.answer in r["text"] for r in results) else 0.0
         hit_scores.append(hit)
 
         # Answer similarity — only when both generator and embedder are available
@@ -453,17 +452,6 @@ async def run_experiment_inline(
             )
             _touch()
             await db.commit()
-
-        # Re-chunking (above) deletes old chunks → ON DELETE SET NULL destroys
-        # source_chunk_id on golden items.  Clean up orphaned items (NULL
-        # source_chunk_id) so the experiment falls back to self-test instead
-        # of returning composite_score=0.0 on broken pointers.
-        await db.execute(
-            delete(DatasetGoldenItem).where(
-                DatasetGoldenItem.dataset_id == dataset_id,
-                DatasetGoldenItem.source_chunk_id.is_(None),
-            )
-        )
 
         # Check whether golden Q&A exists for this dataset
         golden_items = await _load_golden_items(db, dataset_id)

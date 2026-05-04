@@ -1,4 +1,4 @@
-"""Generates golden Q&A pairs by sampling chunks from a dataset via DeepSeek API."""
+"""Generates golden Q&A pairs from document text via DeepSeek API."""
 
 import json
 import logging
@@ -15,34 +15,26 @@ from ragp_api.settings import settings
 logger = logging.getLogger(__name__)
 
 _QA_PROMPT = (
-    "Read the following text chunk and generate ONE concise question that this chunk answers, "
+    "Read the following text and generate ONE concise question that this text answers, "
     "plus the exact answer.\n"
     'Return JSON: {{"question": "...", "answer": "..."}}.\n'
     "No explanations.\n\n"
-    "Chunk:\n{chunk_text}"
+    "Text:\n{document_text}"
 )
+
+# Take at most this many chars from the start of each document for QA generation.
+# 4000 chars ~1000 tokens — leaves room in the context window for the Q&A output.
+_DOC_TEXT_MAX_CHARS = 4000
 
 
 class GoldenGenerationError(RuntimeError):
-    """Raised when chunks exist but the LLM cannot produce any golden Q&A pairs."""
+    """Raised when documents exist but no valid golden Q&A could be generated."""
 
 
-def _extractive_pair(chunk: Chunk) -> dict[str, str]:
-    text = " ".join(chunk.text.split())
-    answer = text[:700].rstrip()
-    if len(text) > 700:
-        answer += "..."
-    return {
-        "question": "Какая информация содержится в этом фрагменте?",
-        "answer": answer,
-        "source_chunk_id": chunk.id,
-    }
-
-
-def _parse_deepseek_response(raw: str, chunk_id: str) -> dict[str, str] | None:
+def _parse_deepseek_response(raw: str) -> dict[str, str] | None:
     """Parse DeepSeek JSON response, stripping markdown fences if present.
 
-    Returns {"question": ..., "answer": ..., "source_chunk_id": ...} or None.
+    Returns {"question": ..., "answer": ...} or None.
     """
     raw = raw.strip()
     if raw.startswith("```"):
@@ -50,12 +42,15 @@ def _parse_deepseek_response(raw: str, chunk_id: str) -> dict[str, str] | None:
         if raw.startswith("json"):
             raw = raw[4:]
         raw = raw.strip()
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
     question = str(parsed.get("question", "")).strip()
     answer = str(parsed.get("answer", "")).strip()
     if not question or not answer:
         return None
-    return {"question": question, "answer": answer, "source_chunk_id": chunk_id}
+    return {"question": question, "answer": answer}
 
 
 async def _call_deepseek(
@@ -68,6 +63,15 @@ async def _call_deepseek(
         return await client.post(url, json=body, headers=headers)
 
 
+def _sample_document_text(document: Document, chunks: list[Chunk]) -> str:
+    """Build a text sample from a document for QA generation.
+
+    Uses the first _DOC_TEXT_MAX_CHARS from the reconstructed document text.
+    """
+    text = "\n\n".join(c.text for c in chunks) if chunks else document.source_uri
+    return text[:_DOC_TEXT_MAX_CHARS].strip()
+
+
 async def generate_golden_qa(
     dataset_id: str,
     organization_id: str,
@@ -75,26 +79,32 @@ async def generate_golden_qa(
     sample_size: int = 10,
     model: str = "deepseek-v4-flash",
 ) -> list[dict[str, str]]:
-    """Generates a list of golden Q&A pairs by sampling chunks from the dataset.
+    """Generates golden Q&A pairs by sampling documents from the dataset.
 
-    Calls DeepSeek API directly via httpx (bypasses litellm for transparency).
-    Returns list of {"question": str, "answer": str, "source_chunk_id": str}.
+    For each sampled document, takes the first ~4000 chars and asks DeepSeek
+    to produce a question+answer pair.  The result is NOT tied to any specific
+    chunk — it works across chunkers and survives re-chunking.
+
+    Returns list of {"question": str, "answer": str}.
     """
-    # Sample random chunks from the dataset via JOIN with documents
-    # SQLite (test env) does not support RANDOM() as a function name but does support it as
-    # ORDER BY RANDOM().  PostgreSQL also supports ORDER BY RANDOM().
+    # Sample random documents from the dataset
     stmt = (
-        select(Chunk)
-        .join(Document, Chunk.document_id == Document.id)
-        .where(Document.dataset_id == dataset_id, Document.organization_id == organization_id)
+        select(Document)
+        .where(
+            Document.dataset_id == dataset_id,
+            Document.organization_id == organization_id,
+            Document.status == "indexed",
+        )
         .order_by(func.random())
         .limit(sample_size)
     )
     result = await db.execute(stmt)
-    chunks = result.scalars().all()
+    documents = result.scalars().all()
 
-    if not chunks:
-        logger.info("No chunks found for dataset %s — returning empty golden set", dataset_id)
+    if not documents:
+        logger.info(
+            "No indexed documents found for dataset %s — returning empty golden set", dataset_id
+        )
         return []
 
     api_key = settings.deepseek_api_key or ""
@@ -107,9 +117,18 @@ async def generate_golden_qa(
 
     pairs: list[dict[str, str]] = []
     failures = 0
-    for chunk in chunks:
-        prompt = _QA_PROMPT.format(chunk_text=chunk.text)
-        body = {
+    for doc in documents:
+        # Load chunks for this document
+        chunks_result = await db.execute(
+            select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.created_at)
+        )
+        chunks = chunks_result.scalars().all()
+        doc_text = _sample_document_text(doc, chunks)
+        if not doc_text:
+            continue
+
+        prompt = _QA_PROMPT.format(document_text=doc_text)
+        body: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
@@ -119,35 +138,29 @@ async def generate_golden_qa(
             resp = await _call_deepseek(url, headers, body)
             if resp.status_code != 200:
                 logger.warning(
-                    "DeepSeek API returned %d for chunk %s: %s",
+                    "DeepSeek API returned %d for doc %s: %s",
                     resp.status_code,
-                    chunk.id,
+                    doc.id,
                     resp.text[:500],
                 )
                 failures += 1
-                if settings.llm_fallback_mode == "extractive":
-                    pairs.append(_extractive_pair(chunk))
                 continue
             data = resp.json()
             raw = data["choices"][0]["message"]["content"]
-            parsed = _parse_deepseek_response(raw, chunk.id)
+            parsed = _parse_deepseek_response(raw)
             if parsed is None:
-                logger.debug("Empty question/answer for chunk %s — skipping", chunk.id)
+                logger.debug("Empty or invalid response for doc %s — skipping", doc.id)
                 continue
             pairs.append(parsed)
         except json.JSONDecodeError as exc:
             failures += 1
-            logger.debug("JSON parse error for chunk %s: %s — skipping", chunk.id, exc)
-            if settings.llm_fallback_mode == "extractive":
-                pairs.append(_extractive_pair(chunk))
+            logger.debug("JSON decode error for doc %s: %s — skipping", doc.id, exc)
         except Exception as exc:
             failures += 1
-            logger.warning("DeepSeek API call failed for chunk %s: %s — skipping", chunk.id, exc)
-            if settings.llm_fallback_mode == "extractive":
-                pairs.append(_extractive_pair(chunk))
+            logger.warning("DeepSeek call failed for doc %s: %s — skipping", doc.id, exc)
 
     if not pairs and failures:
-        raise GoldenGenerationError("LLM did not generate valid golden Q&A pairs")
+        raise GoldenGenerationError("DeepSeek did not produce valid golden Q&A pairs")
 
     return pairs
 
@@ -164,7 +177,6 @@ async def save_golden_items(
             dataset_id=dataset_id,
             question=p["question"],
             answer=p["answer"],
-            source_chunk_id=p.get("source_chunk_id"),
         )
         for p in pairs
     ]
