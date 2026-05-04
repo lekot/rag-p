@@ -45,19 +45,64 @@ async def create_run(
     if pipeline.current_version_id is None:
         raise HTTPException(status_code=422, detail="Pipeline has no version")
 
+    from ragp_api.db.models import PipelineVersion
+
+    ver_result = await db.execute(
+        select(PipelineVersion).where(PipelineVersion.id == pipeline.current_version_id)
+    )
+    ver = ver_result.scalar_one_or_none()
+    if ver is None or not ver.nodes_json:
+        raise HTTPException(status_code=422, detail="Pipeline version has no nodes")
+
+    org_id = pipeline.organization_id
+    dataset_id = body.dataset_id
+    query = body.query or ""
+
     run = Run(
         id=str(uuid.uuid4()),
-        organization_id=pipeline.organization_id,
+        organization_id=org_id,
         pipeline_version_id=pipeline.current_version_id,
-        dataset_id=body.dataset_id,
-        query=body.query,
-        status="pending",
+        dataset_id=dataset_id,
+        query=query,
+        status="running",
+        started_at=datetime.now(),
     )
     db.add(run)
     await db.commit()
-    await db.refresh(run)
 
-    # TODO: enqueue async execution via background task / queue
+    # Execute pipeline inline
+    try:
+        from ragp_api.services.pipeline_runner import run_pipeline
+
+        enriched_nodes: list[dict[str, Any]] = []
+        for node in ver.nodes_json:
+            n = dict(node)
+            if n.get("plugin_kind") == "retriever":
+                params = dict(n.get("params", {}))
+                params["session"] = db
+                params["organization_id"] = org_id
+                params["dataset_id"] = dataset_id
+                n["params"] = params
+            enriched_nodes.append(n)
+
+        result = await run_pipeline(enriched_nodes, query, db)
+
+        usage_dict: dict[str, Any] = result.get("usage", {})
+        run.status = "completed"
+        run.finished_at = datetime.now()
+        run.metrics_json = {
+            "prompt_tokens": int(usage_dict.get("prompt_tokens", 0)),
+            "completion_tokens": int(usage_dict.get("completion_tokens", 0)),
+        }
+        run.traces_json = {"traces": result.get("traces", [])}
+        await db.commit()
+        await db.refresh(run)
+    except Exception:
+        run.status = "failed"
+        run.finished_at = datetime.now()
+        await db.commit()
+        await db.refresh(run)
+
     return RunOut(
         id=run.id,
         organization_id=run.organization_id,
