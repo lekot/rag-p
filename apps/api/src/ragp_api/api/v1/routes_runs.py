@@ -27,6 +27,8 @@ class RunOut(BaseModel):
     status: str
     metrics: dict[str, Any] | None
     trace: dict[str, Any] | None
+    answer: str | None = None
+    contexts: list[dict[str, Any]] | None = None
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
@@ -88,13 +90,21 @@ async def create_run(
         result = await run_pipeline(enriched_nodes, query, db)
 
         usage_dict: dict[str, Any] = result.get("usage", {})
+        answer = result.get("answer", "")
+        contexts = result.get("contexts", [])
         run.status = "completed"
         run.finished_at = datetime.now()
         run.metrics_json = {
             "prompt_tokens": int(usage_dict.get("prompt_tokens", 0)),
             "completion_tokens": int(usage_dict.get("completion_tokens", 0)),
         }
-        run.traces_json = {"traces": result.get("traces", [])}
+        run.traces_json = {
+            "answer": answer,
+            "contexts": [
+                {"id": c.get("id", ""), "text": c.get("text", "")[:300]} for c in contexts
+            ],
+            "traces": result.get("traces", []),
+        }
         await db.commit()
         await db.refresh(run)
     except Exception:
@@ -103,6 +113,7 @@ async def create_run(
         await db.commit()
         await db.refresh(run)
 
+    traces_raw = run.traces_json or {}
     return RunOut(
         id=run.id,
         organization_id=run.organization_id,
@@ -111,7 +122,9 @@ async def create_run(
         query=run.query,
         status=run.status,
         metrics=run.metrics_json,
-        trace=run.traces_json,
+        trace=traces_raw.get("traces", []),
+        answer=traces_raw.get("answer"),
+        contexts=traces_raw.get("contexts"),
         started_at=run.started_at,
         finished_at=run.finished_at,
         created_at=run.created_at,
@@ -124,6 +137,7 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    traces_raw = run.traces_json or {}
     return RunOut(
         id=run.id,
         organization_id=run.organization_id,
@@ -132,7 +146,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
         query=run.query,
         status=run.status,
         metrics=run.metrics_json,
-        trace=run.traces_json,
+        trace=traces_raw.get("traces", []),
+        answer=traces_raw.get("answer"),
+        contexts=traces_raw.get("contexts"),
         started_at=run.started_at,
         finished_at=run.finished_at,
         created_at=run.created_at,
@@ -160,7 +176,9 @@ async def list_runs(
             query=r.query,
             status=r.status,
             metrics=r.metrics_json,
-            trace=r.traces_json,
+            trace=(r.traces_json or {}).get("traces", []),
+            answer=(r.traces_json or {}).get("answer"),
+            contexts=(r.traces_json or {}).get("contexts"),
             started_at=r.started_at,
             finished_at=r.finished_at,
             created_at=r.created_at,
