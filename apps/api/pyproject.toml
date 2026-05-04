@@ -17,7 +17,6 @@ dependencies = [
     "pydantic-settings>=2.2.0",
     "pgvector>=0.3.0",
     "litellm>=1.40.0",
-    "cohere>=5.5.0",
     "langchain-text-splitters>=0.2.0",
     "ragas>=0.1.0",
     "langfuse>=2.0.0",
@@ -56,14 +55,12 @@ markdown-aware = "ragp_api.plugins.chunkers.markdown:MarkdownAwareChunker"
 
 [project.entry-points."ragp.plugins.embedders"]
 litellm-embedder = "ragp_api.plugins.embedders.litellm_embedder:LiteLLMEmbedder"
-cohere-embedder = "ragp_api.plugins.embedders.cohere_embedder:CohereEmbedder"
 ollama-embedder = "ragp_api.plugins.embedders.ollama_embedder:OllamaEmbedder"
 
 [project.entry-points."ragp.plugins.retrievers"]
 pgvector-hybrid = "ragp_api.plugins.retrievers.pgvector_hybrid:PgvectorHybridRetriever"
 
 [project.entry-points."ragp.plugins.rerankers"]
-cohere = "ragp_api.plugins.rerankers.cohere:CohereReranker"
 bge-reranker = "ragp_api.plugins.rerankers.bge:BGEReranker"
 deepseek-reranker = "ragp_api.plugins.rerankers.deepseek:DeepSeekReranker"
 

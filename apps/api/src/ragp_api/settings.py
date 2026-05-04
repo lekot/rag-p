@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     experiment_stale_timeout_seconds: int = 900
     experiment_watchdog_interval_minutes: int = 2
 
-    # Cohere selective VPN routing (AmneziaWG sidecar).
+    # Outbound HTTP forward proxy for API calls that need VPN routing.
     # Empty (default) -> direct connect; from RU IPs api.cohere.com / api.cohere.ai may be blocked.
     # Production value: http://cohere-egress:8888 — HTTP forward proxy in the sidecar.
     cohere_http_proxy: str = ""

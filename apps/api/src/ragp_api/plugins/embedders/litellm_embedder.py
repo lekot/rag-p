@@ -1,4 +1,4 @@
-"""LiteLLMEmbedder — OpenAI/Cohere/Ollama embeddings via LiteLLM."""
+"""LiteLLMEmbedder — OpenAI/Ollama embeddings via LiteLLM."""
 
 import os
 from typing import Any, ClassVar, cast
@@ -21,7 +21,6 @@ class LiteLLMEmbedder(Embedder):
                     "openai/text-embedding-3-small",
                     "openai/text-embedding-3-large",
                     "ollama/bge-m3",
-                    "cohere/embed-english-v3.0",
                 ],
             },
             "dim_override": {"type": "integer", "description": "Force embedding dimension"},
@@ -40,7 +39,7 @@ class LiteLLMEmbedder(Embedder):
         model: str = self.params["model"]
         # litellm ignores the `proxy` kwarg for aembedding, but respects
         # HTTPS_PROXY / HTTP_PROXY env vars.  Set them temporarily so that
-        # traffic is routed through the cohere-egress VPN sidecar.
+        # traffic is routed through the egress VPN sidecar.
         old_https_proxy = os.environ.get("HTTPS_PROXY")
         old_http_proxy = os.environ.get("HTTP_PROXY")
         if settings.cohere_http_proxy:

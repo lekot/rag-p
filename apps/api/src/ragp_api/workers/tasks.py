@@ -390,7 +390,7 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
     """ARQ task: chunk and embed a document in the background.
 
     Uses the default recursive-character chunker, then embeds via the
-    first available embedder (Ollama → Cohere → OpenAI).
+    first available embedder (OpenAI → Ollama).
     Updates document status to "indexed" on success or "failed" on error.
     """
     from typing import cast
@@ -444,11 +444,10 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
             await db.flush()
 
             # Embed — try embedders in priority order with fallback.
-            #   OpenAI ($0.02/M) > Cohere ($0.10/M) > Ollama (free, slow)
+            #   OpenAI > Ollama (free, slow)
             # Each embedder is attempted; if it fails (403, timeout, etc.)
             # the next one is tried.  Ollama is the ultimate fallback.
             ollama_host = os.environ.get("OLLAMA_HOST", "")
-            cohere_key = os.environ.get("COHERE_API_KEY", "")
             openai_key = os.environ.get("OPENAI_API_KEY", "")
 
             embedder: Embedder | None = None
@@ -462,14 +461,6 @@ async def chunk_document(ctx: dict[str, Any], document_id: str, text: str) -> No
                         "litellm-embedder",
                         "openai/text-embedding-3-small",
                         {"model": "openai/text-embedding-3-small"},
-                    )
-                )
-            if cohere_key:
-                candidates.append(
-                    (
-                        "cohere-embedder",
-                        "embed-multilingual-v3.0",
-                        {"model": "embed-multilingual-v3.0", "input_type": "search_document"},
                     )
                 )
             if ollama_host:
