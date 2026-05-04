@@ -86,8 +86,8 @@ function TraceDialog({
                 </p>
               )}
               <p className="text-xs">
-                Hit: {t.retrieval_hit === 1.0 ? "✅" : "❌"}
-                {t.similarity != null && ` | Similarity: ${Number(t.similarity).toFixed(3)}`}
+                Context relevance: {Number(t.context_relevance ?? 0).toFixed(3)}
+                {t.similarity != null && ` | Answer similarity: ${Number(t.similarity).toFixed(3)}`}
               </p>
               {Array.isArray(t.retrieved_chunks) && (
                 <div className="space-y-1">
