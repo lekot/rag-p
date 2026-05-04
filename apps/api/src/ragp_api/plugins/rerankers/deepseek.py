@@ -60,6 +60,8 @@ class DeepSeekReranker(Reranker):
 
         model: str = self.params.get("model", "deepseek-v4-flash")
         base_url = (settings.deepseek_base_url or "https://api.deepseek.com/v1").rstrip("/")
+        org_id: str | None = self.params.get("organization_id")
+        db = self.params.get("session")
 
         # Build document list
         doc_list = "\n".join(
@@ -111,6 +113,25 @@ class DeepSeekReranker(Reranker):
                         candidates[i]["rerank_score"] = float(score)
 
                 candidates.sort(key=lambda c: c.get("rerank_score", 0.0), reverse=True)
+
+                # Track usage
+                usage = data.get("usage", {})
+                if db is not None and org_id:
+                    try:
+                        from ragp_api.services.usage import record_usage_event
+
+                        await record_usage_event(
+                            db,
+                            org_id=org_id,
+                            api_key_id=None,
+                            pipeline_id=None,
+                            model=f"deepseek/{model}",
+                            prompt_tokens=int(usage.get("prompt_tokens", 0)),
+                            completion_tokens=int(usage.get("completion_tokens", 0)),
+                        )
+                    except Exception:
+                        logger.warning("DeepSeekReranker: failed to record usage", exc_info=True)
+
                 return candidates[:top_k]
 
             except (json.JSONDecodeError, KeyError, IndexError) as exc:

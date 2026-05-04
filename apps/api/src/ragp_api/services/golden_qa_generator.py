@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
+from ragp_api.services.usage import record_usage_event
 from ragp_api.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,18 @@ async def generate_golden_qa(
                 failures += 1
                 continue
             pairs.append(parsed)
+
+            # Track usage (prompt + completion tokens from API response)
+            usage = data.get("usage", {})
+            await record_usage_event(
+                db,
+                org_id=organization_id,
+                api_key_id=None,
+                pipeline_id=None,
+                model=f"deepseek/{model}",
+                prompt_tokens=int(usage.get("prompt_tokens", 0)),
+                completion_tokens=int(usage.get("completion_tokens", 0)),
+            )
         except json.JSONDecodeError as exc:
             failures += 1
             logger.debug("JSON decode error for doc %s: %s — skipping", doc.id, exc)

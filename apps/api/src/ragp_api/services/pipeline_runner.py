@@ -31,12 +31,14 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
             traces.append({"kind": kind, "name": name, "contexts_count": len(contexts)})
 
         elif kind == "reranker":
+            params["session"] = session
             reranker = cast(Reranker, cls(params))
             top_k = params.get("top_k", 10)
             contexts = await reranker.rerank(query=query, candidates=contexts, top_k=top_k)
             traces.append({"kind": kind, "name": name, "reranked_count": len(contexts)})
 
         elif kind == "generator":
+            params["session"] = session
             generator = cast(Generator, cls(params))
             result = await generator.generate(query=query, contexts=contexts)
             answer = result.get("answer", "")

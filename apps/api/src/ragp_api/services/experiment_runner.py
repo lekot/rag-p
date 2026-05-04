@@ -532,8 +532,13 @@ async def run_experiment_inline(
         if not use_golden:
             chunks = await _load_dataset_chunks(db, dataset_id, organization_id)
 
+        # Each golden item incurs ~4 API calls (embed query + embed answer +
+        # embed chunks + optionally generate).  Reserve accordingly.
+        _EST_CALLS_PER_GOLDEN_ITEM = 4
         units_per_combo = (
-            len(golden_items) if use_golden else min(len(chunks), _SELF_TEST_SAMPLE_LIMIT)
+            len(golden_items) * _EST_CALLS_PER_GOLDEN_ITEM
+            if use_golden
+            else min(len(chunks), _SELF_TEST_SAMPLE_LIMIT)
         )
         reserved_units = max(1, len(combinations) * max(1, units_per_combo))
         try:
