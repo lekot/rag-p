@@ -251,11 +251,16 @@ async def _golden_metrics(
     for item in golden_items:
         query = item.question
 
-        # Retrieve
-        try:
-            query_vec: list[float] | None = None
-            if embedder is not None:
+        # Embed query — if embedder fails, fall back to BM25-only
+        query_vec: list[float] | None = None
+        if embedder is not None:
+            try:
                 query_vec = (await embedder.embed([query]))[0]
+            except Exception:
+                query_vec = None  # BM25-only fallback
+
+        # Retrieve (BM25 if no query_vec, hybrid otherwise)
+        try:
             retriever = cast(Retriever, retriever_cls(retriever_params))
             results = await retriever.retrieve(
                 query=query,
@@ -362,10 +367,17 @@ async def _self_test_metric(
 
     for chunk in test_sample:
         query = chunk["text"][:80]
-        try:
-            query_vec: list[float] | None = None
-            if embedder is not None:
+
+        # Embed query — if embedder fails, fall back to BM25-only
+        query_vec: list[float] | None = None
+        if embedder is not None:
+            try:
                 query_vec = (await embedder.embed([query]))[0]
+            except Exception:
+                query_vec = None  # BM25-only fallback
+
+        # Retrieve (BM25 if no query_vec, hybrid otherwise)
+        try:
             retriever = cast(Retriever, retriever_cls(params))
             results = await retriever.retrieve(
                 query=query,
