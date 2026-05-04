@@ -286,18 +286,43 @@ async def test_golden_sample_size_capped_at_50(client: AsyncClient, organization
 
 
 @pytest.mark.asyncio
-async def test_regenerate_golden_replaces_items(client: AsyncClient, organization_id: str):
+async def test_regenerate_golden_replaces_items(
+    client: AsyncClient, db_session: AsyncSession, organization_id: str
+):
     """POST /datasets/{id}/golden/regenerate clears old items and creates new ones."""
-    dataset_id = await _create_dataset(client, organization_id)
-    await _upload_document(client, dataset_id, organization_id)
+    # Seed dataset + document + chunks directly (upload requires Redis for chunking)
+    ds_id = str(uuid.uuid4())
+    from ragp_api.db.models import Dataset
+
+    ds = Dataset(id=ds_id, organization_id=organization_id, name="regen-ds", source="uploaded")
+    doc = Document(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        dataset_id=ds_id,
+        source_uri="upload://regen.txt",
+        status="parsed",
+    )
+    db_session.add(ds)
+    db_session.add(doc)
+    await db_session.flush()
+
+    for i in range(3):
+        c = Chunk(
+            id=str(uuid.uuid4()),
+            document_id=doc.id,
+            organization_id=organization_id,
+            text=f"Chunk {i} content. " * 20,
+        )
+        db_session.add(c)
+    await db_session.commit()
 
     # Generate initial golden items
     mock_1 = _mock_litellm_response("Q1?", "A1.")
     with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_1)):
         post_resp = await client.post(
-            f"/api/v1/datasets/{dataset_id}/golden",
+            f"/api/v1/datasets/{ds_id}/golden",
             headers={"X-Organization-Id": organization_id},
-            json={"sample_size": 2},
+            json={"sample_size": 3},
         )
     assert post_resp.status_code == 201
     initial_ids = {item["id"] for item in post_resp.json()["items"]}
@@ -307,9 +332,9 @@ async def test_regenerate_golden_replaces_items(client: AsyncClient, organizatio
     mock_2 = _mock_litellm_response("Q2?", "A2.")
     with patch(_PATCH_ACOMPLETION, new=AsyncMock(return_value=mock_2)):
         regen_resp = await client.post(
-            f"/api/v1/datasets/{dataset_id}/golden/regenerate",
+            f"/api/v1/datasets/{ds_id}/golden/regenerate",
             headers={"X-Organization-Id": organization_id},
-            json={"sample_size": 2},
+            json={"sample_size": 3},
         )
     assert regen_resp.status_code == 201
     regen_data = regen_resp.json()
@@ -323,7 +348,7 @@ async def test_regenerate_golden_replaces_items(client: AsyncClient, organizatio
 
     # GET confirms only new items exist
     get_resp = await client.get(
-        f"/api/v1/datasets/{dataset_id}/golden",
+        f"/api/v1/datasets/{ds_id}/golden",
         headers={"X-Organization-Id": organization_id},
     )
     assert get_resp.status_code == 200

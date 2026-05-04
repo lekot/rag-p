@@ -457,9 +457,7 @@ async def regenerate_golden(
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
     # Delete all existing golden items
-    await db.execute(
-        delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
-    )
+    await db.execute(delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id))
 
     sample_size = max(1, min(body.sample_size, 50))
     try:

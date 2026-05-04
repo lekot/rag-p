@@ -70,9 +70,9 @@ async def _rechunk_documents_for_slot(
 
     for doc in docs_to_rechunk:
         # Reconstruct text from existing chunks (order by chunk_index)
-        existing = (await db.execute(
-            select(Chunk).where(Chunk.document_id == doc.id)
-        )).scalars().all()
+        existing = (
+            (await db.execute(select(Chunk).where(Chunk.document_id == doc.id))).scalars().all()
+        )
         if not existing:
             logger.warning("No existing chunks for doc %s, skipping re-chunk", doc.id)
             continue

@@ -53,9 +53,7 @@ class LiteLLMEmbedder(Embedder):
             all_embeddings: list[list[float]] = []
             for i in range(0, len(texts), MAX_TEXTS_PER_BATCH):
                 batch = texts[i : i + MAX_TEXTS_PER_BATCH]
-                response = await litellm.aembedding(
-                    model=model, input=batch, dimensions=1024
-                )
+                response = await litellm.aembedding(model=model, input=batch, dimensions=1024)
                 batch_embeddings: list[list[float]] = [
                     cast(list[float], item["embedding"]) for item in response.data
                 ]
