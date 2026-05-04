@@ -26,7 +26,7 @@ class RunOut(BaseModel):
     query: str | None
     status: str
     metrics: dict[str, Any] | None
-    trace: dict[str, Any] | None
+    trace: list[dict[str, Any]] | None = None
     answer: str | None = None
     contexts: list[dict[str, Any]] | None = None
     started_at: datetime | None
