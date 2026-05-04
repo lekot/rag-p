@@ -73,7 +73,10 @@ def bootstrap() -> None:
         ollama_embedder,
     )
     from ragp_api.plugins.generators import litellm_generator  # noqa: F401
-    from ragp_api.plugins.rerankers import cohere  # noqa: F401
+    from ragp_api.plugins.rerankers import (
+        cohere,  # noqa: F401
+        deepseek,  # noqa: F401
+    )
 
     if importlib.util.find_spec("sentence_transformers") is not None:
         from ragp_api.plugins.rerankers import bge  # noqa: F401
