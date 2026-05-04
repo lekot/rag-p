@@ -245,6 +245,14 @@ async def _golden_metrics(
         if embedder_cls is not None:
             embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
 
+    logger.info(
+        "Golden eval: retriever=%s embedder=%s generator=%s items=%d",
+        retriever_node["plugin_name"],
+        embedder_node["plugin_name"] if embedder_node else "None",
+        generator_node["plugin_name"] if generator_node else "None",
+        len(golden_items),
+    )
+
     # Build generator if available
     generator: Generator | None = None
     if generator_node is not None:
@@ -312,7 +320,7 @@ async def _golden_metrics(
                 item_trace["context_relevance"] = round(max_sim, 4)
                 ctx_scores.append(max_sim)
             except Exception as exc:
-                logger.debug("Context relevance failed for item %s: %s", item.id, exc)
+                logger.warning("Context relevance failed for item %s: %s", item.id, exc)
                 ctx_scores.append(0.0)
         else:
             # No embedder — fall back to simple substring match
@@ -343,6 +351,13 @@ async def _golden_metrics(
     avg_ctx = sum(ctx_scores) / len(ctx_scores)
     avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else None
     composite = 0.5 * avg_ctx + 0.5 * avg_sim if avg_sim is not None else avg_ctx
+    logger.info(
+        "Golden metrics: ctx_relevance=%.4f sim=%s composite=%.4f (items=%d)",
+        avg_ctx,
+        f"{avg_sim:.4f}" if avg_sim is not None else "N/A",
+        composite,
+        len(ctx_scores),
+    )
 
     metrics: dict[str, Any] = {
         "status": "completed",
