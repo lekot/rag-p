@@ -263,7 +263,7 @@ async def test_experiment_start_audit_event(
             "/api/v1/experiments",
             json={
                 "name": "AuditExperiment",
-                "organization_id": organization_id,
+                "organization_id": exp_org_id,
                 "dataset_id": dataset_id,
                 "plugin_grid": PLUGIN_GRID,
             },
