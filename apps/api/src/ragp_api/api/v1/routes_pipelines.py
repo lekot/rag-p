@@ -37,6 +37,11 @@ class PipelineOut(BaseModel):
     nodes: list[PipelineNodeIn] = []
 
 
+class PipelineUpdateIn(BaseModel):
+    name: str | None = None
+    nodes: list[PipelineNodeIn] | None = None
+
+
 class PromoteIn(BaseModel):
     experiment_id: str
 
@@ -115,6 +120,49 @@ async def list_pipelines(
             )
         )
     return out
+
+
+@router.put("/{pipeline_id}", response_model=PipelineOut)
+async def update_pipeline(
+    pipeline_id: str,
+    body: PipelineUpdateIn,
+    db: AsyncSession = Depends(get_db),
+) -> PipelineOut:
+    """Update pipeline metadata and/or nodes (creates a new version)."""
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
+
+    if body.name is not None:
+        pipeline.name = body.name
+
+    if body.nodes is not None:
+        # Validate all plugins exist before persisting
+        for node in body.nodes:
+            if get_plugin(node.plugin_kind, node.plugin_name) is None:
+                raise PluginNotFoundError(node.plugin_kind, node.plugin_name)
+
+        version_id = str(uuid.uuid4())
+        nodes_json = [n.model_dump() for n in body.nodes]
+        version = PipelineVersion(
+            id=version_id, pipeline_id=pipeline_id, nodes_json=nodes_json
+        )
+        db.add(version)
+        pipeline.current_version_id = version_id
+
+    await db.commit()
+    await db.refresh(pipeline)
+
+    nodes = await _load_nodes(db, pipeline.current_version_id)
+    return PipelineOut(
+        id=pipeline.id,
+        name=pipeline.name,
+        organization_id=pipeline.organization_id,
+        current_version_id=pipeline.current_version_id,
+        dataset_id=pipeline.dataset_id,
+        nodes=nodes,
+    )
 
 
 @router.get("/{pipeline_id}", response_model=PipelineOut)

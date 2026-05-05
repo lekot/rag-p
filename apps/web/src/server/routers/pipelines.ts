@@ -25,6 +25,12 @@ const PipelineSchema = z.object({
 
 export type Pipeline = z.infer<typeof PipelineSchema>;
 
+const PipelineUpdateSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).optional(),
+  nodes: z.array(PipelineNodeSchema).optional(),
+});
+
 export const pipelinesRouter = router({
   list: protectedProcedure
     .input(z.object({ datasetId: z.string().optional() }))
@@ -66,5 +72,14 @@ export const pipelinesRouter = router({
         `/api/v1/pipelines/${input.pipeline_id}/runs`,
         { query: input.query, dataset_id: input.dataset_id ?? null }
       );
+    }),
+
+  update: protectedProcedure
+    .input(PipelineUpdateSchema)
+    .mutation(async ({ input }) => {
+      return apiClient.put<Pipeline>(`/api/v1/pipelines/${input.id}`, {
+        name: input.name,
+        nodes: input.nodes,
+      });
     }),
 });

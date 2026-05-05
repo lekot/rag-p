@@ -22,6 +22,7 @@ import {
 
 interface Props {
   combinations: LeaderboardCombination[];
+  onPromote?: (index: number) => void;
 }
 
 function formatScore(value: number | null | undefined): string {
@@ -110,7 +111,7 @@ function TraceDialog({
   );
 }
 
-export function LeaderboardTable({ combinations }: Props) {
+export function LeaderboardTable({ combinations, onPromote }: Props) {
   const [traceIndex, setTraceIndex] = useState<number | null>(null);
   const sorted = [...combinations].sort(
     (a, b) => b.composite_score - a.composite_score
@@ -131,7 +132,7 @@ export function LeaderboardTable({ combinations }: Props) {
             <TableHead className="w-24 text-right">Precision</TableHead>
             <TableHead className="w-24 text-right">Recall</TableHead>
             <TableHead className="w-24 text-right font-semibold">Score</TableHead>
-            <TableHead className="w-24" />
+            <TableHead className="w-36" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -168,7 +169,7 @@ export function LeaderboardTable({ combinations }: Props) {
               <TableCell className="text-right font-semibold font-mono">
                 {row.composite_score.toFixed(3)}
               </TableCell>
-              <TableCell>
+              <TableCell className="flex gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -176,12 +177,21 @@ export function LeaderboardTable({ combinations }: Props) {
                 >
                   Trace
                 </Button>
+                {onPromote && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onPromote(i)}
+                  >
+                    Promote
+                  </Button>
+                )}
               </TableCell>
             </TableRow>
           ))}
           {sorted.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                 No results yet.
               </TableCell>
             </TableRow>

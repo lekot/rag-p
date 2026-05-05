@@ -44,6 +44,11 @@ const ScoresSchema = z.object({
 });
 
 const LeaderboardCombinationSchema = z.object({
+  nodes: z.array(z.object({
+    plugin_kind: z.string(),
+    plugin_name: z.string(),
+    params: z.record(z.unknown()),
+  })).optional(),
   config: z.record(z.unknown()),
   scores: ScoresSchema,
   composite_score: z.number(),
@@ -102,11 +107,11 @@ export const experimentsRouter = router({
     }),
 
   promote: protectedProcedure
-    .input(z.object({ id: z.string(), name: z.string().min(1) }))
+    .input(z.object({ id: z.string(), name: z.string().min(1), combination_index: z.number().int().min(0).optional().default(0) }))
     .mutation(async ({ input }) => {
       return apiClient.post<PromotedPipeline>(
         `/api/v1/experiments/${input.id}/promote_to_pipeline`,
-        { name: input.name }
+        { name: input.name, combination_index: input.combination_index }
       );
     }),
 });

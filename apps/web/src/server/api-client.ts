@@ -38,6 +38,12 @@ export const apiClient = {
       body: JSON.stringify(body),
       headers: extraHeaders,
     }),
+  put: <T>(path: string, body: unknown, extraHeaders?: Record<string, string>) =>
+    apiFetchJson<T>(path, {
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: extraHeaders,
+    }),
   delete: <T>(path: string, extraHeaders?: Record<string, string>) =>
     apiFetchJson<T>(path, { method: "DELETE", headers: extraHeaders }),
 };

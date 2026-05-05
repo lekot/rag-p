@@ -66,6 +66,7 @@ class LeaderboardOut(BaseModel):
 
 class PromoteIn(BaseModel):
     name: str
+    combination_index: int = 0
 
 
 class PipelineNodeOut(BaseModel):
@@ -261,13 +262,20 @@ async def promote_to_pipeline(
         )
 
     leaderboard = experiment.leaderboard_json or []
-    # Filter out error entries and pick top-1
+    # Filter out error entries
     valid_entries = [e for e in leaderboard if "error" not in e]
     if not valid_entries:
         raise HTTPException(status_code=422, detail="Leaderboard is empty or all runs failed")
 
-    top_entry = valid_entries[0]
-    nodes: list[dict[str, Any]] = top_entry.get("nodes", [])
+    idx = body.combination_index
+    if idx < 0 or idx >= len(valid_entries):
+        raise HTTPException(
+            status_code=422,
+            detail=f"combination_index {idx} out of range (0-{len(valid_entries)-1})",
+        )
+
+    selected_entry = valid_entries[idx]
+    nodes: list[dict[str, Any]] = selected_entry.get("nodes", [])
 
     pipeline_id = str(uuid.uuid4())
     version_id = str(uuid.uuid4())

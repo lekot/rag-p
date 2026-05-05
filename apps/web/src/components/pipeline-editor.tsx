@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Form from "@rjsf/core";
 import validator from "@rjsf/validator-ajv8";
@@ -38,11 +38,42 @@ interface NodeState {
   params: Record<string, unknown>;
 }
 
-export function PipelineEditor() {
+interface PipelineEditorProps {
+  /** Pre-populate nodes for edit mode */
+  initialNodes?: Array<{
+    plugin_kind: string;
+    plugin_name: string;
+    params: Record<string, unknown>;
+  }>;
+  /** Callback for edit mode — parent controls submission */
+  onChange?: (nodes: Array<{
+    plugin_kind: string;
+    plugin_name: string;
+    params: Record<string, unknown>;
+  }>) => void;
+}
+
+export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [nodes, setNodes] = useState<Partial<Record<PluginKind, NodeState>>>({});
+
+  // Sync state when initialNodes changes (edit mode / pipeline switch)
+  useEffect(() => {
+    if (!initialNodes) return;
+    const initial: Partial<Record<PluginKind, NodeState>> = {};
+    for (const n of initialNodes) {
+      const kind = n.plugin_kind as PluginKind;
+      if (PIPELINE_STAGES.includes(kind)) {
+        initial[kind] = {
+          plugin_name: n.plugin_name,
+          params: n.params as Record<string, unknown>,
+        };
+      }
+    }
+    setNodes(initial);
+  }, [initialNodes]);
 
   const { data: plugins, isLoading } = trpc.plugins.list.useQuery();
   const createMutation = trpc.pipelines.create.useMutation({
@@ -99,6 +130,12 @@ export function PipelineEditor() {
       params: nodes[kind]!.params,
     }));
 
+    // If in edit mode, fire onChange
+    if (onChange) {
+      onChange(orderedNodes);
+      return;
+    }
+
     createMutation.mutate({ name, nodes: orderedNodes });
   };
 
@@ -106,18 +143,22 @@ export function PipelineEditor() {
     return <div className="text-muted-foreground">Loading plugins...</div>;
   }
 
+  const isEditMode = !!onChange;
+
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="space-y-2">
-        <Label htmlFor="pipeline-name">Pipeline name</Label>
-        <Input
-          id="pipeline-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="My RAG pipeline"
-          data-testid="pipeline-name-input"
-        />
-      </div>
+      {!isEditMode && (
+        <div className="space-y-2">
+          <Label htmlFor="pipeline-name">Pipeline name</Label>
+          <Input
+            id="pipeline-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="My RAG pipeline"
+            data-testid="pipeline-name-input"
+          />
+        </div>
+      )}
 
       <Separator />
 
@@ -175,12 +216,14 @@ export function PipelineEditor() {
         );
       })}
 
-      <Button
-        onClick={handleSubmit}
-        disabled={!name.trim() || createMutation.isPending}
-      >
-        {createMutation.isPending ? "Creating..." : "Create Pipeline"}
-      </Button>
+      {!isEditMode && (
+        <Button
+          onClick={handleSubmit}
+          disabled={!name.trim() || createMutation.isPending}
+        >
+          {createMutation.isPending ? "Creating..." : "Create Pipeline"}
+        </Button>
+      )}
     </div>
   );
 }
