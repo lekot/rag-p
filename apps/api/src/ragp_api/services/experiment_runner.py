@@ -40,8 +40,6 @@ async def _rechunk_documents_for_slot(
     organization_id: str,
     plugin_name: str,
     params: dict[str, Any],
-    embedder_name: str | None = None,
-    embedder_params: dict[str, Any] | None = None,
 ) -> None:
     """Re-chunk documents in a dataset if they were chunked with a different chunker.
 
@@ -49,15 +47,14 @@ async def _rechunk_documents_for_slot(
     Documents chunked with a different chunker (or not chunked at all) get their
     existing chunks deleted and re-chunked with the new chunker.
 
-    After re-chunking, embeds the new chunks using the first available embedder
-    (OpenAI → Ollama) so the vector search branch has data to work with.
+    Chunks are created WITHOUT embeddings — embedding happens per-combo
+    inside ``_golden_metrics`` so each embedder variant gets the right vectors.
     """
     from typing import cast
 
-    from ragp_api.plugins.base import Chunker, Embedder
+    from ragp_api.plugins.base import Chunker
     from ragp_api.plugins.registry import get_plugin
 
-    # Find docs that need re-chunking
     doc_result = await db.execute(
         select(Document).where(
             Document.dataset_id == dataset_id,
@@ -74,36 +71,7 @@ async def _rechunk_documents_for_slot(
         raise ValueError(f"Chunker plugin not found: {plugin_name}")
     chunker = cast(Chunker, chunker_cls(params))
 
-    # Resolve embedder once for all docs (OpenAI → Ollama priority)
-    import os
-
-    embedder: Embedder | None = None
-    if embedder_name:
-        emb_cls = get_plugin("embedder", embedder_name)
-        if emb_cls is not None:
-            embedder = cast(Embedder, emb_cls(embedder_params or {}))
-    if embedder is None:
-        ollama_host = os.environ.get("OLLAMA_HOST", "")
-        openai_key = os.environ.get("OPENAI_API_KEY", "")
-        candidates: list[tuple[str, str, dict[str, Any]]] = []
-        if openai_key:
-            candidates.append(
-                ("litellm-embedder", "openai/text-embedding-3-small", {"model": "openai/text-embedding-3-small"})
-            )
-        if ollama_host:
-            candidates.append(("ollama-embedder", "bge-m3", {"model": "bge-m3"}))
-        for plugin_name_cand, _label, emb_params in candidates:
-            cls = get_plugin("embedder", plugin_name_cand)
-            if cls is None:
-                continue
-            try:
-                embedder = cast(Embedder, cls(emb_params))
-                break
-            except Exception:
-                continue
-
     for doc in docs_to_rechunk:
-        # Reconstruct text from existing chunks (order by chunk_index)
         existing = (
             (await db.execute(select(Chunk).where(Chunk.document_id == doc.id))).scalars().all()
         )
@@ -113,12 +81,10 @@ async def _rechunk_documents_for_slot(
 
         text = "\n\n".join(c.text for c in existing)
 
-        # Delete existing chunks
         await db.execute(
             Chunk.__table__.delete().where(Chunk.document_id == doc.id)  # type: ignore[attr-defined]
         )
 
-        # Chunk
         raw_chunks = await chunker.chunk(text)
         chunk_objs = []
         for i, rc in enumerate(raw_chunks):
@@ -138,24 +104,6 @@ async def _rechunk_documents_for_slot(
 
         if chunk_objs:
             db.add_all(chunk_objs)
-            await db.flush()
-
-            # Embed new chunks
-            if embedder is not None:
-                try:
-                    texts = [c.text for c in chunk_objs]
-                    vectors = await embedder.embed(texts)
-                    for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
-                        chunk_obj.embedding = vec
-                    logger.info(
-                        "Re-chunk: embedded %d chunks for doc %s",
-                        len(chunk_objs), doc.id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Re-chunk: embedder failed for doc %s: %s",
-                        doc.id, exc,
-                    )
 
         doc.chunker_name = plugin_name
         doc.status = "indexed"
@@ -266,6 +214,86 @@ def _build_partial_metrics(
     return m
 
 
+async def _ensure_chunks_embedded(
+    db: AsyncSession,
+    dataset_id: str,
+    organization_id: str,
+    embedder: Embedder | None,
+) -> None:
+    """Ensure all chunks in a dataset are embedded with *embedder*.
+
+    Compares the embedder's output dimension against stored chunk embeddings.
+    If dimensions differ (or chunks have no embeddings), re-embeds all chunks.
+    """
+    if embedder is None:
+        return
+
+    from sqlalchemy import text as sql_text
+
+    # Check current stored dimension
+    dim_result = await db.execute(
+        sql_text(
+            "SELECT vector_dims(embedding) FROM chunks c "
+            "JOIN documents d ON d.id = c.document_id "
+            "WHERE d.dataset_id = :ds_id AND c.embedding IS NOT NULL "
+            "LIMIT 1"
+        ),
+        {"ds_id": dataset_id},
+    )
+    row = dim_result.one_or_none()
+    stored_dim = int(row[0]) if row else 0
+
+    # Probe embedder output dimension
+    try:
+        probe = await embedder.embed(["test"])
+        embedder_dim = len(probe[0])
+    except Exception:
+        logger.warning("Cannot probe embedder dimension, skipping re-embed")
+        return
+
+    if stored_dim == embedder_dim:
+        logger.debug(
+            "Chunk embedding dim %d matches embedder — skip re-embed", stored_dim
+        )
+        return
+
+    logger.info(
+        "Re-embedding chunks: stored_dim=%d embedder_dim=%d ds=%s",
+        stored_dim, embedder_dim, dataset_id,
+    )
+
+    # Load all chunks in dataset
+    result = await db.execute(
+        select(Chunk).where(
+            Chunk.document_id.in_(
+                select(Document.id).where(
+                    Document.dataset_id == dataset_id,
+                    Document.organization_id == organization_id,
+                )
+            )
+        )
+    )
+    chunks = list(result.scalars().all())
+
+    if not chunks:
+        return
+
+    # Embed in batches
+    batch_size = 50
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i : i + batch_size]
+        texts = [c.text for c in batch]
+        try:
+            vectors = await embedder.embed(texts)
+            for chunk_obj, vec in zip(batch, vectors, strict=False):
+                chunk_obj.embedding = vec
+        except Exception as exc:
+            logger.warning("Batch %d re-embed failed: %s", i // batch_size, exc)
+
+    await db.flush()
+    logger.info("Re-embedded %d chunks with dim=%d", len(chunks), embedder_dim)
+
+
 async def _golden_metrics(
     nodes: list[dict[str, Any]],
     golden_items: list[DatasetGoldenItem],
@@ -318,6 +346,9 @@ async def _golden_metrics(
         embedder_cls = get_plugin("embedder", embedder_node["plugin_name"])
         if embedder_cls is not None:
             embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
+
+    # Ensure chunks are embedded with this combo's embedder (dimension check)
+    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder)
 
     logger.info(
         "Golden eval: retriever=%s embedder=%s generator=%s items=%d",
@@ -599,18 +630,14 @@ async def run_experiment_inline(
         # combo's chunker as the reference (all combos share the same slot).
         if combinations and "chunkers" in experiment.plugin_grid_json:
             first_chunker = experiment.plugin_grid_json["chunkers"][0]
-            # Use first embedder from plugin_grid for re-embedding
-            first_embedder = None
-            if "embedders" in experiment.plugin_grid_json and experiment.plugin_grid_json["embedders"]:
-                first_embedder = experiment.plugin_grid_json["embedders"][0]
+            # Re-chunk without embedding — embedding happens per-combo
+            # inside _golden_metrics so each embedder variant gets the right vectors.
             await _rechunk_documents_for_slot(
                 db,
                 dataset_id=dataset_id,
                 organization_id=organization_id,
                 plugin_name=first_chunker["plugin_name"],
                 params=first_chunker.get("params", {}),
-                embedder_name=first_embedder["plugin_name"] if first_embedder else None,
-                embedder_params=first_embedder.get("params", {}) if first_embedder else None,
             )
             _touch()
             await db.commit()
