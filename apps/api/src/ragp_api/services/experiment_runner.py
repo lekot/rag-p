@@ -218,7 +218,7 @@ async def _ensure_chunks_embedded(
     db: AsyncSession,
     dataset_id: str,
     organization_id: str,
-    embedder: Embedder | None,
+    embedder: Any | None,
 ) -> None:
     """Ensure all chunks in a dataset are embedded with *embedder*.
 
