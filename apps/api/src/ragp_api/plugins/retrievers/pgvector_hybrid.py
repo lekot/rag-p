@@ -236,18 +236,19 @@ class PgvectorHybridRetriever(Retriever):
             from sqlalchemy import text as sql_text
 
             try:
+                diag_sql = (
+                    """
+                    SELECT count(*) FILTER (WHERE c.embedding IS NOT NULL) AS with_embedding,
+                           count(*) FILTER (WHERE c.embedding IS NULL) AS without_embedding
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE d.organization_id = :org_id
+                      AND c.text != ''
+                    """
+                    + dataset_filter
+                )
                 diag = await session.execute(
-                    sql_text(
-                        """
-                        SELECT count(*) FILTER (WHERE c.embedding IS NOT NULL) AS with_embedding,
-                               count(*) FILTER (WHERE c.embedding IS NULL) AS without_embedding
-                        FROM chunks c
-                        JOIN documents d ON d.id = c.document_id
-                        WHERE d.organization_id = :org_id
-                          AND c.text != ''
-                          {dataset_filter}
-                        """.format(dataset_filter=dataset_filter)
-                    ),
+                    sql_text(diag_sql),
                     params,
                 )
                 (emb_count, no_emb_count) = diag.one()
