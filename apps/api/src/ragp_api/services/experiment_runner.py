@@ -40,16 +40,21 @@ async def _rechunk_documents_for_slot(
     organization_id: str,
     plugin_name: str,
     params: dict[str, Any],
+    embedder_name: str | None = None,
+    embedder_params: dict[str, Any] | None = None,
 ) -> None:
     """Re-chunk documents in a dataset if they were chunked with a different chunker.
 
     Compares ``plugin_name`` against each document's stored ``chunker_name``.
     Documents chunked with a different chunker (or not chunked at all) get their
     existing chunks deleted and re-chunked with the new chunker.
+
+    After re-chunking, embeds the new chunks using the first available embedder
+    (OpenAI → Ollama) so the vector search branch has data to work with.
     """
     from typing import cast
 
-    from ragp_api.plugins.base import Chunker
+    from ragp_api.plugins.base import Chunker, Embedder
     from ragp_api.plugins.registry import get_plugin
 
     # Find docs that need re-chunking
@@ -68,6 +73,34 @@ async def _rechunk_documents_for_slot(
     if chunker_cls is None:
         raise ValueError(f"Chunker plugin not found: {plugin_name}")
     chunker = cast(Chunker, chunker_cls(params))
+
+    # Resolve embedder once for all docs (OpenAI → Ollama priority)
+    import os
+
+    embedder: Embedder | None = None
+    if embedder_name:
+        emb_cls = get_plugin("embedder", embedder_name)
+        if emb_cls is not None:
+            embedder = cast(Embedder, emb_cls(embedder_params or {}))
+    if embedder is None:
+        ollama_host = os.environ.get("OLLAMA_HOST", "")
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        candidates: list[tuple[str, str, dict[str, Any]]] = []
+        if openai_key:
+            candidates.append(
+                ("litellm-embedder", "openai/text-embedding-3-small", {"model": "openai/text-embedding-3-small"})
+            )
+        if ollama_host:
+            candidates.append(("ollama-embedder", "bge-m3", {"model": "bge-m3"}))
+        for plugin_name_cand, _label, emb_params in candidates:
+            cls = get_plugin("embedder", plugin_name_cand)
+            if cls is None:
+                continue
+            try:
+                embedder = cast(Embedder, cls(emb_params))
+                break
+            except Exception:
+                continue
 
     for doc in docs_to_rechunk:
         # Reconstruct text from existing chunks (order by chunk_index)
@@ -105,6 +138,24 @@ async def _rechunk_documents_for_slot(
 
         if chunk_objs:
             db.add_all(chunk_objs)
+            await db.flush()
+
+            # Embed new chunks
+            if embedder is not None:
+                try:
+                    texts = [c.text for c in chunk_objs]
+                    vectors = await embedder.embed(texts)
+                    for chunk_obj, vec in zip(chunk_objs, vectors, strict=False):
+                        chunk_obj.embedding = vec
+                    logger.info(
+                        "Re-chunk: embedded %d chunks for doc %s",
+                        len(chunk_objs), doc.id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Re-chunk: embedder failed for doc %s: %s — chunks stored without embeddings",
+                        doc.id, exc,
+                    )
 
         doc.chunker_name = plugin_name
         doc.status = "indexed"
@@ -548,12 +599,18 @@ async def run_experiment_inline(
         # combo's chunker as the reference (all combos share the same slot).
         if combinations and "chunkers" in experiment.plugin_grid_json:
             first_chunker = experiment.plugin_grid_json["chunkers"][0]
+            # Use first embedder from plugin_grid for re-embedding
+            first_embedder = None
+            if "embedders" in experiment.plugin_grid_json and experiment.plugin_grid_json["embedders"]:
+                first_embedder = experiment.plugin_grid_json["embedders"][0]
             await _rechunk_documents_for_slot(
                 db,
                 dataset_id=dataset_id,
                 organization_id=organization_id,
                 plugin_name=first_chunker["plugin_name"],
                 params=first_chunker.get("params", {}),
+                embedder_name=first_embedder["plugin_name"] if first_embedder else None,
+                embedder_params=first_embedder.get("params", {}) if first_embedder else None,
             )
             _touch()
             await db.commit()
