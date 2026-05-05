@@ -219,12 +219,17 @@ async def _ensure_chunks_embedded(
     dataset_id: str,
     organization_id: str,
     embedder: Any | None,
+    experiment: Any | None = None,
 ) -> None:
     """Ensure all chunks in a dataset are embedded with *embedder*.
 
     Compares the embedder's output dimension (via embedder.dim) against
     stored chunk embeddings.  If dimensions differ (or chunks have no
     embeddings), re-embeds all chunks.
+
+    When *experiment* is provided its ``updated_at`` is bumped after each
+    batch so the stale-experiment watchdog does not kill the run during
+    long re-embedding (issue #5 in audit 2026-05-05).
     """
     if embedder is None:
         return
@@ -275,7 +280,7 @@ async def _ensure_chunks_embedded(
     if not chunks:
         return
 
-    # Embed in batches
+    # Embed in batches, bumping experiment heartbeat between batches
     batch_size = 50
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i : i + batch_size]
@@ -287,6 +292,10 @@ async def _ensure_chunks_embedded(
         except Exception as exc:
             logger.warning("Batch %d re-embed failed: %s", i // batch_size, exc)
 
+        # Heartbeat: bump experiment.updated_at so watchdog doesn't kill us
+        if experiment is not None:
+            experiment.updated_at = datetime.now(UTC)
+
     await db.flush()
     logger.info("Re-embedded %d chunks with dim=%d", len(chunks), embedder_dim)
 
@@ -297,6 +306,7 @@ async def _golden_metrics(
     organization_id: str,
     dataset_id: str,
     db: AsyncSession,
+    experiment: Any | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Evaluate a pipeline combo against golden Q&A pairs using embeddings.
@@ -345,7 +355,7 @@ async def _golden_metrics(
             embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
 
     # Ensure chunks are embedded with this combo's embedder (dimension check)
-    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder)
+    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder, experiment)
 
     logger.info(
         "Golden eval: retriever=%s embedder=%s generator=%s items=%d",
@@ -501,6 +511,7 @@ async def _self_test_metric(
     organization_id: str,
     dataset_id: str,
     db: AsyncSession,
+    experiment: Any | None = None,
 ) -> dict[str, Any]:
     """
     Simple self-test: for each chunk, query = first 50 chars of text,
@@ -544,7 +555,7 @@ async def _self_test_metric(
         embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
 
     # Ensure chunks are embedded with this combo's embedder
-    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder)
+    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder, experiment)
 
     hit_count = 0
     attempted = 0
@@ -688,11 +699,11 @@ async def run_experiment_inline(
             try:
                 if use_golden:
                     metrics, traces = await _golden_metrics(
-                        nodes, golden_items, organization_id, dataset_id, db
+                        nodes, golden_items, organization_id, dataset_id, db, experiment
                     )
                 else:
                     metrics = await _self_test_metric(
-                        nodes, chunks, organization_id, dataset_id, db
+                        nodes, chunks, organization_id, dataset_id, db, experiment
                     )
             except Exception as exc:
                 logger.warning("Metrics computation failed for combo %s: %s", nodes, exc)
