@@ -62,36 +62,42 @@ async def create_run(
 
     # Check subscription / quota before executing
     from ragp_api.services.subscription import (
-        NoActiveSubscriptionError,
-        consume_q,
-        get_active_subscription,
+        NoActiveSubscriptionError as _NoSub,
     )
     from ragp_api.services.subscription import (
-        QuotaExceededError as SubQuotaExceededError,
+        QuotaExceededError as _SubQuota,
     )
+    from ragp_api.services.subscription import (
+        consume_q as _consume_q,
+    )
+    from ragp_api.services.subscription import (
+        get_active_subscription as _get_sub,
+    )
+    from ragp_api.settings import settings as _runs_settings
 
-    try:
-        await get_active_subscription(db, org_id)
-    except NoActiveSubscriptionError:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "no_active_plan",
-                "message": "Активной подписки нет. Купите план на /pricing",
-            },
-        ) from None
-    try:
-        await consume_q(db, org_id, count=1)
-    except SubQuotaExceededError as exc:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "quota_exceeded",
-                "q_used": exc.q_used,
-                "q_limit": exc.q_limit,
-                "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
-            },
-        ) from None
+    if _runs_settings.enforce_subscription_quotas:
+        try:
+            await _get_sub(db, org_id)
+        except _NoSub:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "no_active_plan",
+                    "message": "Активной подписки нет. Купите план на /pricing",
+                },
+            ) from None
+        try:
+            await _consume_q(db, org_id, count=1)
+        except _SubQuota as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "quota_exceeded",
+                    "q_used": exc.q_used,
+                    "q_limit": exc.q_limit,
+                    "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+                },
+            ) from None
 
     run = Run(
         id=str(uuid.uuid4()),
