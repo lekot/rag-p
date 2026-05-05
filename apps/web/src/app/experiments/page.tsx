@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
 export default function ExperimentsPage() {
-  const router = useRouter();
   const { toast } = useToast();
   const utils = trpc.useUtils();
 

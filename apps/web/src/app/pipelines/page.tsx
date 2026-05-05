@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
 export default function PipelinesPage() {
-  const router = useRouter();
   const { toast } = useToast();
   const utils = trpc.useUtils();
 
