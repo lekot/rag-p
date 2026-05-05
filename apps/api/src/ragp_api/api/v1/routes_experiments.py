@@ -89,12 +89,11 @@ async def create_experiment(
     body: ExperimentCreateIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
     experiment = Experiment(
         id=str(uuid.uuid4()),
-        organization_id=org.id,
+        organization_id=body.organization_id,
         name=body.name,
         dataset_id=body.dataset_id,
         plugin_grid_json=body.plugin_grid,
@@ -146,13 +145,11 @@ async def create_experiment(
 
 @router.get("", response_model=list[ExperimentOut])
 async def list_experiments(
-    organization_id: str | None = None,
+    organization_id: str,
     db: AsyncSession = Depends(get_db),
-    org: Organization = Depends(require_organization),
 ) -> list[ExperimentOut]:
-    org_id = organization_id or org.id
     result = await db.execute(
-        select(Experiment).where(Experiment.organization_id == org_id)
+        select(Experiment).where(Experiment.organization_id == organization_id)
     )
     experiments = result.scalars().all()
     return [
@@ -174,11 +171,10 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    org: Organization = Depends(require_organization),
 ) -> ExperimentOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
-    if experiment is None or experiment.organization_id != org.id:
+    if experiment is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     return ExperimentOut(
         id=experiment.id,
@@ -196,11 +192,10 @@ async def get_experiment(
 async def get_leaderboard(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    org: Organization = Depends(require_organization),
 ) -> LeaderboardOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
-    if experiment is None or experiment.organization_id != org.id:
+    if experiment is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
 
     raw_leaderboard = experiment.leaderboard_json or []

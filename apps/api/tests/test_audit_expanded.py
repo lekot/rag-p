@@ -249,12 +249,10 @@ PLUGIN_GRID = {
 async def test_experiment_start_audit_event(
     client: AsyncClient,
     db_session: AsyncSession,
+    organization_id: str,
 ) -> None:
     """POST /experiments creates experiment.start audit with name + dataset_id."""
-    data = await _signup(client, "audit_exp@example.com")
-    exp_org_id = data["organization"]["id"]
-    await _login(client, "audit_exp@example.com")
-    dataset_id = await _create_dataset(client, exp_org_id, name="ExpAuditDS")
+    dataset_id = await _create_dataset(client, organization_id, name="ExpAuditDS")
     with patch(
         "ragp_api.api.v1.routes_experiments.enqueue",
         new=AsyncMock(return_value={"job_id": "j", "task_id": "t", "deduplicated": False}),
@@ -263,7 +261,7 @@ async def test_experiment_start_audit_event(
             "/api/v1/experiments",
             json={
                 "name": "AuditExperiment",
-                "organization_id": exp_org_id,
+                "organization_id": organization_id,
                 "dataset_id": dataset_id,
                 "plugin_grid": PLUGIN_GRID,
             },
@@ -273,7 +271,7 @@ async def test_experiment_start_audit_event(
 
     result = await db_session.execute(
         select(AuditEvent).where(
-            AuditEvent.org_id == exp_org_id,
+            AuditEvent.org_id == organization_id,
             AuditEvent.event_type == "experiment.start",
         )
     )
@@ -294,14 +292,12 @@ async def test_experiment_start_audit_event(
 async def test_experiment_promote_audit_event(
     client: AsyncClient,
     db_session: AsyncSession,
+    organization_id: str,
 ) -> None:
     """POST /experiments/{id}/promote_to_pipeline creates experiment.promote audit."""
     from ragp_api.db.models import Experiment
 
-    data = await _signup(client, "audit_promote@example.com")
-    exp_org_id = data["organization"]["id"]
-    await _login(client, "audit_promote@example.com")
-    dataset_id = await _create_dataset(client, exp_org_id, name="PromoteAuditDS")
+    dataset_id = await _create_dataset(client, organization_id, name="PromoteAuditDS")
 
     winning_nodes = [
         {"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}},
@@ -315,7 +311,7 @@ async def test_experiment_promote_audit_event(
             "/api/v1/experiments",
             json={
                 "name": "PromoteAuditExp",
-                "organization_id": exp_org_id,
+                "organization_id": organization_id,
                 "dataset_id": dataset_id,
                 "plugin_grid": PLUGIN_GRID,
             },
@@ -340,7 +336,7 @@ async def test_experiment_promote_audit_event(
 
     result = await db_session.execute(
         select(AuditEvent).where(
-            AuditEvent.org_id == exp_org_id,
+            AuditEvent.org_id == organization_id,
             AuditEvent.event_type == "experiment.promote",
         )
     )
