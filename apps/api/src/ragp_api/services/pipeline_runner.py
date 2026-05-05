@@ -34,8 +34,8 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
     # Phase 2: execute remaining nodes in order
     for node in nodes:
         kind: str = node["plugin_kind"]
-        name: str = node["plugin_name"]
-        params: dict[str, Any] = dict(node.get("params", {}))
+        name = node["plugin_name"]
+        params = dict(node.get("params", {}))
 
         cls = get_plugin(kind, name)
         if cls is None:
