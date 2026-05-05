@@ -222,13 +222,18 @@ async def _ensure_chunks_embedded(
 ) -> None:
     """Ensure all chunks in a dataset are embedded with *embedder*.
 
-    Compares the embedder's output dimension against stored chunk embeddings.
-    If dimensions differ (or chunks have no embeddings), re-embeds all chunks.
+    Compares the embedder's output dimension (via embedder.dim) against
+    stored chunk embeddings.  If dimensions differ (or chunks have no
+    embeddings), re-embeds all chunks.
     """
     if embedder is None:
         return
 
     from sqlalchemy import text as sql_text
+
+    embedder_dim = getattr(embedder, "dim", None)
+    if embedder_dim is None:
+        return  # cannot determine dimension, skip
 
     # Check current stored dimension
     dim_result = await db.execute(
@@ -242,14 +247,6 @@ async def _ensure_chunks_embedded(
     )
     row = dim_result.one_or_none()
     stored_dim = int(row[0]) if row else 0
-
-    # Probe embedder output dimension
-    try:
-        probe = await embedder.embed(["test"])
-        embedder_dim = len(probe[0])
-    except Exception:
-        logger.warning("Cannot probe embedder dimension, skipping re-embed")
-        return
 
     if stored_dim == embedder_dim:
         logger.debug(
@@ -545,6 +542,9 @@ async def _self_test_metric(
                 f"Embedder plugin is not registered: {embedder_node['plugin_name']}",
             )
         embedder = cast(Embedder, embedder_cls(dict(embedder_node.get("params", {}))))
+
+    # Ensure chunks are embedded with this combo's embedder
+    await _ensure_chunks_embedded(db, dataset_id, organization_id, embedder)
 
     hit_count = 0
     attempted = 0

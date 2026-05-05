@@ -66,13 +66,12 @@ class PgvectorHybridRetriever(Retriever):
             sql = text(
                 f"""
                 SELECT c.id, c.text, c.metadata_json, c.document_id,
-                       doc.source_uri AS document_name,
+                       d.source_uri AS document_name,
                        ts_rank_cd(
                            to_tsvector('english', c.text),
                            plainto_tsquery('english', :query)
                        ) AS score
                 FROM chunks c
-                JOIN documents doc ON doc.id = c.document_id
                 JOIN documents d ON d.id = c.document_id
                 WHERE d.organization_id = :org_id
                   AND c.text != ''
@@ -107,13 +106,12 @@ class PgvectorHybridRetriever(Retriever):
                     fallback_sql = text(
                         f"""
                         SELECT c.id, c.text, c.metadata_json, c.document_id,
-                               doc.source_uri AS document_name,
+                               d.source_uri AS document_name,
                                ts_rank_cd(
                                    to_tsvector('simple', c.text),
                                    to_tsquery('simple', :simple_query)
                                ) AS score
                         FROM chunks c
-                        JOIN documents doc ON doc.id = c.document_id
                         JOIN documents d ON d.id = c.document_id
                         WHERE d.organization_id = :org_id
                           AND c.text != ''
@@ -208,9 +206,9 @@ class PgvectorHybridRetriever(Retriever):
                 FULL OUTER JOIN bm25 ON bm25.id = dense.id
             )
             SELECT rrf.id, rrf.text, rrf.metadata_json, rrf.document_id,
-                   doc.source_uri AS document_name, rrf.score
+                   d.source_uri AS document_name, rrf.score
             FROM rrf
-            JOIN documents doc ON doc.id = rrf.document_id
+            JOIN documents d ON d.id = rrf.document_id
             ORDER BY score DESC
             LIMIT :top_k
             """
@@ -230,6 +228,41 @@ class PgvectorHybridRetriever(Retriever):
 
         result = await session.execute(sql, params)
         rows = result.fetchall()
+
+        if not rows:
+            # If hybrid returned nothing, try BM25-only as fallback
+            # (handles dimension mismatch or empty dense branch gracefully)
+            try:
+                bm25_only = text(
+                    f"""
+                    SELECT c.id, c.text, c.metadata_json, c.document_id,
+                           d.source_uri AS document_name,
+                           ts_rank_cd(
+                               to_tsvector('english', c.text),
+                               plainto_tsquery('english', :query)
+                           ) AS score
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE d.organization_id = :org_id
+                      AND c.text != ''
+                      {dataset_filter}
+                    ORDER BY score DESC
+                    LIMIT :top_k
+                    """
+                )
+                fb_result = await session.execute(
+                    bm25_only,
+                    {"query": query, "org_id": organization_id, "top_k": top_k}
+                    | ({"dataset_id": dataset_id} if dataset_id is not None else {}),
+                )
+                rows = fb_result.fetchall()
+                if rows:
+                    logger.info(
+                        "Hybrid returned 0 rows — BM25 fallback found %d rows",
+                        len(rows),
+                    )
+            except Exception as fb_exc:
+                logger.warning("BM25 fallback failed: %s", fb_exc)
 
         if not rows:
             # Diagnostic: check if chunks exist for this org/dataset
