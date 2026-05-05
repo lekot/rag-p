@@ -153,7 +153,7 @@ async def _rechunk_documents_for_slot(
                     )
                 except Exception as exc:
                     logger.warning(
-                        "Re-chunk: embedder failed for doc %s: %s — chunks stored without embeddings",
+                        "Re-chunk: embedder failed for doc %s: %s",
                         doc.id, exc,
                     )
 
