@@ -252,6 +252,7 @@ async def test_experiment_start_audit_event(
     organization_id: str,
 ) -> None:
     """POST /experiments creates experiment.start audit with name + dataset_id."""
+    await _login(client, "audit_exp@example.com")
     dataset_id = await _create_dataset(client, organization_id, name="ExpAuditDS")
     with patch(
         "ragp_api.api.v1.routes_experiments.enqueue",
