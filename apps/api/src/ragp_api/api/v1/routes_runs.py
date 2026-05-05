@@ -7,8 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Pipeline, Run
+from ragp_api.db.models import Organization, Pipeline, Run
 from ragp_api.deps import get_db
+from ragp_api.deps_auth import require_organization, require_scope
 
 router = APIRouter(tags=["runs"])
 
@@ -39,10 +40,12 @@ async def create_run(
     pipeline_id: str,
     body: RunCreateIn,
     db: AsyncSession = Depends(get_db),
+    _scope: None = Depends(require_scope("write")),
+    org: Organization = Depends(require_organization),
 ) -> RunOut:
     pl_result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
     pipeline = pl_result.scalar_one_or_none()
-    if pipeline is None:
+    if pipeline is None or pipeline.organization_id != org.id:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
     if pipeline.current_version_id is None:
         raise HTTPException(status_code=422, detail="Pipeline has no version")
@@ -59,6 +62,39 @@ async def create_run(
     org_id = pipeline.organization_id
     dataset_id = body.dataset_id
     query = body.query or ""
+
+    # Check subscription / quota before executing
+    from ragp_api.services.subscription import (
+        NoActiveSubscriptionError,
+        consume_q,
+        get_active_subscription,
+    )
+    from ragp_api.services.subscription import (
+        QuotaExceededError as SubQuotaExceededError,
+    )
+
+    try:
+        await get_active_subscription(db, org_id)
+    except NoActiveSubscriptionError:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        ) from None
+    try:
+        await consume_q(db, org_id, count=1)
+    except SubQuotaExceededError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "quota_exceeded",
+                "q_used": exc.q_used,
+                "q_limit": exc.q_limit,
+                "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+            },
+        ) from None
 
     run = Run(
         id=str(uuid.uuid4()),
@@ -159,12 +195,14 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
 async def list_runs(
     organization_id: str,
     dataset_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ) -> list[RunOut]:
     stmt = select(Run).where(Run.organization_id == organization_id)
     if dataset_id is not None:
         stmt = stmt.where(Run.dataset_id == dataset_id)
-    stmt = stmt.order_by(Run.created_at.desc())
+    stmt = stmt.order_by(Run.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(stmt)
     runs = result.scalars().all()
     return [

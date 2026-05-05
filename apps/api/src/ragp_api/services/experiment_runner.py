@@ -22,7 +22,7 @@ from ragp_api.services.usage import record_usage_event
 
 logger = logging.getLogger(__name__)
 
-_SELF_TEST_SAMPLE_LIMIT = 5
+_SELF_TEST_SAMPLE_LIMIT = 25
 
 
 def _metric_error(code: str, message: str) -> dict[str, Any]:

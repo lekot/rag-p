@@ -1,13 +1,29 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ExperimentsPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const utils = trpc.useUtils();
+
   const { data: experiments, isLoading } = trpc.experiments.list.useQuery();
+
+  const deleteMutation = trpc.experiments.delete.useMutation({
+    onSuccess: () => {
+      toast({ title: "Experiment deleted" });
+      utils.experiments.list.invalidate();
+    },
+    onError: (err) => {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    },
+  });
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -34,14 +50,28 @@ export default function ExperimentsPage() {
         {(experiments ?? []).map((exp) => (
           <Card key={exp.id}>
             <CardHeader>
-              <CardTitle className="text-lg">
-                <Link
-                  href={`/experiments/${exp.id}`}
-                  className="hover:underline"
+              <div className="flex items-start justify-between">
+                <CardTitle className="text-lg">
+                  <Link
+                    href={`/experiments/${exp.id}`}
+                    className="hover:underline"
+                  >
+                    {exp.name}
+                  </Link>
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (confirm("Delete this experiment?")) {
+                      deleteMutation.mutate({ id: exp.id });
+                    }
+                  }}
                 >
-                  {exp.name}
-                </Link>
-              </CardTitle>
+                  Delete
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
               {exp.status && <Badge variant="secondary">{exp.status}</Badge>}

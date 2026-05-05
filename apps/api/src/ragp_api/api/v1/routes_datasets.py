@@ -991,7 +991,7 @@ async def ask_dataset(
     if body.pipeline_id:
         pl_result = await db.execute(select(Pipeline).where(Pipeline.id == body.pipeline_id))
         pl = pl_result.scalar_one_or_none()
-        if pl is not None and pl.current_version_id:
+        if pl is not None and pl.organization_id == organization_id and pl.current_version_id:
             pipeline_version_id_for_run = pl.current_version_id
             ver_result = await db.execute(
                 select(PipelineVersion).where(PipelineVersion.id == pl.current_version_id)

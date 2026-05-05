@@ -7,9 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Experiment, Pipeline, PipelineVersion
+from ragp_api.db.models import Experiment, Organization, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import require_scope
+from ragp_api.deps_auth import require_organization, require_scope
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.queue import QuotaExceededError, enqueue
 
@@ -89,11 +89,12 @@ async def create_experiment(
     body: ExperimentCreateIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
     experiment = Experiment(
         id=str(uuid.uuid4()),
-        organization_id=body.organization_id,
+        organization_id=org.id,
         name=body.name,
         dataset_id=body.dataset_id,
         plugin_grid_json=body.plugin_grid,
@@ -145,11 +146,13 @@ async def create_experiment(
 
 @router.get("", response_model=list[ExperimentOut])
 async def list_experiments(
-    organization_id: str,
+    organization_id: str | None = None,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
 ) -> list[ExperimentOut]:
+    org_id = organization_id or org.id
     result = await db.execute(
-        select(Experiment).where(Experiment.organization_id == organization_id)
+        select(Experiment).where(Experiment.organization_id == org_id)
     )
     experiments = result.scalars().all()
     return [
@@ -171,10 +174,11 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
 ) -> ExperimentOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
-    if experiment is None:
+    if experiment is None or experiment.organization_id != org.id:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     return ExperimentOut(
         id=experiment.id,
@@ -192,10 +196,11 @@ async def get_experiment(
 async def get_leaderboard(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
 ) -> LeaderboardOut:
     result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
     experiment = result.scalar_one_or_none()
-    if experiment is None:
+    if experiment is None or experiment.organization_id != org.id:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
 
     raw_leaderboard = experiment.leaderboard_json or []
@@ -241,6 +246,32 @@ async def get_leaderboard(
         leaderboard=raw_leaderboard,
         combinations=combinations,
     )
+
+
+@router.delete("/{experiment_id}", status_code=204)
+async def delete_experiment(
+    experiment_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("write")),
+) -> None:
+    result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
+    experiment = result.scalar_one_or_none()
+    if experiment is None or experiment.organization_id != org.id:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
+    await db.delete(experiment)
+    await log_audit_event(
+        db,
+        org_id=org.id,
+        user_id=None,
+        event_type="experiment.delete",
+        resource_type="experiment",
+        resource_id=experiment_id,
+        metadata={"name": experiment.name},
+        request=request,
+    )
+    await db.commit()
 
 
 @router.post("/{experiment_id}/promote_to_pipeline", status_code=201, response_model=PipelineOut)

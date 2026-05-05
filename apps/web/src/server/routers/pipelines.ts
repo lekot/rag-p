@@ -82,4 +82,10 @@ export const pipelinesRouter = router({
         nodes: input.nodes,
       });
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      return apiClient.delete<void>(`/api/v1/pipelines/${input.id}`);
+    }),
 });

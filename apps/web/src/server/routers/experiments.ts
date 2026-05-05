@@ -114,4 +114,10 @@ export const experimentsRouter = router({
         { name: input.name, combination_index: input.combination_index }
       );
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      return apiClient.delete<void>(`/api/v1/experiments/${input.id}`);
+    }),
 });
