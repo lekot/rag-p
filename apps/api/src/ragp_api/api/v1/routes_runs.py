@@ -7,9 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Organization, Pipeline, Run
+from ragp_api.db.models import Pipeline, Run
 from ragp_api.deps import get_db
-from ragp_api.deps_auth import require_organization, require_scope
 
 router = APIRouter(tags=["runs"])
 
@@ -40,12 +39,10 @@ async def create_run(
     pipeline_id: str,
     body: RunCreateIn,
     db: AsyncSession = Depends(get_db),
-    _scope: None = Depends(require_scope("write")),
-    org: Organization = Depends(require_organization),
 ) -> RunOut:
     pl_result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
     pipeline = pl_result.scalar_one_or_none()
-    if pipeline is None or pipeline.organization_id != org.id:
+    if pipeline is None:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
     if pipeline.current_version_id is None:
         raise HTTPException(status_code=422, detail="Pipeline has no version")
