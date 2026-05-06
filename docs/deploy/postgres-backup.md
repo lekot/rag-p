@@ -22,6 +22,11 @@ A dedicated `postgres-backup` Compose service runs alongside the stack:
   `deploy/compose/postgres-backup/Dockerfile`).
 - Loops in-container: sleep until `RAGP_PGBACKUP_HOUR_UTC:RAGP_PGBACKUP_MINUTE`
   (default `02:15` UTC), run `pg_dump | gzip`, upload to S3.
+- On startup and before every scheduled sleep, checks the latest S3 object.
+  If it is older than `RAGP_PGBACKUP_INTERVAL_HOURS` plus
+  `RAGP_PGBACKUP_CATCHUP_GRACE_MINUTES` (default 60), or the prefix is empty,
+  it runs an immediate catch-up backup so host downtime does not silently skip
+  the RPO window.
 - Object naming: `s3://$RAGP_PGBACKUP_S3_BUCKET/$RAGP_PGBACKUP_PREFIX/postgres-YYYYMMDDTHHMMSSZ.sql.gz`.
 - Retention: after each upload, objects older than
   `RAGP_PGBACKUP_RETENTION_DAYS` (default 7) are deleted via
@@ -54,6 +59,7 @@ Configure these in `/opt/rag-p/.env` (see `deploy/compose/env.example`):
 | `RAGP_PGBACKUP_HOUR_UTC` | `2` | Daily slot, hour. |
 | `RAGP_PGBACKUP_MINUTE` | `15` | Daily slot, minute. |
 | `RAGP_PGBACKUP_INTERVAL_HOURS` | `24` | Lower for more frequent runs. |
+| `RAGP_PGBACKUP_CATCHUP_GRACE_MINUTES` | `60` | Startup/loop catch-up threshold grace after the interval. |
 | `RAGP_PGBACKUP_RETENTION_DAYS` | `7` | Older objects are pruned. |
 
 The Postgres credentials (`POSTGRES_HOST=postgres`, `POSTGRES_USER`,
@@ -90,7 +96,11 @@ or by `pg_dump`/`pg_restore`-ing the tables you need.
    ```bash
    docker compose -f /opt/rag-p/compose.prod.yml --env-file /opt/rag-p/.env \
        run --rm --entrypoint bash postgres-backup -lc \
-       'aws --endpoint-url $RAGP_PGBACKUP_S3_ENDPOINT_URL s3 ls \
+       'export AWS_ACCESS_KEY_ID="$RAGP_PGBACKUP_S3_ACCESS_KEY_ID"
+        export AWS_SECRET_ACCESS_KEY="$RAGP_PGBACKUP_S3_SECRET_ACCESS_KEY"
+        export AWS_DEFAULT_REGION="${RAGP_PGBACKUP_S3_REGION:-ru-1}"
+        export AWS_REGION="$AWS_DEFAULT_REGION"
+        aws --endpoint-url "$RAGP_PGBACKUP_S3_ENDPOINT_URL" s3 ls \
         s3://$RAGP_PGBACKUP_S3_BUCKET/$RAGP_PGBACKUP_PREFIX'
    ```
 
@@ -106,10 +116,14 @@ or by `pg_dump`/`pg_restore`-ing the tables you need.
 
    ```bash
    docker compose -f /opt/rag-p/compose.prod.yml --env-file /opt/rag-p/.env \
-       run --rm --entrypoint bash postgres-backup \
+       run --rm --entrypoint bash postgres-backup -lc \
+       'export AWS_ACCESS_KEY_ID="$RAGP_PGBACKUP_S3_ACCESS_KEY_ID"
+        export AWS_SECRET_ACCESS_KEY="$RAGP_PGBACKUP_S3_SECRET_ACCESS_KEY"
+        export AWS_DEFAULT_REGION="${RAGP_PGBACKUP_S3_REGION:-ru-1}"
+        export AWS_REGION="$AWS_DEFAULT_REGION"
        /usr/local/bin/restore.sh \
        s3://rag-p-pg-backups/pg-backups/postgres-20260430T021500Z.sql.gz \
-       ragp_restore
+       ragp_restore'
    ```
 
 4. Verify table counts in `ragp_restore` and either:

@@ -23,11 +23,14 @@ Services:
 - `worker`: ARQ worker using the API image.
 - `migrate`: one-shot Alembic service used by CI/CD.
 - `postgres`: `pgvector/pgvector:pg16` with local volume.
+- `postgres-backup`: scheduled `pg_dump` to Selectel S3, with startup catch-up
+  if the latest object is older than the configured RPO window.
 - `redis`: queue/cache, no persistence for pilot.
 - `ollama`: local model runtime with local model volume.
 - `cohere-egress`: AmneziaWG VPN client + tinyproxy on `:8888`, used for
   selective routing of cohere SDK calls only. See
   [`cohere-vpn-sidecar.md`](cohere-vpn-sidecar.md).
+- `smtp`: internal maddy relay for transactional email.
 
 Persistent volumes:
 
@@ -39,7 +42,8 @@ Persistent volumes:
 
 Repository variable:
 
-- `DEPLOY_TARGET=compose` enables automatic Compose deploy after CI on `main`.
+- `DEPLOY_TARGET=compose` enables automatic Compose deploy after CI on `main`;
+  manual `workflow_dispatch` remains available regardless of this value.
 - `DEPLOY_TARGET=kubernetes` enables the legacy Helm staging workflow.
 - Any other value disables automatic deploys; manual workflow dispatch remains.
 

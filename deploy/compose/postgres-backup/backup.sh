@@ -18,6 +18,7 @@
 #   RAGP_PGBACKUP_HOUR_UTC=2
 #   RAGP_PGBACKUP_MINUTE=15
 #   RAGP_PGBACKUP_INTERVAL_HOURS=24
+#   RAGP_PGBACKUP_CATCHUP_GRACE_MINUTES=60
 #   RAGP_PGBACKUP_RETENTION_DAYS=7
 #   RAGP_PGBACKUP_S3_REGION=ru-1
 
@@ -95,6 +96,7 @@ esac
 HOUR_UTC="${RAGP_PGBACKUP_HOUR_UTC:-2}"
 MINUTE="${RAGP_PGBACKUP_MINUTE:-15}"
 INTERVAL_HOURS="${RAGP_PGBACKUP_INTERVAL_HOURS:-24}"
+CATCHUP_GRACE_MINUTES="${RAGP_PGBACKUP_CATCHUP_GRACE_MINUTES:-60}"
 RETENTION_DAYS="${RAGP_PGBACKUP_RETENTION_DAYS:-7}"
 S3_REGION="${RAGP_PGBACKUP_S3_REGION:-ru-1}"
 
@@ -200,6 +202,85 @@ prune_old_backups() {
     log "pruned ${deleted} object(s)"
 }
 
+iso_to_epoch() {
+    local iso="$1"
+    date -u -d "$iso" +%s 2>/dev/null \
+        || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${iso%+00:00}Z" +%s
+}
+
+latest_backup_epoch() {
+    local list latest_iso
+    if ! list="$(aws_s3api list-objects-v2 \
+            --bucket "$BUCKET" \
+            --prefix "$PREFIX" \
+            --output json 2>/dev/null)"
+    then
+        err "list-objects-v2 failed; skipping catch-up freshness check"
+        return 1
+    fi
+
+    if ! latest_iso="$(echo "$list" \
+        | jq -r '(.Contents // []) | if length == 0 then empty else max_by(.LastModified).LastModified end')"
+    then
+        err "failed to parse list-objects-v2 response; skipping catch-up freshness check"
+        return 1
+    fi
+
+    if [[ -z "$latest_iso" ]]; then
+        echo 0
+        return 0
+    fi
+
+    iso_to_epoch "$latest_iso"
+}
+
+backup_is_stale() {
+    local latest_epoch now_epoch max_age_seconds age_seconds
+    if ! latest_epoch="$(latest_backup_epoch)"; then
+        return 2
+    fi
+
+    now_epoch="$(date -u +%s)"
+    max_age_seconds=$(( INTERVAL_HOURS * 3600 + CATCHUP_GRACE_MINUTES * 60 ))
+
+    if (( latest_epoch == 0 )); then
+        log "no backup objects found under s3://${BUCKET}/${PREFIX}; catch-up backup is due"
+        return 0
+    fi
+
+    age_seconds=$(( now_epoch - latest_epoch ))
+    if (( age_seconds > max_age_seconds )); then
+        log "latest backup is ${age_seconds}s old (threshold ${max_age_seconds}s); catch-up backup is due"
+        return 0
+    fi
+
+    log "latest backup age ${age_seconds}s is within threshold ${max_age_seconds}s"
+    return 1
+}
+
+run_catchup_if_needed() {
+    local stale_status
+    set +e
+    backup_is_stale
+    stale_status=$?
+    set -e
+
+    case "$stale_status" in
+        0)
+            log "running catch-up backup before scheduled sleep"
+            if ! run_once; then
+                err "catch-up backup failed; continuing loop"
+            fi
+            ;;
+        1)
+            log "catch-up backup not needed"
+            ;;
+        *)
+            err "catch-up freshness check failed; continuing to scheduled sleep"
+            ;;
+    esac
+}
+
 # Compute seconds until the next HOUR_UTC:MINUTE slot, stepped by INTERVAL_HOURS.
 seconds_until_next_run() {
     local now next_ts now_ts
@@ -229,8 +310,9 @@ case "$MODE" in
         run_once
         ;;
     loop)
-        log "mode=loop hour_utc=${HOUR_UTC} minute=${MINUTE} interval_hours=${INTERVAL_HOURS} retention_days=${RETENTION_DAYS}"
+        log "mode=loop hour_utc=${HOUR_UTC} minute=${MINUTE} interval_hours=${INTERVAL_HOURS} catchup_grace_minutes=${CATCHUP_GRACE_MINUTES} retention_days=${RETENTION_DAYS}"
         while true; do
+            run_catchup_if_needed
             sleep_for="$(seconds_until_next_run)"
             log "sleeping ${sleep_for}s until next backup slot"
             sleep "$sleep_for"

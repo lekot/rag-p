@@ -17,7 +17,7 @@ env:
 jobs:
   deploy:
     name: Build + deploy on host
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_TARGET == 'compose') }}
     # Self-hosted runner lives on the same host as the prod compose stack.
     # Builds images directly into the local docker daemon (no GHCR push) and
     # restarts the stack via `sudo -u ragp-deploy` so we never need to ssh

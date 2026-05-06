@@ -319,8 +319,13 @@ services:
       - smtp_data:/data
       - ./smtp/maddy.conf:/data/maddy.conf:ro
     healthcheck:
-      # `maddy` image ships busybox `nc`; -z exits 0 once the listener is up.
-      test: ["CMD-SHELL", "nc -z localhost 587"]
+      # Complete a tiny SMTP dialogue instead of opening and resetting TCP;
+      # maddy otherwise logs a connection reset every healthcheck interval.
+      test:
+        [
+          "CMD-SHELL",
+          "{ printf 'EHLO healthcheck.local\\r\\nQUIT\\r\\n'; sleep 1; } | nc -w 4 127.0.0.1 587 | grep -q '^220'",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
