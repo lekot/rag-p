@@ -30,7 +30,8 @@ Services:
 - `cohere-egress`: AmneziaWG VPN client + tinyproxy on `:8888`, used for
   selective routing of cohere SDK calls only. See
   [`cohere-vpn-sidecar.md`](cohere-vpn-sidecar.md).
-- `smtp`: internal maddy relay for transactional email.
+- Transactional email is sent by the API through the managed Selectel SMTP
+  relay; no SMTP container runs in the Compose stack.
 
 Persistent volumes:
 
@@ -68,6 +69,8 @@ Production environment secrets:
   sidecar still starts (without VPN) and cohere calls fail-soft per plugin.
 - `RAGP_S3_ACCESS_KEY_ID`, `RAGP_S3_SECRET_ACCESS_KEY`: Selectel S3 keys.
 - `RAGP_S3_SERVICE_PASSWORD`: optional Selectel service-user password.
+- `RAGP_SMTP_USER`, `RAGP_SMTP_PASSWORD`: Selectel Email Service SMTP
+  credentials. The workflow defaults to `smtp.mail.selcloud.ru:1127` with TLS.
 
 Optional repository variable:
 

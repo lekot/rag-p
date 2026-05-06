@@ -146,27 +146,22 @@
    - `COHERE_AMNEZIA_CONF` (multi-line, содержимое локального `cohere.awg.conf` в корне репо — gitignored).
    - `RAGP_PGBACKUP_S3_*` — **больше не обязательны**: deploy-compose.yml по умолчанию переиспользует `RAGP_S3_*` (тот же bucket, объекты разводятся префиксом `pg-backups/`). Задавать отдельные `RAGP_PGBACKUP_S3_*` только если хочется выделить отдельный bucket.
    - `GRAFANA_*` / `ALERTMANAGER_*` — **не нужны**, observability через Prometheus/Grafana отменили (хостер мониторит сервер).
-   - **SMTP secrets — опционально.** `RAGP_SMTP_HOST/PORT/USER/PASSWORD/FROM/USE_TLS` стали optional после self-hosted maddy SMTP в compose. Дефолты роутят через in-stack `smtp` (plaintext :587 во внутренней docker-сети, без auth/TLS, FROM=`noreply@lekottt.ru`). Переопределяй секреты только при relay через внешнего провайдера (Yandex 360, SendGrid и т.п.).
+   - **SMTP secrets — нужны для доставки почты.** Self-hosted maddy убран из compose: Selectel блокирует исходящие SMTP-порты к публичным адресам, поэтому prod должен слать через Selectel Email Service relay. В GitHub production environment добавить `RAGP_SMTP_USER` и `RAGP_SMTP_PASSWORD`; workflow по умолчанию пишет `RAGP_SMTP_HOST=smtp.mail.selcloud.ru`, `RAGP_SMTP_PORT=1127`, `RAGP_SMTP_USE_TLS=true`, `RAGP_SMTP_FROM=noreply@lekottt.ru`.
 
 2. **Selectel S3** — bucket `rag-p-pg-backups` создавать **не нужно**: pg-backup пишет в существующий app bucket под префиксом `pg-backups/` (см. `RAGP_PGBACKUP_PREFIX` в `deploy/compose/postgres-backup/backup.sh`). Те же ключи `RAGP_S3_ACCESS_KEY_ID` / `RAGP_S3_SECRET_ACCESS_KEY` покрывают и app uploads, и pg backups.
 
-3. **DNS records for lekottt.ru** — добавить у регистратора (без них письма уйдут в спам или вернутся как «non-deliverable»):
+3. **DNS records for lekottt.ru** — настроить под Selectel Email Service:
 
    ```
-   mail.lekottt.ru.        IN A    <HOST_IP>
-   lekottt.ru.             IN TXT  "v=spf1 mx a:mail.lekottt.ru ip4:<HOST_IP> -all"
-   default._domainkey.lekottt.ru. IN TXT "v=DKIM1; k=rsa; p=<DKIM_PUBLIC_KEY>"
+   lekottt.ru.             IN TXT  "<SELECTEL_DOMAIN_VERIFY_KEY>"
+   lekottt.ru.             IN TXT  "v=spf1 include:spf.mail.selcloud.ru ?all"
+   selcloud._domainkey.lekottt.ru. IN TXT "<SELECTEL_DKIM_VALUE>"
    _dmarc.lekottt.ru.      IN TXT  "v=DMARC1; p=quarantine; rua=mailto:postmaster@lekottt.ru"
    ```
 
-   - `<HOST_IP>` — публичный IPv4 prod-сервера (тот же, что у `lekottt.ru` сейчас).
-   - `<DKIM_PUBLIC_KEY>` — генерируется maddy при первом отправленном письме. После первого деплоя получить значение командой:
-     ```
-     docker exec rag-p-smtp-1 cat /data/dkim_keys/lekottt.ru_default.dns
-     ```
-     Файл содержит готовую TXT-запись (`v=DKIM1; k=rsa; p=...`) — скопировать целиком в значение DNS-записи `default._domainkey.lekottt.ru`.
-   - **PTR (reverse DNS):** Selectel обычно ставит PTR per-сервер автоматически. Если `dig -x <HOST_IP>` не возвращает `mail.lekottt.ru` — открыть тикет в Selectel: «прошу установить PTR для `<HOST_IP>` = `mail.lekottt.ru`».
-   - **Egress port 25:** Selectel часто блокирует исходящий 25/tcp по умолчанию. Если очередь maddy не уменьшается (`docker exec rag-p-smtp-1 ls /data/queue`) — тикет в Selectel «прошу разблокировать исходящий tcp/25 для отправки транзакционной почты». Альтернатива — переключиться на внешний relay (Yandex 360 — 5 ящиков бесплатно с SMTP-credentials для своего домена).
+   - `<SELECTEL_DOMAIN_VERIFY_KEY>` — ключ проверки владения доменом из карточки ресурса.
+   - `<SELECTEL_DKIM_VALUE>` — DKIM из карточки домена в ресурсе Selectel Email Service.
+   - У домена может быть только одна SPF TXT-запись: старую `mx a:mail.lekottt.ru ip4:<HOST_IP>` заменить или объединить с `include:spf.mail.selcloud.ru`.
 
 3. **Selectel S3** — создать bucket `rag-p-pg-backups` (или префикс в существующем).
 
