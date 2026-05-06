@@ -181,9 +181,7 @@ async def update_pipeline(
 
         version_id = str(uuid.uuid4())
         nodes_json = [n.model_dump() for n in body.nodes]
-        version = PipelineVersion(
-            id=version_id, pipeline_id=pipeline_id, nodes_json=nodes_json
-        )
+        version = PipelineVersion(id=version_id, pipeline_id=pipeline_id, nodes_json=nodes_json)
         db.add(version)
         pipeline.current_version_id = version_id
 

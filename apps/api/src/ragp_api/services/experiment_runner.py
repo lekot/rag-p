@@ -254,14 +254,14 @@ async def _ensure_chunks_embedded(
     stored_dim = int(row[0]) if row else 0
 
     if stored_dim == embedder_dim:
-        logger.debug(
-            "Chunk embedding dim %d matches embedder — skip re-embed", stored_dim
-        )
+        logger.debug("Chunk embedding dim %d matches embedder — skip re-embed", stored_dim)
         return
 
     logger.info(
         "Re-embedding chunks: stored_dim=%d embedder_dim=%d ds=%s",
-        stored_dim, embedder_dim, dataset_id,
+        stored_dim,
+        embedder_dim,
+        dataset_id,
     )
 
     # Load all chunks in dataset
@@ -639,9 +639,7 @@ async def run_experiment_inline(
         try:
             subscription = await get_active_subscription(db, organization_id)
             if subscription is None:
-                raise NoActiveSubscriptionError(
-                    f"No active subscription for org {organization_id}"
-                )
+                raise NoActiveSubscriptionError(f"No active subscription for org {organization_id}")
             _touch()
             await db.commit()
         except NoActiveSubscriptionError:

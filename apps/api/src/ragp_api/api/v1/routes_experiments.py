@@ -149,9 +149,7 @@ async def list_experiments(
     org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("read")),
 ) -> list[ExperimentOut]:
-    result = await db.execute(
-        select(Experiment).where(Experiment.organization_id == org.id)
-    )
+    result = await db.execute(select(Experiment).where(Experiment.organization_id == org.id))
     experiments = result.scalars().all()
     return [
         ExperimentOut(

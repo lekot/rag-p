@@ -304,9 +304,7 @@ async def test_experiment_runner_fails_closed_when_active_subscription_missing(
         updated_at=_utcnow() - timedelta(hours=1),
     )
     exp.plugin_grid_json = {
-        "retrievers": [
-            {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}
-        ]
+        "retrievers": [{"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}]
     }
     db_session.add(exp)
     await db_session.commit()

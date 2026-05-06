@@ -448,9 +448,7 @@ async def test_experiment_routes_scope_to_session_org_not_client_supplied_org(
         tenant_b = await _signup(client, "experiments-tenant-b")
         tenant_b_org_id = tenant_b["organization"]["id"]
 
-        list_resp = await client.get(
-            f"/api/v1/experiments?organization_id={tenant_a_org_id}"
-        )
+        list_resp = await client.get(f"/api/v1/experiments?organization_id={tenant_a_org_id}")
         assert list_resp.status_code == 200, list_resp.text
         assert list_resp.json() == []
 
