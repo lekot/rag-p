@@ -292,7 +292,9 @@ async def test_run_routes_scope_to_session_org_not_query_org(
             query="tenant a run",
             status="completed",
         )
-        db_session.add_all([pipeline, version, run])
+        db_session.add_all([pipeline, version])
+        await db_session.flush()
+        db_session.add(run)
         await db_session.commit()
 
         await client.post("/api/v1/auth/logout")
