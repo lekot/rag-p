@@ -259,6 +259,7 @@ async def test_experiment_start_audit_event(
     ):
         resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "AuditExperiment",
                 "organization_id": organization_id,
@@ -309,6 +310,7 @@ async def test_experiment_promote_audit_event(
     ):
         create_resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "PromoteAuditExp",
                 "organization_id": organization_id,
@@ -329,6 +331,7 @@ async def test_experiment_promote_audit_event(
 
     promote_resp = await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "AuditPipeline"},
     )
     assert promote_resp.status_code == 201, promote_resp.text
