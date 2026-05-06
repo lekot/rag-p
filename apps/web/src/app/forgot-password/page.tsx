@@ -11,19 +11,26 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
-      await fetch("/api/v1/auth/forgot-password", {
+      const res = await fetch("/api/proxy/v1/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setSubmitted(true);
+    } catch {
+      setError("Не удалось отправить ссылку. Попробуйте ещё раз.");
     } finally {
       setLoading(false);
-      setSubmitted(true);
     }
   }
 
@@ -62,6 +69,7 @@ export default function ForgotPasswordPage() {
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Отправляем…" : "Отправить ссылку"}
               </Button>
+              {error && <p className="text-sm text-red-500">{error}</p>}
               <p className="text-sm text-center text-muted-foreground">
                 <Link href="/login" className="underline hover:text-foreground">
                   Вернуться ко входу

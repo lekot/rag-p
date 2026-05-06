@@ -54,7 +54,7 @@ export class RagPApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/api/v1/auth/me',
+			url: '/api/v1/rag/usage/quota',
 			method: 'GET',
 			skipSslCertificateValidation: '={{ !$credentials.verifySsl }}',
 		},

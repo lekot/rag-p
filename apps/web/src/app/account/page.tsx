@@ -87,6 +87,9 @@ const EXPIRY_PRESETS: { label: string; days: number }[] = [
   { label: "365 дней", days: 365 },
 ];
 
+const ACCOUNT_EXPORT_URL = "/api/proxy/v1/users/me/export";
+const ACCOUNT_DELETE_URL = "/api/proxy/v1/users/me/delete";
+
 export default function AccountPage() {
   const router = useRouter();
   const user = useUser();
@@ -143,8 +146,6 @@ export default function AccountPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
-
   async function handleLogout() {
     setLoggingOut(true);
     try {
@@ -159,7 +160,7 @@ export default function AccountPage() {
     setExporting(true);
     setExportError(null);
     try {
-      const resp = await fetch(`${apiBase}/api/v1/users/me/export`, {
+      const resp = await fetch(ACCOUNT_EXPORT_URL, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -188,7 +189,7 @@ export default function AccountPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      const resp = await fetch(`${apiBase}/api/v1/users/me/delete`, {
+      const resp = await fetch(ACCOUNT_DELETE_URL, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
