@@ -271,7 +271,13 @@ async def test_run_routes_scope_to_session_org_not_query_org(
         version = PipelineVersion(
             id=str(uuid.uuid4()),
             pipeline_id=str(uuid.uuid4()),
-            nodes_json=[{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}],
+            nodes_json=[
+                {
+                    "plugin_kind": "chunker",
+                    "plugin_name": "recursive-character",
+                    "params": {},
+                }
+            ],
         )
         pipeline = Pipeline(
             id=version.pipeline_id,
