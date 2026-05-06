@@ -127,6 +127,15 @@ async def create_dataset(
     org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> DatasetOut:
+    if settings.enforce_subscription_quotas and await get_active_subscription(db, org.id) is None:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "No active subscription. Buy a plan at /pricing",
+            },
+        )
+
     dataset = Dataset(
         id=str(uuid.uuid4()),
         organization_id=org.id,

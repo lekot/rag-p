@@ -162,6 +162,31 @@ async def test_dataset_routes_scope_to_session_org_not_client_supplied_org(
         settings.allow_legacy_org_header = old_allow_legacy_org_header
 
 
+@pytest.mark.asyncio
+async def test_create_dataset_requires_active_plan_when_quotas_enforced(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    old_enforce = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    try:
+        resp = await client.post(
+            "/api/v1/datasets",
+            headers={"X-Organization-Id": organization_id},
+            json={"name": "No Plan DS", "organization_id": organization_id},
+        )
+    finally:
+        settings.enforce_subscription_quotas = old_enforce
+
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["detail"]["code"] == "no_active_plan"
+    dataset = (
+        await db_session.execute(select(Dataset).where(Dataset.name == "No Plan DS"))
+    ).scalar_one_or_none()
+    assert dataset is None
+
+
 # ---------------------------------------------------------------------------
 # POST /datasets/{dataset_id}/documents
 # ---------------------------------------------------------------------------

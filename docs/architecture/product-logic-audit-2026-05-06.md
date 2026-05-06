@@ -20,6 +20,7 @@ integration tooling.
 | PIPE-001 | Pipeline dataset binding | Pipelines accepted foreign/missing dataset IDs, and inline runs ignored pipeline dataset binding. | Fixed | Pipeline create/update validate dataset ownership. Runs use an effective dataset ID, reject conflicts, and pass the effective ID to retrievers and persisted run records. |
 | INGEST-001 | Document upload | Upload returned `201 pending` even when enqueueing chunking failed. | Fixed | Upload now returns `503 document_enqueue_failed`, cleans the DB document, releases storage quota, and best-effort deletes raw object storage when enqueue fails. |
 | PAY-001 | Frontend paywall UX | Costly dataset/upload/search/ask/experiment actions surfaced raw 402/API errors. | Fixed | Shared frontend paywall helper maps 402/no-plan errors to pricing CTA; no-plan upload is blocked before dataset creation. |
+| PAY-002 | Dataset creation paywall | Direct API callers could create empty dataset records without an active plan, even though datasets are part of the paid product journey. | Fixed | `POST /datasets` now returns `402 no_active_plan` before persisting when subscription quotas are enforced and the org has no active plan. |
 | UX-001 | Auth cache | Account logout/delete used soft navigation and could leave stale auth cache in the client. | Fixed | Account logout/delete now hard-navigate to `/login`. |
 | UX-002 | Pipeline editor | Edit-mode changes could be lost until internal submit, and detail page set edit state during render. | Fixed | `PipelineEditor` emits edit-mode changes immediately; pipeline detail initializes edit state in an effect. |
 | UX-003 | Dataset pipeline journey | Dataset pages did not create dataset-bound pipelines. | Fixed | Dataset detail links to `/pipelines/new?dataset_id=...`; new pipeline page passes `dataset_id` to creation. |
@@ -37,5 +38,6 @@ integration tooling.
 Local quality gate:
 
 - Backend: `ruff format --check apps/api/src apps/api/tests`, `ruff check apps/api/src apps/api/tests`, `mypy apps/api/src`, `pytest apps/api/tests -q`.
+- Regression: `pytest apps/api/tests/test_routes_datasets.py -k "create_dataset_requires_active_plan" -q`.
 - Web: `pnpm --dir apps/web lint`, `pnpm --dir apps/web typecheck`, `pnpm --dir apps/web test`.
 - n8n: `npm audit --audit-level=high`, `npm run lint`, `npm run build`, `npm pack --dry-run`.
