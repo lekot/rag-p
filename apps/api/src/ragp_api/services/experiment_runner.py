@@ -632,9 +632,45 @@ async def run_experiment_inline(
         _touch()
         await db.commit()
 
+        organization_id: str = experiment.organization_id
+
+        # Fail closed before doing any experiment work. get_active_subscription()
+        # returns None for missing/expired/cancelled plans; None is not active.
+        try:
+            subscription = await get_active_subscription(db, organization_id)
+            if subscription is None:
+                raise NoActiveSubscriptionError(
+                    f"No active subscription for org {organization_id}"
+                )
+            _touch()
+            await db.commit()
+        except NoActiveSubscriptionError:
+            experiment.status = "failed"
+            experiment.leaderboard_json = [
+                {
+                    "error_code": "no_active_plan",
+                    "error": "No active subscription. Buy a plan on /pricing.",
+                }
+            ]
+            _touch()
+            await db.commit()
+            return
+        except QuotaExceededError as exc:
+            experiment.status = "failed"
+            experiment.leaderboard_json = [
+                {
+                    "error_code": "quota_exceeded",
+                    "error": "RAG query quota exceeded. Upgrade your plan.",
+                    "q_used": exc.q_used,
+                    "q_limit": exc.q_limit,
+                }
+            ]
+            _touch()
+            await db.commit()
+            return
+
         combinations = build_combinations(experiment.plugin_grid_json)
         dataset_id: str = experiment.dataset_id
-        organization_id: str = experiment.organization_id
 
         # Re-chunk documents if the pipeline uses a different chunker than
         # the one that was used at upload time.  Uses the first pipeline

@@ -794,6 +794,15 @@ def _make_ask_get_plugin(fake_chunks: list[dict], generator_mock: MagicMock):
     return _side_effect
 
 
+def _mock_pipeline_result() -> dict:
+    return {
+        "answer": "Pipeline answer",
+        "contexts": [],
+        "traces": [],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+
+
 # ---------------------------------------------------------------------------
 # POST /datasets/{dataset_id}/ask
 # ---------------------------------------------------------------------------
@@ -1086,6 +1095,141 @@ async def test_ask_pipeline_path_returns_usage(
     assert body["usage"]["prompt_tokens"] > 0
     assert body["usage"]["prompt_tokens"] == 55
     assert body["usage"]["completion_tokens"] == 15
+
+
+@pytest.mark.asyncio
+async def test_ask_with_missing_pipeline_id_returns_404_without_default_fallback(
+    client: AsyncClient,
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    generator_cls = MagicMock()
+
+    with (
+        patch(
+            "ragp_api.api.v1.routes_datasets.get_plugin",
+            side_effect=_make_ask_get_plugin([], generator_cls),
+        ),
+        patch(
+            "ragp_api.api.v1.routes_datasets.run_pipeline",
+            new=AsyncMock(return_value=_mock_pipeline_result()),
+        ) as run_mock,
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "what?", "pipeline_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "pipeline_not_found"
+    run_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pipeline_org_id", "pipeline_dataset_matches"),
+    [
+        ("other-org", True),
+        ("org-test-001", False),
+    ],
+)
+async def test_ask_with_unusable_pipeline_returns_404_without_default_fallback(
+    client: AsyncClient,
+    organization_id: str,
+    db_session,  # type: ignore[no-untyped-def]
+    pipeline_org_id: str,
+    pipeline_dataset_matches: bool,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    pipeline_dataset_id = (
+        dataset_id
+        if pipeline_dataset_matches
+        else await _create_dataset(client, organization_id, name="Other DS")
+    )
+    version_id = str(uuid.uuid4())
+    pipeline_id = str(uuid.uuid4())
+    db_session.add(
+        PipelineVersion(
+            id=version_id,
+            pipeline_id=pipeline_id,
+            nodes_json=[
+                {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}
+            ],
+        )
+    )
+    db_session.add(
+        Pipeline(
+            id=pipeline_id,
+            organization_id=pipeline_org_id,
+            name="Unusable Pipeline",
+            dataset_id=pipeline_dataset_id,
+            current_version_id=version_id,
+        )
+    )
+    await db_session.commit()
+    generator_cls = MagicMock()
+
+    with (
+        patch(
+            "ragp_api.api.v1.routes_datasets.get_plugin",
+            side_effect=_make_ask_get_plugin([], generator_cls),
+        ),
+        patch(
+            "ragp_api.api.v1.routes_datasets.run_pipeline",
+            new=AsyncMock(return_value=_mock_pipeline_result()),
+        ) as run_mock,
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "what?", "pipeline_id": pipeline_id},
+        )
+
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "pipeline_not_found"
+    run_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ask_with_pipeline_without_current_version_returns_422_without_default_fallback(
+    client: AsyncClient,
+    organization_id: str,
+    db_session,  # type: ignore[no-untyped-def]
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    pipeline_id = str(uuid.uuid4())
+    db_session.add(
+        Pipeline(
+            id=pipeline_id,
+            organization_id=organization_id,
+            name="Draft Pipeline",
+            dataset_id=dataset_id,
+            current_version_id=None,
+        )
+    )
+    await db_session.commit()
+    generator_cls = MagicMock()
+
+    with (
+        patch(
+            "ragp_api.api.v1.routes_datasets.get_plugin",
+            side_effect=_make_ask_get_plugin([], generator_cls),
+        ),
+        patch(
+            "ragp_api.api.v1.routes_datasets.run_pipeline",
+            new=AsyncMock(return_value=_mock_pipeline_result()),
+        ) as run_mock,
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "what?", "pipeline_id": pipeline_id},
+        )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "pipeline_has_no_current_version"
+    run_mock.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

@@ -989,16 +989,48 @@ async def ask_dataset(
     pipeline_nodes: list[dict[str, Any]] | None = None
     pipeline_version_id_for_run: str | None = None
     if body.pipeline_id:
-        pl_result = await db.execute(select(Pipeline).where(Pipeline.id == body.pipeline_id))
-        pl = pl_result.scalar_one_or_none()
-        if pl is not None and pl.organization_id == organization_id and pl.current_version_id:
-            pipeline_version_id_for_run = pl.current_version_id
-            ver_result = await db.execute(
-                select(PipelineVersion).where(PipelineVersion.id == pl.current_version_id)
+        pl_result = await db.execute(
+            select(Pipeline).where(
+                Pipeline.id == body.pipeline_id,
+                Pipeline.organization_id == organization_id,
+                Pipeline.dataset_id == dataset_id,
             )
-            ver = ver_result.scalar_one_or_none()
-            if ver is not None:
-                pipeline_nodes = ver.nodes_json
+        )
+        pl = pl_result.scalar_one_or_none()
+        if pl is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "pipeline_not_found",
+                    "message": f"Pipeline {body.pipeline_id} not found for this dataset",
+                },
+            )
+        if not pl.current_version_id:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "pipeline_has_no_current_version",
+                    "message": "Pipeline has no current version",
+                },
+            )
+
+        pipeline_version_id_for_run = pl.current_version_id
+        ver_result = await db.execute(
+            select(PipelineVersion).where(
+                PipelineVersion.id == pl.current_version_id,
+                PipelineVersion.pipeline_id == pl.id,
+            )
+        )
+        ver = ver_result.scalar_one_or_none()
+        if ver is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "pipeline_has_no_current_version",
+                    "message": "Pipeline current version was not found",
+                },
+            )
+        pipeline_nodes = ver.nodes_json
 
     if pipeline_nodes is not None:
         # Execute via pipeline nodes

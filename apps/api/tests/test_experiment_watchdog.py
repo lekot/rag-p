@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -285,6 +285,44 @@ async def test_on_job_failure_swallows_exceptions(monkeypatch):
             "exception": RuntimeError("worker died"),
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_experiment_runner_fails_closed_when_active_subscription_missing(
+    db_session: AsyncSession,
+    organization_id: str,
+    dataset: str,
+):
+    """get_active_subscription() returning None means no active plan, not success."""
+    from ragp_api.services import experiment_runner
+    from ragp_api.services.experiment_runner import run_experiment_inline
+
+    exp = _make_experiment(
+        organization_id=organization_id,
+        dataset_id=dataset,
+        status="queued",
+        updated_at=_utcnow() - timedelta(hours=1),
+    )
+    exp.plugin_grid_json = {
+        "retrievers": [
+            {"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}
+        ]
+    }
+    db_session.add(exp)
+    await db_session.commit()
+
+    with patch.object(
+        experiment_runner,
+        "_self_test_metric",
+        new_callable=AsyncMock,
+    ) as metric_mock:
+        metric_mock.return_value = {"status": "completed", "composite_score": 1.0}
+        await run_experiment_inline(exp, db_session)
+
+    await db_session.refresh(exp)
+    assert exp.status == "failed"
+    assert exp.leaderboard_json[0]["error_code"] == "no_active_plan"
+    metric_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
