@@ -1,11 +1,13 @@
 """Tests for experiment routes and pipeline promotion."""
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
 
 from ragp_api.services.experiment_runner import build_combinations
+from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
 # Helper: mock the queue.enqueue() helper so tests don't need a real Redis.
@@ -32,6 +34,19 @@ async def _create_dataset(client: AsyncClient, organization_id: str) -> str:
     )
     assert resp.status_code == 201
     return resp.json()["id"]
+
+
+async def _signup(client: AsyncClient, org_name: str) -> dict:
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": f"{org_name}-{uuid.uuid4().hex}@example.com",
+            "password": "s3cr3t!",
+            "organization_name": org_name,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
 
 
 PLUGIN_GRID = {
@@ -95,6 +110,7 @@ async def test_experiment_enqueued_returns_queued_status(client: AsyncClient, or
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         response = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Queued Experiment",
                 "organization_id": organization_id,
@@ -127,6 +143,7 @@ async def test_create_experiment_enqueues_job(client: AsyncClient, organization_
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         response = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Test Experiment",
                 "organization_id": organization_id,
@@ -153,6 +170,7 @@ async def test_create_experiment_enqueue_called_once(client: AsyncClient, organi
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Once Test",
                 "organization_id": organization_id,
@@ -173,6 +191,7 @@ async def test_list_experiments_org_filtered(client: AsyncClient, organization_i
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Exp 1",
                 "organization_id": organization_id,
@@ -182,6 +201,7 @@ async def test_list_experiments_org_filtered(client: AsyncClient, organization_i
         )
         await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": "other-org"},
             json={
                 "name": "Exp 2",
                 "organization_id": "other-org",
@@ -190,7 +210,10 @@ async def test_list_experiments_org_filtered(client: AsyncClient, organization_i
             },
         )
 
-    list_resp = await client.get(f"/api/v1/experiments?organization_id={organization_id}")
+    list_resp = await client.get(
+        f"/api/v1/experiments?organization_id={organization_id}",
+        headers={"X-Organization-Id": organization_id},
+    )
     assert list_resp.status_code == 200
     data = list_resp.json()
     assert all(e["organization_id"] == organization_id for e in data)
@@ -207,6 +230,7 @@ async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Detailed Exp",
                 "organization_id": organization_id,
@@ -216,7 +240,10 @@ async def test_get_experiment_by_id(client: AsyncClient, organization_id: str):
         )
 
     exp_id = create_resp.json()["id"]
-    resp = await client.get(f"/api/v1/experiments/{exp_id}")
+    resp = await client.get(
+        f"/api/v1/experiments/{exp_id}",
+        headers={"X-Organization-Id": organization_id},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == exp_id
@@ -234,6 +261,7 @@ async def test_promote_to_pipeline_requires_completed(client: AsyncClient, organ
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Not Completed",
                 "organization_id": organization_id,
@@ -246,6 +274,7 @@ async def test_promote_to_pipeline_requires_completed(client: AsyncClient, organ
 
     promote_resp = await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "Should Fail"},
     )
     assert promote_resp.status_code == 422
@@ -271,6 +300,7 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str, db
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         create_resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "Promotable Exp",
                 "organization_id": organization_id,
@@ -294,6 +324,7 @@ async def test_promote_to_pipeline(client: AsyncClient, organization_id: str, db
 
     promote_resp = await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "Winner Pipeline"},
     )
     assert promote_resp.status_code == 201
@@ -333,6 +364,7 @@ async def test_pipeline_list_filter_by_dataset(
     with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
         exp_resp = await client.post(
             "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
             json={
                 "name": "DS1 Exp",
                 "organization_id": organization_id,
@@ -362,12 +394,14 @@ async def test_pipeline_list_filter_by_dataset(
 
     await client.post(
         f"/api/v1/experiments/{exp_id}/promote_to_pipeline",
+        headers={"X-Organization-Id": organization_id},
         json={"name": "Pipeline for DS1"},
     )
 
     # Get pipelines filtered by ds1
     list_resp = await client.get(
-        f"/api/v1/pipelines?organization_id={organization_id}&dataset_id={ds1_id}"
+        f"/api/v1/pipelines?organization_id={organization_id}&dataset_id={ds1_id}",
+        headers={"X-Organization-Id": organization_id},
     )
     assert list_resp.status_code == 200
     pipelines = list_resp.json()
@@ -376,7 +410,72 @@ async def test_pipeline_list_filter_by_dataset(
 
     # ds2 should return empty
     list_resp2 = await client.get(
-        f"/api/v1/pipelines?organization_id={organization_id}&dataset_id={ds2_id}"
+        f"/api/v1/pipelines?organization_id={organization_id}&dataset_id={ds2_id}",
+        headers={"X-Organization-Id": organization_id},
     )
     assert list_resp2.status_code == 200
     assert list_resp2.json() == []
+
+
+@pytest.mark.asyncio
+async def test_experiment_routes_scope_to_session_org_not_client_supplied_org(
+    client: AsyncClient,
+) -> None:
+    old_allow_legacy_org_header = settings.allow_legacy_org_header
+    settings.allow_legacy_org_header = False
+    try:
+        tenant_a = await _signup(client, "experiments-tenant-a")
+        tenant_a_org_id = tenant_a["organization"]["id"]
+        dataset_id = await _create_dataset(client, tenant_a_org_id)
+        enqueue_mock = _make_enqueue_mock()
+
+        with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
+            create_resp = await client.post(
+                "/api/v1/experiments",
+                json={
+                    "name": "Tenant A Experiment",
+                    "organization_id": "other-org",
+                    "dataset_id": dataset_id,
+                    "plugin_grid": PLUGIN_GRID,
+                },
+            )
+        assert create_resp.status_code == 201, create_resp.text
+        experiment_id = create_resp.json()["id"]
+        assert create_resp.json()["organization_id"] == tenant_a_org_id
+        assert enqueue_mock.call_args.kwargs["tenant_id"] == tenant_a_org_id
+
+        await client.post("/api/v1/auth/logout")
+        tenant_b = await _signup(client, "experiments-tenant-b")
+        tenant_b_org_id = tenant_b["organization"]["id"]
+
+        list_resp = await client.get(
+            f"/api/v1/experiments?organization_id={tenant_a_org_id}"
+        )
+        assert list_resp.status_code == 200, list_resp.text
+        assert list_resp.json() == []
+
+        with patch("ragp_api.api.v1.routes_experiments.enqueue", _make_enqueue_mock()):
+            create_b_resp = await client.post(
+                "/api/v1/experiments",
+                json={
+                    "name": "Tenant B Experiment",
+                    "organization_id": tenant_a_org_id,
+                    "dataset_id": dataset_id,
+                    "plugin_grid": PLUGIN_GRID,
+                },
+            )
+        assert create_b_resp.status_code == 201, create_b_resp.text
+        assert create_b_resp.json()["organization_id"] == tenant_b_org_id
+
+        assert (await client.get(f"/api/v1/experiments/{experiment_id}")).status_code == 404
+        assert (
+            await client.get(f"/api/v1/experiments/{experiment_id}/leaderboard")
+        ).status_code == 404
+        assert (
+            await client.post(
+                f"/api/v1/experiments/{experiment_id}/promote_to_pipeline",
+                json={"name": "Cross Org Promote"},
+            )
+        ).status_code == 404
+    finally:
+        settings.allow_legacy_org_header = old_allow_legacy_org_header

@@ -18,7 +18,6 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 class ExperimentCreateIn(BaseModel):
     name: str
-    organization_id: str
     dataset_id: str
     plugin_grid: dict[str, list[dict[str, Any]]]
 
@@ -89,11 +88,12 @@ async def create_experiment(
     body: ExperimentCreateIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
     experiment = Experiment(
         id=str(uuid.uuid4()),
-        organization_id=body.organization_id,
+        organization_id=org.id,
         name=body.name,
         dataset_id=body.dataset_id,
         plugin_grid_json=body.plugin_grid,
@@ -103,7 +103,7 @@ async def create_experiment(
     await db.flush()
     await log_audit_event(
         db,
-        org_id=body.organization_id,
+        org_id=org.id,
         user_id=None,
         event_type="experiment.start",
         resource_type="experiment",
@@ -119,7 +119,7 @@ async def create_experiment(
     try:
         await enqueue(
             task_type="experiment.run",
-            tenant_id=body.organization_id,
+            tenant_id=org.id,
             payload={"experiment_id": experiment.id},
             idempotency_key=f"experiment.run:{experiment.id}",
             queue_name="rag.experiment",
@@ -145,11 +145,12 @@ async def create_experiment(
 
 @router.get("", response_model=list[ExperimentOut])
 async def list_experiments(
-    organization_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("read")),
 ) -> list[ExperimentOut]:
     result = await db.execute(
-        select(Experiment).where(Experiment.organization_id == organization_id)
+        select(Experiment).where(Experiment.organization_id == org.id)
     )
     experiments = result.scalars().all()
     return [
@@ -171,8 +172,15 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("read")),
 ) -> ExperimentOut:
-    result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
+    result = await db.execute(
+        select(Experiment).where(
+            Experiment.id == experiment_id,
+            Experiment.organization_id == org.id,
+        )
+    )
     experiment = result.scalar_one_or_none()
     if experiment is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
@@ -192,8 +200,15 @@ async def get_experiment(
 async def get_leaderboard(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("read")),
 ) -> LeaderboardOut:
-    result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
+    result = await db.execute(
+        select(Experiment).where(
+            Experiment.id == experiment_id,
+            Experiment.organization_id == org.id,
+        )
+    )
     experiment = result.scalar_one_or_none()
     if experiment is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
@@ -275,9 +290,15 @@ async def promote_to_pipeline(
     body: PromoteIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> PipelineOut:
-    result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
+    result = await db.execute(
+        select(Experiment).where(
+            Experiment.id == experiment_id,
+            Experiment.organization_id == org.id,
+        )
+    )
     experiment = result.scalar_one_or_none()
     if experiment is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")

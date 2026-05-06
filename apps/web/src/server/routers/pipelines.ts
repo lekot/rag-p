@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { apiClient } from "../api-client";
+import type { Context } from "../context";
+
+function authHeaders(ctx: Pick<Context, "cookieHeader">): Record<string, string> {
+  return ctx.cookieHeader ? { cookie: ctx.cookieHeader } : {};
+}
 
 const PipelineNodeSchema = z.object({
   plugin_kind: z.string(),
@@ -35,28 +40,30 @@ export const pipelinesRouter = router({
   list: protectedProcedure
     .input(z.object({ datasetId: z.string().optional() }))
     .query(async ({ ctx, input }) => {
-      const params = new URLSearchParams({
-        organization_id: ctx.organization_id,
-      });
+      const params = new URLSearchParams();
       if (input.datasetId) {
         params.set("dataset_id", input.datasetId);
       }
-      return apiClient.get<Pipeline[]>(`/api/v1/pipelines?${params.toString()}`);
+      const query = params.toString();
+      return apiClient.get<Pipeline[]>(
+        query ? `/api/v1/pipelines?${query}` : "/api/v1/pipelines",
+        authHeaders(ctx)
+      );
     }),
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
-      return apiClient.get<Pipeline>(`/api/v1/pipelines/${input.id}`);
+    .query(async ({ input, ctx }) => {
+      return apiClient.get<Pipeline>(
+        `/api/v1/pipelines/${input.id}`,
+        authHeaders(ctx)
+      );
     }),
 
   create: protectedProcedure
     .input(CreatePipelineSchema)
     .mutation(async ({ input, ctx }) => {
-      return apiClient.post<Pipeline>("/api/v1/pipelines", {
-        ...input,
-        organization_id: ctx.organization_id,
-      });
+      return apiClient.post<Pipeline>("/api/v1/pipelines", input, authHeaders(ctx));
     }),
 
   createRun: protectedProcedure
@@ -67,25 +74,30 @@ export const pipelinesRouter = router({
         dataset_id: z.string().nullable().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       return apiClient.post<{ id: string; status: string }>(
         `/api/v1/pipelines/${input.pipeline_id}/runs`,
-        { query: input.query, dataset_id: input.dataset_id ?? null }
+        { query: input.query, dataset_id: input.dataset_id ?? null },
+        authHeaders(ctx)
       );
     }),
 
   update: protectedProcedure
     .input(PipelineUpdateSchema)
-    .mutation(async ({ input }) => {
-      return apiClient.put<Pipeline>(`/api/v1/pipelines/${input.id}`, {
-        name: input.name,
-        nodes: input.nodes,
-      });
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.put<Pipeline>(
+        `/api/v1/pipelines/${input.id}`,
+        {
+          name: input.name,
+          nodes: input.nodes,
+        },
+        authHeaders(ctx)
+      );
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => {
-      return apiClient.delete<void>(`/api/v1/pipelines/${input.id}`);
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.delete<void>(`/api/v1/pipelines/${input.id}`, authHeaders(ctx));
     }),
 });

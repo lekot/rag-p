@@ -7,8 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Pipeline, Run
+from ragp_api.db.models import Organization, Pipeline, Run
 from ragp_api.deps import get_db
+from ragp_api.deps_auth import require_organization, require_scope
 
 router = APIRouter(tags=["runs"])
 
@@ -39,8 +40,15 @@ async def create_run(
     pipeline_id: str,
     body: RunCreateIn,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("write")),
 ) -> RunOut:
-    pl_result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pl_result = await db.execute(
+        select(Pipeline).where(
+            Pipeline.id == pipeline_id,
+            Pipeline.organization_id == org.id,
+        )
+    )
     pipeline = pl_result.scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
@@ -56,7 +64,7 @@ async def create_run(
     if ver is None or not ver.nodes_json:
         raise HTTPException(status_code=422, detail="Pipeline version has no nodes")
 
-    org_id = pipeline.organization_id
+    org_id = org.id
     dataset_id = body.dataset_id
     query = body.query or ""
 
@@ -76,8 +84,13 @@ async def create_run(
     from ragp_api.settings import settings as _runs_settings
 
     if _runs_settings.enforce_subscription_quotas:
+        no_active_plan_detail = {
+            "code": "no_active_plan",
+            "message": "No active subscription. Buy a plan at /pricing",
+        }
         try:
-            await _get_sub(db, org_id)
+            if await _get_sub(db, org_id) is None:
+                raise HTTPException(status_code=402, detail=no_active_plan_detail)
         except _NoSub:
             raise HTTPException(
                 status_code=402,
@@ -88,6 +101,8 @@ async def create_run(
             ) from None
         try:
             await _consume_q(db, org_id, count=1)
+        except _NoSub:
+            raise HTTPException(status_code=402, detail=no_active_plan_detail) from None
         except _SubQuota as exc:
             raise HTTPException(
                 status_code=402,
@@ -171,8 +186,18 @@ async def create_run(
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
-async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
-    result = await db.execute(select(Run).where(Run.id == run_id))
+async def get_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("read")),
+) -> RunOut:
+    result = await db.execute(
+        select(Run).where(
+            Run.id == run_id,
+            Run.organization_id == org.id,
+        )
+    )
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
@@ -196,13 +221,14 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)) -> RunOut:
 
 @router.get("/runs", response_model=list[RunOut])
 async def list_runs(
-    organization_id: str,
     dataset_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    org: Organization = Depends(require_organization),
+    _scope: None = Depends(require_scope("read")),
 ) -> list[RunOut]:
-    stmt = select(Run).where(Run.organization_id == organization_id)
+    stmt = select(Run).where(Run.organization_id == org.id)
     if dataset_id is not None:
         stmt = stmt.where(Run.dataset_id == dataset_id)
     stmt = stmt.order_by(Run.created_at.desc()).limit(limit).offset(offset)

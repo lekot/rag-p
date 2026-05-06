@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { apiClient } from "../api-client";
+import type { Context } from "../context";
+
+function authHeaders(ctx: Pick<Context, "cookieHeader">): Record<string, string> {
+  return ctx.cookieHeader ? { cookie: ctx.cookieHeader } : {};
+}
 
 const ScoredChunkSchema = z.object({
   text: z.string(),
@@ -120,19 +125,22 @@ export const runsRouter = router({
   list: protectedProcedure
     .input(z.object({ dataset_id: z.string().optional() }).optional())
     .query(async ({ input, ctx }) => {
-      const params = new URLSearchParams({ organization_id: ctx.organization_id });
+      const params = new URLSearchParams();
       if (input?.dataset_id) params.set("dataset_id", input.dataset_id);
+      const query = params.toString();
       const raw = await apiClient.get<z.infer<typeof RunListItemSchema>[]>(
-        `/api/v1/runs?${params.toString()}`
+        query ? `/api/v1/runs?${query}` : "/api/v1/runs",
+        authHeaders(ctx)
       );
       return z.array(RunListItemSchema).parse(raw);
     }),
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const raw = await apiClient.get<z.infer<typeof RawRunDetailSchema>>(
-        `/api/v1/runs/${input.id}`
+        `/api/v1/runs/${input.id}`,
+        authHeaders(ctx)
       );
       return normaliseRun(raw);
     }),

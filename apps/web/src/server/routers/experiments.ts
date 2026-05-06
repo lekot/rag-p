@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { apiClient } from "../api-client";
+import type { Context } from "../context";
+
+function authHeaders(ctx: Pick<Context, "cookieHeader">): Record<string, string> {
+  return ctx.cookieHeader ? { cookie: ctx.cookieHeader } : {};
+}
 
 const PluginOptionSchema = z.object({
   plugin_kind: z.string(),
@@ -78,46 +83,49 @@ export type PromotedPipeline = z.infer<typeof PromotePipelineSchema>;
 
 export const experimentsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    return apiClient.get<Experiment[]>(
-      `/api/v1/experiments?organization_id=${ctx.organization_id}`
-    );
+    return apiClient.get<Experiment[]>("/api/v1/experiments", authHeaders(ctx));
   }),
 
   byId: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
-      return apiClient.get<Experiment>(`/api/v1/experiments/${input.id}`);
+    .query(async ({ input, ctx }) => {
+      return apiClient.get<Experiment>(
+        `/api/v1/experiments/${input.id}`,
+        authHeaders(ctx)
+      );
     }),
 
   create: protectedProcedure
     .input(CreateExperimentSchema)
     .mutation(async ({ input, ctx }) => {
-      return apiClient.post<Experiment>("/api/v1/experiments", {
-        ...input,
-        organization_id: ctx.organization_id,
-      });
+      return apiClient.post<Experiment>("/api/v1/experiments", input, authHeaders(ctx));
     }),
 
   leaderboard: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return apiClient.get<{ combinations: LeaderboardCombination[] }>(
-        `/api/v1/experiments/${input.id}/leaderboard`
+        `/api/v1/experiments/${input.id}/leaderboard`,
+        authHeaders(ctx)
       );
     }),
 
   promote: protectedProcedure
     .input(z.object({ id: z.string(), name: z.string().min(1), combination_index: z.number().int().min(0).optional().default(0) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       return apiClient.post<PromotedPipeline>(
         `/api/v1/experiments/${input.id}/promote_to_pipeline`,
-        { name: input.name, combination_index: input.combination_index }
+        { name: input.name, combination_index: input.combination_index },
+        authHeaders(ctx)
       );
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => {
-      return apiClient.delete<void>(`/api/v1/experiments/${input.id}`);
+    .mutation(async ({ input, ctx }) => {
+      return apiClient.delete<void>(
+        `/api/v1/experiments/${input.id}`,
+        authHeaders(ctx)
+      );
     }),
 });
