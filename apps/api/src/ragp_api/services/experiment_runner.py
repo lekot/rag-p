@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, Experiment
+from ragp_api.db.models import Chunk, Dataset, DatasetGoldenItem, Document, Experiment
 from ragp_api.services.subscription import (
     NoActiveSubscriptionError,
     QuotaExceededError,
@@ -174,10 +174,16 @@ async def _load_dataset_chunks(
 async def _load_golden_items(
     db: AsyncSession,
     dataset_id: str,
+    organization_id: str,
 ) -> list[DatasetGoldenItem]:
     """Load all golden Q&A items for a dataset."""
     result = await db.execute(
-        select(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id)
+        select(DatasetGoldenItem)
+        .join(Dataset, Dataset.id == DatasetGoldenItem.dataset_id)
+        .where(
+            DatasetGoldenItem.dataset_id == dataset_id,
+            Dataset.organization_id == organization_id,
+        )
     )
     return list(result.scalars().all())
 
@@ -688,7 +694,7 @@ async def run_experiment_inline(
             await db.commit()
 
         # Check whether golden Q&A exists for this dataset
-        golden_items = await _load_golden_items(db, dataset_id)
+        golden_items = await _load_golden_items(db, dataset_id, organization_id)
         use_golden = len(golden_items) > 0
 
         # Load dataset chunks for self-test fallback (only needed when no golden)

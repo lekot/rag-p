@@ -8,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@/lib/auth";
 
 export default function DatasetsPage() {
   const { toast } = useToast();
+  const user = useUser();
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const utils = trpc.useUtils();
@@ -40,7 +42,11 @@ export default function DatasetsPage() {
         <Button onClick={() => setUploadOpen(true)}>Upload / Create</Button>
       </div>
 
-      <UploadDocumentDialog open={uploadOpen} onOpenChange={setUploadOpen} />
+      <UploadDocumentDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        hasActiveSubscription={user?.has_active_subscription}
+      />
 
       {isLoading && <div className="text-muted-foreground">Loading...</div>}
 

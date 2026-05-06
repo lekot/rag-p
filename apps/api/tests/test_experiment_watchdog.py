@@ -16,7 +16,7 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ragp_api.db.models import Dataset, Experiment
+from ragp_api.db.models import Dataset, DatasetGoldenItem, Experiment
 
 
 def _utcnow() -> datetime:
@@ -321,6 +321,33 @@ async def test_experiment_runner_fails_closed_when_active_subscription_missing(
     assert exp.status == "failed"
     assert exp.leaderboard_json[0]["error_code"] == "no_active_plan"
     metric_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_load_golden_items_is_scoped_to_dataset_organization(
+    db_session: AsyncSession,
+    organization_id: str,
+) -> None:
+    from ragp_api.services.experiment_runner import _load_golden_items
+
+    dataset_id = str(uuid.uuid4())
+    foreign_dataset = Dataset(
+        id=dataset_id,
+        organization_id="other-org",
+        name="foreign golden ds",
+    )
+    foreign_item = DatasetGoldenItem(
+        id=str(uuid.uuid4()),
+        dataset_id=dataset_id,
+        question="foreign question",
+        answer="foreign answer",
+    )
+    db_session.add_all([foreign_dataset, foreign_item])
+    await db_session.commit()
+
+    items = await _load_golden_items(db_session, dataset_id, organization_id)
+
+    assert items == []
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import AuditEvent, Membership, OrgInvite, OrgMember, OrgRole, User
@@ -178,6 +178,12 @@ async def remove_member(
             raise HTTPException(status_code=400, detail="Cannot remove the last owner")
 
     await db.delete(member)
+    await db.execute(
+        delete(Membership).where(
+            Membership.organization_id == org_id,
+            Membership.user_id == user_id,
+        )
+    )
     await log_audit_event(
         db,
         org_id=org_id,

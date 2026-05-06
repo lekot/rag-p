@@ -20,6 +20,7 @@ from ragp_api.db.models import (
     Organization,
     Pipeline,
     PipelineVersion,
+    Plan,
     Run,
 )
 from ragp_api.deps import get_db
@@ -46,6 +47,7 @@ from ragp_api.services.subscription import (
     StorageQuotaExceededError,
     consume_q,
     consume_storage,
+    get_active_subscription,
     release_storage,
 )
 from ragp_api.services.usage import record_usage_event
@@ -379,6 +381,64 @@ class GenerateGoldenOut(BaseModel):
     count: int
 
 
+async def _preflight_golden_generation_quota(db: AsyncSession, organization_id: str) -> None:
+    if not settings.enforce_subscription_quotas:
+        return
+    try:
+        subscription = await get_active_subscription(db, organization_id)
+    except NoActiveSubscriptionError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        ) from exc
+    if subscription is None:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        )
+
+    plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+    plan = plan_result.scalar_one_or_none()
+    if plan is not None and not plan.allow_overage and subscription.q_used + 1 > plan.included_q:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "quota_exceeded",
+                "q_used": subscription.q_used,
+                "q_limit": plan.included_q,
+                "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+            },
+        )
+
+
+def _golden_quota_http_exception(
+    exc: NoActiveSubscriptionError | QuotaExceededError,
+) -> HTTPException:
+    if isinstance(exc, NoActiveSubscriptionError):
+        return HTTPException(
+            status_code=402,
+            detail={
+                "code": "no_active_plan",
+                "message": "Активной подписки нет. Купите план на /pricing",
+            },
+        )
+    return HTTPException(
+        status_code=402,
+        detail={
+            "code": "quota_exceeded",
+            "q_used": exc.q_used,
+            "q_limit": exc.q_limit,
+            "message": "Лимит RAG-запросов исчерпан. Перейдите на старший тариф.",
+        },
+    )
+
+
 @router.post("/{dataset_id}/golden", status_code=201, response_model=GenerateGoldenOut)
 async def generate_golden(
     dataset_id: str,
@@ -393,6 +453,8 @@ async def generate_golden(
     )
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+    await _preflight_golden_generation_quota(db, organization_id)
 
     sample_size = max(1, min(body.sample_size, 50))
     try:
@@ -410,6 +472,8 @@ async def generate_golden(
                 "message": "Не удалось сгенерировать Golden Q&A. Проверьте настройки LLM.",
             },
         ) from exc
+    except (NoActiveSubscriptionError, QuotaExceededError) as exc:
+        raise _golden_quota_http_exception(exc) from exc
     db_items = await save_golden_items(dataset_id=dataset_id, pairs=pairs, db=db)
 
     out_items = [
@@ -450,6 +514,8 @@ async def regenerate_golden(
     if ds_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
 
+    await _preflight_golden_generation_quota(db, organization_id)
+
     # Delete all existing golden items
     await db.execute(delete(DatasetGoldenItem).where(DatasetGoldenItem.dataset_id == dataset_id))
 
@@ -469,6 +535,8 @@ async def regenerate_golden(
                 "message": "Не удалось перегенерировать Golden Q&A. Проверьте настройки LLM.",
             },
         ) from exc
+    except (NoActiveSubscriptionError, QuotaExceededError) as exc:
+        raise _golden_quota_http_exception(exc) from exc
     db_items = await save_golden_items(dataset_id=dataset_id, pairs=pairs, db=db)
 
     out_items = [
@@ -759,6 +827,7 @@ async def upload_document(
     await db.commit()
 
     # Queue async chunking job on the rag.ingest queue.
+    pool = None
     try:
         from arq import create_pool
         from arq.connections import RedisSettings
@@ -768,9 +837,35 @@ async def upload_document(
             default_queue_name="rag.ingest",
         )
         await pool.enqueue_job("chunk_document", document_id=document_id, text=text)
-        await pool.aclose()
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to queue chunking job for doc %s", document_id)
+        try:
+            await db.delete(doc)
+            if settings.enforce_subscription_quotas and len(raw) > 0:
+                await release_storage(db, organization_id, len(raw))
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to clean up doc %s after enqueue failure", document_id)
+            await db.rollback()
+        try:
+            await delete_raw_documents(
+                [ObjectStorageRef(backend=storage_ref.backend, key=storage_ref.key)]
+            )
+        except ObjectStorageError:
+            logger.exception(
+                "Failed to delete raw document for doc %s after enqueue failure",
+                document_id,
+            )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "document_enqueue_failed",
+                "message": "Не удалось поставить документ в очередь обработки.",
+            },
+        ) from exc
+    finally:
+        if pool is not None:
+            await pool.aclose()
 
     return UploadDocumentResponse(
         document_id=doc.id,

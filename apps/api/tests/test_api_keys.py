@@ -29,8 +29,24 @@ from ragp_api.db.models import (
     Membership,
     Organization,
     OrgBalance,
+    OrgMember,
     User,
 )
+from ragp_api.deps_auth import COOKIE_NAME
+from ragp_api.services.sessions import make_session_cookie
+
+PLUGIN_GRID = {
+    "chunkers": [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}],
+    "embedders": [{"plugin_kind": "embedder", "plugin_name": "litellm-embedder", "params": {}}],
+    "retrievers": [{"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}],
+    "generators": [
+        {
+            "plugin_kind": "generator",
+            "plugin_name": "litellm-generator",
+            "params": {"model": "openai/gpt-4o-mini"},
+        }
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -133,6 +149,117 @@ async def test_create_key_rejects_invalid_scope(client: AsyncClient) -> None:
     await _signup_and_login(client, email="badscope@example.com", org_name="badscope-org")
     resp = await client.post("/api/v1/keys", json={"name": "x", "scope": "superuser"})
     assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_member_cannot_manage_api_keys(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Plain org members cannot list/create/delete API keys."""
+    owner = await _signup_and_login(
+        client,
+        email="keys-owner@example.com",
+        org_name="keys-owner-org",
+    )
+    org_id = owner["organization"]["id"]
+    owner_key_resp = await client.post("/api/v1/keys", json={"name": "owner-key"})
+    assert owner_key_resp.status_code == 201, owner_key_resp.text
+    key_id = owner_key_resp.json()["id"]
+
+    member = await _signup_and_login(
+        client,
+        email="keys-member@example.com",
+        org_name="keys-member-org",
+    )
+    member_user_id = member["user"]["id"]
+    db_session.add_all(
+        [
+            OrgMember(
+                id=str(uuid.uuid4()),
+                org_id=org_id,
+                user_id=member_user_id,
+                role="member",
+            ),
+            Membership(
+                organization_id=org_id,
+                user_id=member_user_id,
+                role="editor",
+            ),
+        ]
+    )
+    await db_session.commit()
+    client.cookies.set(COOKIE_NAME, make_session_cookie(member_user_id, org_id))
+
+    list_resp = await client.get("/api/v1/keys")
+    assert list_resp.status_code == 403, list_resp.text
+
+    create_resp = await client.post(
+        "/api/v1/keys",
+        json={"name": "member-admin-key", "scope": "admin"},
+    )
+    assert create_resp.status_code == 403, create_resp.text
+
+    delete_resp = await client.delete(f"/api/v1/keys/{key_id}")
+    assert delete_resp.status_code == 403, delete_resp.text
+
+
+@pytest.mark.asyncio
+async def test_removed_member_cannot_manage_api_keys_with_stale_membership(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A removed member's legacy Membership does not keep API key access alive."""
+    owner = await _signup_and_login(
+        client,
+        email="keys-remove-owner@example.com",
+        org_name="keys-remove-owner-org",
+    )
+    org_id = owner["organization"]["id"]
+    owner_user_id = owner["user"]["id"]
+    owner_key_resp = await client.post("/api/v1/keys", json={"name": "owner-key"})
+    assert owner_key_resp.status_code == 201, owner_key_resp.text
+    key_id = owner_key_resp.json()["id"]
+
+    member = await _signup_and_login(
+        client,
+        email="keys-remove-member@example.com",
+        org_name="keys-remove-member-org",
+    )
+    member_user_id = member["user"]["id"]
+    stale_membership = Membership(
+        organization_id=org_id,
+        user_id=member_user_id,
+        role="editor",
+    )
+    removed_org_member = OrgMember(
+        id=str(uuid.uuid4()),
+        org_id=org_id,
+        user_id=member_user_id,
+        role="member",
+    )
+    db_session.add_all([stale_membership, removed_org_member])
+    await db_session.commit()
+    await db_session.delete(removed_org_member)
+    await db_session.commit()
+
+    client.cookies.set(COOKIE_NAME, make_session_cookie(member_user_id, org_id))
+
+    list_resp = await client.get("/api/v1/keys")
+    assert list_resp.status_code == 403, list_resp.text
+
+    create_resp = await client.post(
+        "/api/v1/keys",
+        json={"name": "stale-admin-key", "scope": "admin"},
+    )
+    assert create_resp.status_code == 403, create_resp.text
+
+    delete_resp = await client.delete(f"/api/v1/keys/{key_id}")
+    assert delete_resp.status_code == 403, delete_resp.text
+
+    client.cookies.set(COOKIE_NAME, make_session_cookie(owner_user_id, org_id))
+    owner_resp = await client.get("/api/v1/keys")
+    assert owner_resp.status_code == 200, owner_resp.text
 
 
 @pytest.mark.asyncio
@@ -327,7 +454,7 @@ async def test_admin_scope_can_create_experiment(
                 "name": "exp",
                 "organization_id": org_id,
                 "dataset_id": dataset_id,
-                "plugin_grid": {},
+                "plugin_grid": PLUGIN_GRID,
             },
         )
     assert resp.status_code != 403, resp.text
@@ -350,7 +477,7 @@ async def test_read_scope_cannot_create_experiment_403(
             "name": "exp",
             "organization_id": org_id,
             "dataset_id": dataset_id,
-            "plugin_grid": {},
+            "plugin_grid": PLUGIN_GRID,
         },
     )
     assert resp.status_code == 403, resp.text

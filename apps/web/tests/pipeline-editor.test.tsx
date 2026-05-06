@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PipelineEditor } from "@/components/pipeline-editor";
+
+const pipelineMocks = vi.hoisted(() => ({
+  createPipelineMutate: vi.fn(),
+}));
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -14,7 +18,16 @@ vi.mock("@/lib/trpc", () => ({
       list: {
         useQuery: () => ({
           data: [
-            { kind: "chunker", name: "fixed-size", version: "1.0", params_schema: {}, default_params: {} },
+            {
+              kind: "chunker",
+              name: "fixed-size",
+              version: "1.0",
+              params_schema: {
+                type: "object",
+                properties: { chunk_size: { type: "number", title: "Chunk size" } },
+              },
+              default_params: { chunk_size: 512 },
+            },
             { kind: "embedder", name: "openai-ada", version: "2.0", params_schema: {}, default_params: {} },
             { kind: "retriever", name: "faiss", version: "1.0", params_schema: {}, default_params: {} },
             { kind: "reranker", name: "cross-encoder", version: "1.0", params_schema: {}, default_params: {} },
@@ -26,7 +39,7 @@ vi.mock("@/lib/trpc", () => ({
     },
     pipelines: {
       create: {
-        useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+        useMutation: () => ({ mutate: pipelineMocks.createPipelineMutate, isPending: false }),
       },
     },
   },
@@ -65,5 +78,41 @@ describe("PipelineEditor", () => {
   it("renders pipeline name input", () => {
     render(<PipelineEditor />);
     expect(screen.getByTestId("pipeline-name-input")).toBeTruthy();
+  });
+
+  it("emits edit-mode parameter changes to the parent without requiring internal submit", async () => {
+    const onChange = vi.fn();
+    render(
+      <PipelineEditor
+        initialNodes={[
+          {
+            plugin_kind: "chunker",
+            plugin_name: "fixed-size",
+            params: { chunk_size: 512 },
+          },
+        ]}
+        onChange={onChange}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Chunk size"), {
+      target: { value: "256" },
+    });
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith([
+        {
+          plugin_kind: "chunker",
+          plugin_name: "fixed-size",
+          params: { chunk_size: 256 },
+        },
+      ]);
+    });
+  });
+
+  it("passes dataset_id when creating from dataset context", () => {
+    render(<PipelineEditor datasetId="ds-123" />);
+
+    expect(screen.getByText("Dataset-bound pipeline")).toBeTruthy();
   });
 });

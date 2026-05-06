@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import ApiKey, Membership, User
+from ragp_api.db.models import ApiKey, Membership, OrgMember, OrgRole, User
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import COOKIE_NAME, require_session_user
 from ragp_api.services.audit import log_audit_event
+from ragp_api.services.permissions import require_role
 from ragp_api.services.sessions import read_session_cookie
 
 router = APIRouter(prefix="/keys", tags=["keys"])
@@ -70,27 +71,52 @@ class KeyCreatedOut(BaseModel):
 
 
 async def _get_user_org_id(user: User, db: AsyncSession, request: Request) -> str:
-    """Return the active session organization_id for the user."""
+    """Return the active session organization_id for an owner/admin user."""
     token = request.cookies.get(COOKIE_NAME)
     if token:
         parsed = read_session_cookie(token)
         if parsed and parsed[0] == user.id:
             _, org_id = parsed
+            org_member_count = await db.execute(
+                select(OrgMember.id).where(OrgMember.org_id == org_id).limit(1)
+            )
+            if org_member_count.scalar_one_or_none() is not None:
+                await require_role(db, user.id, org_id, OrgRole.admin)
+                return org_id
+
             session_result = await db.execute(
-                select(Membership.organization_id).where(
+                select(Membership.role).where(
                     Membership.user_id == user.id,
                     Membership.organization_id == org_id,
                 )
             )
-            if session_result.scalar_one_or_none() is not None:
+            legacy_role = session_result.scalar_one_or_none()
+            if legacy_role in ("owner", "admin"):
                 return org_id
 
+    org_member_result = await db.execute(
+        select(OrgMember.org_id)
+        .where(
+            OrgMember.user_id == user.id,
+            OrgMember.role.in_([OrgRole.owner, OrgRole.admin]),
+        )
+        .limit(1)
+    )
+    row = org_member_result.scalar_one_or_none()
+    if row is not None:
+        return row
+
     result = await db.execute(
-        select(Membership.organization_id).where(Membership.user_id == user.id).limit(1)
+        select(Membership.organization_id)
+        .where(
+            Membership.user_id == user.id,
+            Membership.role.in_(["owner", "admin"]),
+        )
+        .limit(1)
     )
     row = result.scalar_one_or_none()
     if row is None:
-        raise HTTPException(status_code=400, detail="User has no organization")
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     return row
 
 

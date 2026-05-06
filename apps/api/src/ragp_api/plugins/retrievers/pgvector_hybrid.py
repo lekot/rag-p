@@ -95,7 +95,9 @@ class PgvectorHybridRetriever(Retriever):
                 # Fallback: try simple token matching (works better for non-English)
                 logger.info(
                     "BM25 returned 0 rows for org=%s dataset=%s query=%r — trying simple fallback",
-                    organization_id, dataset_id, query[:80],
+                    organization_id,
+                    dataset_id,
+                    query[:80],
                 )
                 # Extract alphanumeric tokens from query for basic matching
                 import re
@@ -134,7 +136,8 @@ class PgvectorHybridRetriever(Retriever):
                         if rows:
                             logger.info(
                                 "Simple fallback found %d rows for org=%s",
-                                len(rows), organization_id,
+                                len(rows),
+                                organization_id,
                             )
                     except Exception as fb_exc:
                         logger.warning("Simple fallback query failed: %s", fb_exc)
@@ -142,7 +145,8 @@ class PgvectorHybridRetriever(Retriever):
                 if not rows:
                     logger.warning(
                         "BM25 + simple fallback returned 0 rows for org=%s query=%r",
-                        organization_id, query[:80],
+                        organization_id,
+                        query[:80],
                     )
 
             return [
@@ -288,9 +292,12 @@ class PgvectorHybridRetriever(Retriever):
                 logger.warning(
                     "Hybrid retrieve returned 0 rows for org=%s dataset=%s query=%r "
                     "dense_vec=%s. Chunks in scope: %d with emb, %d without emb",
-                    organization_id, dataset_id, query[:80],
+                    organization_id,
+                    dataset_id,
+                    query[:80],
                     "provided" if query_vec is not None else "none",
-                    emb_count, no_emb_count,
+                    emb_count,
+                    no_emb_count,
                 )
             except Exception as diag_exc:
                 logger.warning("Diagnostic query failed: %s", diag_exc)

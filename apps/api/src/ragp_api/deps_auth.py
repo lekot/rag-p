@@ -328,6 +328,12 @@ async def _get_user_org(
                 {"id": org.id, "name": org.name, "slug": org.slug, "role": org_member.role},
             )
 
+        any_org_member_result = await db.execute(
+            select(OrgMember.id).where(OrgMember.org_id == preferred_org_id).limit(1)
+        )
+        if any_org_member_result.scalar_one_or_none() is not None:
+            return None
+
         membership_result = await db.execute(
             select(Membership, Organization)
             .join(Organization, Organization.id == Membership.organization_id)
@@ -345,6 +351,21 @@ async def _get_user_org(
                 {"id": org.id, "name": org.name, "slug": org.slug, "role": membership.role},
             )
 
+    org_member_result = await db.execute(
+        select(OrgMember, Organization)
+        .join(Organization, Organization.id == OrgMember.org_id)
+        .where(OrgMember.user_id == user.id)
+        .order_by(OrgMember.role)
+        .limit(1)
+    )
+    org_member_row = org_member_result.first()
+    if org_member_row is not None:
+        org_member, org = org_member_row
+        return (
+            {"id": user.id, "email": user.email},
+            {"id": org.id, "name": org.name, "slug": org.slug, "role": org_member.role},
+        )
+
     uo_result = await db.execute(
         select(Membership, Organization)
         .join(Organization, Organization.id == Membership.organization_id)
@@ -356,6 +377,11 @@ async def _get_user_org(
     if row is None:
         return None
     membership, org = row
+    any_org_member_result = await db.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org.id).limit(1)
+    )
+    if any_org_member_result.scalar_one_or_none() is not None:
+        return None
     return (
         {"id": user.id, "email": user.email},
         {"id": org.id, "name": org.name, "slug": org.slug, "role": membership.role},
@@ -363,19 +389,25 @@ async def _get_user_org(
 
 
 async def _user_has_org_access(db: AsyncSession, user_id: str, org_id: str) -> bool:
-    membership_result = await db.execute(
-        select(Membership.organization_id).where(
-            Membership.user_id == user_id,
-            Membership.organization_id == org_id,
-        )
-    )
-    if membership_result.scalar_one_or_none() is not None:
-        return True
-
     org_member_result = await db.execute(
         select(OrgMember.id).where(
             OrgMember.user_id == user_id,
             OrgMember.org_id == org_id,
         )
     )
-    return org_member_result.scalar_one_or_none() is not None
+    if org_member_result.scalar_one_or_none() is not None:
+        return True
+
+    any_org_member_result = await db.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org_id).limit(1)
+    )
+    if any_org_member_result.scalar_one_or_none() is not None:
+        return False
+
+    membership_result = await db.execute(
+        select(Membership.organization_id).where(
+            Membership.user_id == user_id,
+            Membership.organization_id == org_id,
+        )
+    )
+    return membership_result.scalar_one_or_none() is not None

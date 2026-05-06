@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import sys
 import types
+from importlib.machinery import ModuleSpec
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from ragp_api.plugins import registry
 from ragp_api.plugins.registry import list_plugins
 from ragp_api.plugins.rerankers import bge as bge_module
 from ragp_api.plugins.rerankers.bge import BGEReranker
@@ -30,6 +32,7 @@ def fake_sentence_transformers(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     cross_encoder_cls.return_value = instance
 
     fake_module = types.ModuleType("sentence_transformers")
+    fake_module.__spec__ = ModuleSpec("sentence_transformers", loader=None)
     fake_module.CrossEncoder = cross_encoder_cls  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
     return cross_encoder_cls
@@ -100,7 +103,11 @@ async def test_bge_reranker_lazy_loads_model_once(
     assert instance.predict.call_count == 2
 
 
-def test_bge_reranker_registered_in_plugin_registry() -> None:
+def test_bge_reranker_registered_in_plugin_registry(
+    fake_sentence_transformers: MagicMock,
+) -> None:
+    registry._registry.clear()
+    registry.bootstrap()
     plugins = list_plugins()
     names = {p["name"] for p in plugins}
     assert "bge-reranker" in names

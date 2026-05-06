@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
 import { useParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
@@ -55,18 +55,18 @@ export default function PipelineDetailPage() {
     },
   });
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
-  if (!pipeline) return <div className="text-muted-foreground">Pipeline not found.</div>;
-
-  // Initialise edit state from pipeline data
-  if (!isEditing && editNodes === null && pipeline.nodes.length > 0) {
+  useEffect(() => {
+    if (!pipeline || isEditing || pipeline.nodes.length === 0) return;
     setEditName(pipeline.name);
     setEditNodes(pipeline.nodes.map(n => ({
       plugin_kind: n.plugin_kind,
       plugin_name: n.plugin_name,
       params: n.params as Record<string, unknown>,
     })));
-  }
+  }, [pipeline, isEditing]);
+
+  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (!pipeline) return <div className="text-muted-foreground">Pipeline not found.</div>;
 
   if (isEditing && editNodes) {
     return (

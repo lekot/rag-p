@@ -7,13 +7,28 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Experiment, Organization, Pipeline, PipelineVersion
+from ragp_api.db.models import Dataset, Experiment, Organization, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_organization, require_scope
 from ragp_api.services.audit import log_audit_event
 from ragp_api.services.queue import QuotaExceededError, enqueue
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
+
+_REQUIRED_EXPERIMENT_GRID_SLOTS = ("chunkers", "embedders", "retrievers", "generators")
+
+
+def _validate_plugin_grid(plugin_grid: dict[str, list[dict[str, Any]]]) -> None:
+    missing_slots = [slot for slot in _REQUIRED_EXPERIMENT_GRID_SLOTS if not plugin_grid.get(slot)]
+    if missing_slots:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_plugin_grid",
+                "message": "Experiment requires chunker, embedder, retriever, and generator slots.",
+                "missing": missing_slots,
+            },
+        )
 
 
 class ExperimentCreateIn(BaseModel):
@@ -91,6 +106,17 @@ async def create_experiment(
     org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> ExperimentOut:
+    _validate_plugin_grid(body.plugin_grid)
+
+    dataset_result = await db.execute(
+        select(Dataset).where(
+            Dataset.id == body.dataset_id,
+            Dataset.organization_id == org.id,
+        )
+    )
+    if dataset_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {body.dataset_id} not found")
+
     experiment = Experiment(
         id=str(uuid.uuid4()),
         organization_id=org.id,

@@ -10,7 +10,8 @@ export class RagPApi implements ICredentialType {
 
 	displayName = 'RAG-Platform API';
 
-	documentationUrl = 'https://lekottt.ru/docs';
+	// eslint-disable-next-line n8n-nodes-base/cred-class-field-documentation-url-miscased
+	documentationUrl = 'https://lekottt.ru/docs/auth';
 
 	properties: INodeProperties[] = [
 		{

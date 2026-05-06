@@ -152,7 +152,7 @@ export default function AccountPage() {
       await fetch("/api/auth/logout", { method: "POST" });
     } finally {
       setLoggingOut(false);
-      router.push("/login");
+      window.location.assign("/login");
     }
   }
 
@@ -199,8 +199,7 @@ export default function AccountPage() {
         throw new Error(detail || `HTTP ${resp.status}`);
       }
       setDeleteDialogOpen(false);
-      // Cookie is intentionally left intact — backend now rejects all auth.
-      router.push("/login");
+      window.location.assign("/login");
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Ошибка удаления");
     } finally {

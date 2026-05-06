@@ -45,6 +45,25 @@ async def reset_registry():
     _registry.clear()
 
 
+@pytest.fixture(autouse=True)
+def stub_document_enqueue_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep route-level document upload tests independent from a live Redis/ARQ."""
+
+    class _Pool:
+        async def enqueue_job(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return object()
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _create_pool(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return _Pool()
+
+    import arq
+
+    monkeypatch.setattr(arq, "create_pool", _create_pool)
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     from sqlalchemy import text

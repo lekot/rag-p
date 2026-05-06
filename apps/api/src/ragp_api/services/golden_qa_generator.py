@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
+from ragp_api.services.subscription import NoActiveSubscriptionError, QuotaExceededError, consume_q
 from ragp_api.services.usage import record_usage_event
 from ragp_api.settings import settings
 
@@ -137,6 +138,8 @@ async def generate_golden_qa(
             "max_tokens": 2000,
         }
         try:
+            if settings.enforce_subscription_quotas:
+                await consume_q(db, organization_id, count=1)
             resp = await _call_deepseek(url, headers, body)
             if resp.status_code != 200:
                 logger.warning(
@@ -166,10 +169,13 @@ async def generate_golden_qa(
                 model=f"deepseek/{model}",
                 prompt_tokens=int(usage.get("prompt_tokens", 0)),
                 completion_tokens=int(usage.get("completion_tokens", 0)),
+                quota_reserved=settings.enforce_subscription_quotas,
             )
         except json.JSONDecodeError as exc:
             failures += 1
             logger.debug("JSON decode error for doc %s: %s — skipping", doc.id, exc)
+        except (NoActiveSubscriptionError, QuotaExceededError):
+            raise
         except Exception as exc:
             failures += 1
             logger.warning("DeepSeek call failed for doc %s: %s — skipping", doc.id, exc)

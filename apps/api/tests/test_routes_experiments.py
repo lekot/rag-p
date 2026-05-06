@@ -51,6 +51,7 @@ async def _signup(client: AsyncClient, org_name: str) -> dict:
 
 PLUGIN_GRID = {
     "chunkers": [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}],
+    "embedders": [{"plugin_kind": "embedder", "plugin_name": "litellm-embedder", "params": {}}],
     "retrievers": [{"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}],
     "generators": [
         {
@@ -59,6 +60,12 @@ PLUGIN_GRID = {
             "params": {"model": "openai/gpt-4o-mini"},
         }
     ],
+}
+
+PLUGIN_GRID_WITHOUT_EMBEDDER = {
+    "chunkers": PLUGIN_GRID["chunkers"],
+    "retrievers": PLUGIN_GRID["retrievers"],
+    "generators": PLUGIN_GRID["generators"],
 }
 
 
@@ -180,6 +187,60 @@ async def test_create_experiment_enqueue_called_once(client: AsyncClient, organi
         )
 
     assert enqueue_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset_id", [str(uuid.uuid4()), "foreign"])
+async def test_create_experiment_rejects_unowned_dataset_id(
+    client: AsyncClient,
+    organization_id: str,
+    dataset_id: str,
+) -> None:
+    if dataset_id == "foreign":
+        dataset_id = await _create_dataset(client, "other-org")
+    enqueue_mock = _make_enqueue_mock()
+
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
+        response = await client.post(
+            "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
+            json={
+                "name": "Unowned Dataset Experiment",
+                "organization_id": organization_id,
+                "dataset_id": dataset_id,
+                "plugin_grid": PLUGIN_GRID,
+            },
+        )
+
+    assert response.status_code == 404
+    enqueue_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_experiment_requires_embedder_slot(
+    client: AsyncClient,
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    enqueue_mock = _make_enqueue_mock()
+
+    with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_mock):
+        response = await client.post(
+            "/api/v1/experiments",
+            headers={"X-Organization-Id": organization_id},
+            json={
+                "name": "Missing Embedder Experiment",
+                "organization_id": organization_id,
+                "dataset_id": dataset_id,
+                "plugin_grid": PLUGIN_GRID_WITHOUT_EMBEDDER,
+            },
+        )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_plugin_grid"
+    assert detail["missing"] == ["embedders"]
+    enqueue_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -369,15 +430,7 @@ async def test_pipeline_list_filter_by_dataset(
                 "name": "DS1 Exp",
                 "organization_id": organization_id,
                 "dataset_id": ds1_id,
-                "plugin_grid": {
-                    "chunkers": [
-                        {
-                            "plugin_kind": "chunker",
-                            "plugin_name": "recursive-character",
-                            "params": {},
-                        }
-                    ]
-                },
+                "plugin_grid": PLUGIN_GRID,
             },
         )
 
@@ -445,14 +498,14 @@ async def test_experiment_routes_scope_to_session_org_not_client_supplied_org(
         assert enqueue_mock.call_args.kwargs["tenant_id"] == tenant_a_org_id
 
         await client.post("/api/v1/auth/logout")
-        tenant_b = await _signup(client, "experiments-tenant-b")
-        tenant_b_org_id = tenant_b["organization"]["id"]
+        await _signup(client, "experiments-tenant-b")
 
         list_resp = await client.get(f"/api/v1/experiments?organization_id={tenant_a_org_id}")
         assert list_resp.status_code == 200, list_resp.text
         assert list_resp.json() == []
 
-        with patch("ragp_api.api.v1.routes_experiments.enqueue", _make_enqueue_mock()):
+        enqueue_b_mock = _make_enqueue_mock()
+        with patch("ragp_api.api.v1.routes_experiments.enqueue", enqueue_b_mock):
             create_b_resp = await client.post(
                 "/api/v1/experiments",
                 json={
@@ -462,8 +515,8 @@ async def test_experiment_routes_scope_to_session_org_not_client_supplied_org(
                     "plugin_grid": PLUGIN_GRID,
                 },
             )
-        assert create_b_resp.status_code == 201, create_b_resp.text
-        assert create_b_resp.json()["organization_id"] == tenant_b_org_id
+        assert create_b_resp.status_code == 404, create_b_resp.text
+        enqueue_b_mock.assert_not_awaited()
 
         assert (await client.get(f"/api/v1/experiments/{experiment_id}")).status_code == 404
         assert (

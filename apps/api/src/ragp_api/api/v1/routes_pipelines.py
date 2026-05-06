@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.api.errors import PluginNotFoundError
-from ragp_api.db.models import Organization, Pipeline, PipelineVersion
+from ragp_api.db.models import Dataset, Organization, Pipeline, PipelineVersion
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_organization, require_scope
 from ragp_api.plugins.registry import get_plugin
@@ -40,6 +40,7 @@ class PipelineOut(BaseModel):
 class PipelineUpdateIn(BaseModel):
     name: str | None = None
     nodes: list[PipelineNodeIn] | None = None
+    dataset_id: str | None = None
 
 
 class PromoteIn(BaseModel):
@@ -56,6 +57,24 @@ async def _load_nodes(db: AsyncSession, version_id: str | None) -> list[Pipeline
     return [PipelineNodeIn(**n) for n in version.nodes_json]
 
 
+async def _validate_dataset_id(
+    db: AsyncSession,
+    *,
+    dataset_id: str | None,
+    organization_id: str,
+) -> None:
+    if dataset_id is None:
+        return
+    result = await db.execute(
+        select(Dataset.id).where(
+            Dataset.id == dataset_id,
+            Dataset.organization_id == organization_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+
+
 @router.post("", status_code=201, response_model=PipelineOut)
 async def create_pipeline(
     body: PipelineCreateIn,
@@ -63,6 +82,8 @@ async def create_pipeline(
     org: Organization = Depends(require_organization),
     _scope: None = Depends(require_scope("write")),
 ) -> PipelineOut:
+    await _validate_dataset_id(db, dataset_id=body.dataset_id, organization_id=org.id)
+
     # Validate all plugins exist before persisting
     for node in body.nodes:
         if get_plugin(node.plugin_kind, node.plugin_name) is None:
@@ -172,6 +193,10 @@ async def update_pipeline(
 
     if body.name is not None:
         pipeline.name = body.name
+
+    if "dataset_id" in body.model_fields_set:
+        await _validate_dataset_id(db, dataset_id=body.dataset_id, organization_id=org.id)
+        pipeline.dataset_id = body.dataset_id
 
     if body.nodes is not None:
         # Validate all plugins exist before persisting

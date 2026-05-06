@@ -6,12 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { isPaymentRequiredError, PAYWALL_TOAST } from "@/lib/paywall";
 
 export default function ExperimentsPage() {
   const { toast } = useToast();
   const utils = trpc.useUtils();
 
-  const { data: experiments, isLoading } = trpc.experiments.list.useQuery();
+  const { data: experiments, isLoading, isError, error } = trpc.experiments.list.useQuery();
 
   const deleteMutation = trpc.experiments.delete.useMutation({
     onSuccess: () => {
@@ -34,7 +35,20 @@ export default function ExperimentsPage() {
 
       {isLoading && <div className="text-muted-foreground">Loading...</div>}
 
-      {!isLoading && (!experiments || experiments.length === 0) && (
+      {isError && isPaymentRequiredError(error) && (
+        <div role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+          <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
+          <Link href="/pricing" className="text-primary underline">
+            Choose a plan
+          </Link>
+        </div>
+      )}
+
+      {isError && !isPaymentRequiredError(error) && (
+        <p className="mb-4 text-sm text-destructive">{error.message}</p>
+      )}
+
+      {!isLoading && !isError && (!experiments || experiments.length === 0) && (
         <div className="text-muted-foreground">
           No experiments yet.{" "}
           <Link href="/experiments/new" className="text-primary hover:underline">

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { isPaymentRequiredError, PAYWALL_TOAST } from "@/lib/paywall";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED_EXTENSIONS = [
@@ -36,12 +37,14 @@ interface UploadDocumentDialogProps {
   onOpenChange: (open: boolean) => void;
   /** If provided, skip dataset creation step and upload directly to this dataset. */
   datasetId?: string;
+  hasActiveSubscription?: boolean;
 }
 
 export function UploadDocumentDialog({
   open,
   onOpenChange,
   datasetId: initialDatasetId,
+  hasActiveSubscription,
 }: UploadDocumentDialogProps) {
   const { toast } = useToast();
   const router = useRouter();
@@ -118,6 +121,10 @@ export function UploadDocumentDialog({
       toast({ title: "Dataset name is required", variant: "destructive" });
       return;
     }
+    if (hasActiveSubscription === false) {
+      router.push("/pricing");
+      return;
+    }
 
     setIsUploading(true);
     setUploadProgress(0);
@@ -155,6 +162,9 @@ export function UploadDocumentDialog({
               const body = JSON.parse(xhr.responseText);
               msg = body.detail || msg;
             } catch {}
+            if (xhr.status === 402) {
+              msg = `402 ${msg}`;
+            }
             reject(new Error(msg));
           }
         };
@@ -179,7 +189,11 @@ export function UploadDocumentDialog({
       }, 800);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      toast({ title: "Upload error", description: message, variant: "destructive" });
+      if (isPaymentRequiredError(err)) {
+        toast(PAYWALL_TOAST);
+      } else {
+        toast({ title: "Upload error", description: message, variant: "destructive" });
+      }
       setStatusText("Error");
       setIsUploading(false);
     }
@@ -261,7 +275,11 @@ export function UploadDocumentDialog({
             disabled={isUploading || !file || (!initialDatasetId && !datasetName.trim())}
             className="w-full"
           >
-            {isUploading ? "Uploading..." : "Upload"}
+            {hasActiveSubscription === false
+              ? "Choose a plan"
+              : isUploading
+              ? "Uploading..."
+              : "Upload"}
           </Button>
         </div>
       </DialogContent>

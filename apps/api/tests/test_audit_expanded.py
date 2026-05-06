@@ -234,6 +234,7 @@ async def test_golden_generate_audit_event(
 
 PLUGIN_GRID = {
     "chunkers": [{"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}],
+    "embedders": [{"plugin_kind": "embedder", "plugin_name": "litellm-embedder", "params": {}}],
     "retrievers": [{"plugin_kind": "retriever", "plugin_name": "pgvector-hybrid", "params": {}}],
     "generators": [
         {

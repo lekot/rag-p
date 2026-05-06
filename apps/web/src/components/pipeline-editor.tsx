@@ -46,6 +46,7 @@ interface PipelineEditorProps {
     params: Record<string, unknown>;
   }>;
   /** Callback for edit mode — parent controls submission */
+  datasetId?: string;
   onChange?: (nodes: Array<{
     plugin_kind: string;
     plugin_name: string;
@@ -53,7 +54,17 @@ interface PipelineEditorProps {
   }>) => void;
 }
 
-export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) {
+function orderedPipelineNodes(nodes: Partial<Record<PluginKind, NodeState>>) {
+  return PIPELINE_STAGES.filter(
+    (kind) => nodes[kind]?.plugin_name
+  ).map((kind) => ({
+    plugin_kind: kind,
+    plugin_name: nodes[kind]!.plugin_name,
+    params: nodes[kind]!.params,
+  }));
+}
+
+export function PipelineEditor({ initialNodes, datasetId, onChange }: PipelineEditorProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [name, setName] = useState("");
@@ -93,13 +104,17 @@ export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) 
     const plugin = (plugins ?? []).find(
       (p) => p.kind === kind && p.name === pluginName
     );
-    setNodes((prev) => ({
-      ...prev,
-      [kind]: {
-        plugin_name: pluginName,
-        params: plugin?.default_params ?? {},
-      },
-    }));
+    setNodes((prev) => {
+      const next = {
+        ...prev,
+        [kind]: {
+          plugin_name: pluginName,
+          params: plugin?.default_params ?? {},
+        },
+      };
+      onChange?.(orderedPipelineNodes(next));
+      return next;
+    });
   };
 
   const handleParamsChange = (
@@ -107,10 +122,14 @@ export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rjsf formData is untyped
     formData: any
   ) => {
-    setNodes((prev) => ({
-      ...prev,
-      [kind]: { ...prev[kind]!, params: formData as Record<string, unknown> },
-    }));
+    setNodes((prev) => {
+      const next = {
+        ...prev,
+        [kind]: { ...prev[kind]!, params: formData as Record<string, unknown> },
+      };
+      onChange?.(orderedPipelineNodes(next));
+      return next;
+    });
   };
 
   const handleSubmit = () => {
@@ -122,13 +141,7 @@ export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) 
       }
     }
 
-    const orderedNodes = PIPELINE_STAGES.filter(
-      (kind) => nodes[kind]?.plugin_name
-    ).map((kind) => ({
-      plugin_kind: kind,
-      plugin_name: nodes[kind]!.plugin_name,
-      params: nodes[kind]!.params,
-    }));
+    const orderedNodes = orderedPipelineNodes(nodes);
 
     // If in edit mode, fire onChange
     if (onChange) {
@@ -136,7 +149,7 @@ export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) 
       return;
     }
 
-    createMutation.mutate({ name, nodes: orderedNodes });
+    createMutation.mutate({ name, nodes: orderedNodes, dataset_id: datasetId ?? null });
   };
 
   if (isLoading) {
@@ -157,6 +170,9 @@ export function PipelineEditor({ initialNodes, onChange }: PipelineEditorProps) 
             placeholder="My RAG pipeline"
             data-testid="pipeline-name-input"
           />
+          {datasetId && (
+            <p className="text-xs text-muted-foreground">Dataset-bound pipeline</p>
+          )}
         </div>
       )}
 

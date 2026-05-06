@@ -12,6 +12,7 @@ from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.db.models import OrgInvite, OrgMember
+from ragp_api.deps_auth import COOKIE_NAME
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -261,3 +262,59 @@ async def test_invite_expires_after_7_days(client: AsyncClient, db_session: Asyn
     resp = await client.post("/api/v1/invites/accept", json={"token": raw_token})
     assert resp.status_code == 410, resp.text
     assert "expired" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_removed_invited_member_loses_tenant_access(
+    client: AsyncClient,
+) -> None:
+    """Removing an invited member invalidates tenant access despite legacy Membership."""
+    owner_data = await _signup(client, "owner-removed@example.com", org_name="removed-firm")
+    org_id = owner_data["organization"]["id"]
+
+    invite_resp = await client.post(
+        f"/api/v1/orgs/{org_id}/invites",
+        json={"email": "removed-member@example.com", "role": "member"},
+    )
+    assert invite_resp.status_code == 201, invite_resp.text
+    raw_token = invite_resp.json()["invite_url"].split("/invite/")[-1]
+
+    dataset_resp = await client.post("/api/v1/datasets", json={"name": "owner dataset"})
+    assert dataset_resp.status_code == 201, dataset_resp.text
+    pipeline_resp = await client.post(
+        "/api/v1/pipelines",
+        json={"name": "owner pipeline", "nodes": []},
+    )
+    assert pipeline_resp.status_code == 201, pipeline_resp.text
+    pipeline_id = pipeline_resp.json()["id"]
+
+    await client.post("/api/v1/auth/logout")
+    member_data = await _signup(
+        client,
+        "removed-member@example.com",
+        org_name="removed-member-personal",
+    )
+    member_user_id = member_data["user"]["id"]
+
+    accept_resp = await client.post("/api/v1/invites/accept", json={"token": raw_token})
+    assert accept_resp.status_code == 200, accept_resp.text
+    stale_member_cookie = client.cookies[COOKIE_NAME]
+
+    await client.post("/api/v1/auth/logout")
+    await _login(client, "owner-removed@example.com")
+    remove_resp = await client.delete(f"/api/v1/orgs/{org_id}/members/{member_user_id}")
+    assert remove_resp.status_code == 204, remove_resp.text
+
+    client.cookies.set(COOKIE_NAME, stale_member_cookie)
+
+    checks = [
+        ("GET", "/api/v1/datasets", None),
+        ("POST", "/api/v1/datasets", {"name": "stale dataset"}),
+        ("GET", "/api/v1/pipelines", None),
+        ("POST", "/api/v1/pipelines", {"name": "stale pipeline", "nodes": []}),
+        ("GET", "/api/v1/runs", None),
+        ("POST", f"/api/v1/pipelines/{pipeline_id}/runs", {"query": "stale"}),
+    ]
+    for method, url, json_body in checks:
+        resp = await client.request(method, url, json=json_body)
+        assert resp.status_code == 401, f"{method} {url}: {resp.status_code} {resp.text}"

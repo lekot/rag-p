@@ -7,9 +7,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Organization, Pipeline, Run
+from ragp_api.db.models import Dataset, Organization, Pipeline, Run
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_organization, require_scope
+from ragp_api.services.usage import record_usage_event
 
 router = APIRouter(tags=["runs"])
 
@@ -65,8 +66,24 @@ async def create_run(
         raise HTTPException(status_code=422, detail="Pipeline version has no nodes")
 
     org_id = org.id
-    dataset_id = body.dataset_id
     query = body.query or ""
+    effective_dataset_id = pipeline.dataset_id
+    if pipeline.dataset_id is not None:
+        if body.dataset_id is not None and body.dataset_id != pipeline.dataset_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Run dataset_id must be absent or match the pipeline dataset_id",
+            )
+    elif body.dataset_id is not None:
+        ds_result = await db.execute(
+            select(Dataset).where(
+                Dataset.id == body.dataset_id,
+                Dataset.organization_id == org_id,
+            )
+        )
+        if ds_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail=f"Dataset {body.dataset_id} not found")
+        effective_dataset_id = body.dataset_id
 
     # Check subscription / quota before executing
     from ragp_api.services.subscription import (
@@ -81,8 +98,12 @@ async def create_run(
     from ragp_api.services.subscription import (
         get_active_subscription as _get_sub,
     )
+    from ragp_api.services.subscription import (
+        release_q as _release_q,
+    )
     from ragp_api.settings import settings as _runs_settings
 
+    quota_reserved = False
     if _runs_settings.enforce_subscription_quotas:
         no_active_plan_detail = {
             "code": "no_active_plan",
@@ -101,6 +122,7 @@ async def create_run(
             ) from None
         try:
             await _consume_q(db, org_id, count=1)
+            quota_reserved = True
         except _NoSub:
             raise HTTPException(status_code=402, detail=no_active_plan_detail) from None
         except _SubQuota as exc:
@@ -118,7 +140,7 @@ async def create_run(
         id=str(uuid.uuid4()),
         organization_id=org_id,
         pipeline_version_id=pipeline.current_version_id,
-        dataset_id=dataset_id,
+        dataset_id=effective_dataset_id,
         query=query,
         status="running",
         started_at=datetime.now(),
@@ -137,20 +159,22 @@ async def create_run(
                 params = dict(n.get("params", {}))
                 params["session"] = db
                 params["organization_id"] = org_id
-                params["dataset_id"] = dataset_id
+                params["dataset_id"] = effective_dataset_id
                 n["params"] = params
             enriched_nodes.append(n)
 
         result = await run_pipeline(enriched_nodes, query, db)
 
         usage_dict: dict[str, Any] = result.get("usage", {})
+        prompt_tokens = int(usage_dict.get("prompt_tokens", 0))
+        completion_tokens = int(usage_dict.get("completion_tokens", 0))
         answer = result.get("answer", "")
         contexts = result.get("contexts", [])
         run.status = "completed"
         run.finished_at = datetime.now()
         run.metrics_json = {
-            "prompt_tokens": int(usage_dict.get("prompt_tokens", 0)),
-            "completion_tokens": int(usage_dict.get("completion_tokens", 0)),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
         }
         run.traces_json = {
             "answer": answer,
@@ -160,10 +184,29 @@ async def create_run(
             "traces": result.get("traces", []),
         }
         await db.commit()
+        model = "pipeline-run"
+        for node in ver.nodes_json:
+            if node.get("plugin_kind") == "generator":
+                params = node.get("params") or {}
+                if isinstance(params, dict) and params.get("model"):
+                    model = str(params["model"])
+                break
+        await record_usage_event(
+            db,
+            org_id=org_id,
+            api_key_id=None,
+            pipeline_id=pipeline.id,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            quota_reserved=_runs_settings.enforce_subscription_quotas,
+        )
         await db.refresh(run)
     except Exception:
         run.status = "failed"
         run.finished_at = datetime.now()
+        if quota_reserved:
+            await _release_q(db, org_id, count=1)
         await db.commit()
         await db.refresh(run)
 

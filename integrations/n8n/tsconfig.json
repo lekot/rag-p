@@ -23,6 +23,6 @@
     "outDir": "./dist/",
     "rootDir": "./"
   },
-  "include": ["credentials/**/*", "nodes/**/*", "nodes/**/*.json"],
+  "include": ["credentials/**/*", "nodes/**/*", "nodes/**/*.json", "package.json"],
   "exclude": ["node_modules", "dist"]
 }

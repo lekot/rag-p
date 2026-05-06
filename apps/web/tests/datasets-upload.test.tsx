@@ -1,178 +1,287 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 
-const mockPush = vi.fn();
-const mockRefresh = vi.fn();
-const mockToast = vi.fn();
-const mockInvalidate = vi.fn();
-const mockMutateAsync = vi.fn();
+const uploadMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
+  toast: vi.fn(),
+  datasetsListInvalidate: vi.fn(),
+  datasetByIdInvalidate: vi.fn(),
+  documentsListInvalidate: vi.fn(),
+  createDatasetMutateAsync: vi.fn(),
+}));
 
-// Mock next/navigation — must be before any import that transitively uses it
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
+  useRouter: () => ({ push: uploadMocks.push, refresh: uploadMocks.refresh }),
 }));
 
-// Mock useToast
 vi.mock("@/hooks/use-toast", () => ({
-  useToast: () => ({ toast: mockToast }),
+  useToast: () => ({ toast: uploadMocks.toast }),
 }));
 
-// Mock tRPC — all mocks are defined with vi.fn() at module scope (no hoisting issue)
-vi.mock("@/lib/trpc", () => {
-  const _invalidate = vi.fn();
-  const _mutateAsync = vi.fn();
-
-  return {
-    trpc: {
-      plugins: {
-        list: {
-          useQuery: () => ({
-            data: [
-              {
-                kind: "chunker",
-                name: "recursive-character",
-                version: "1.0",
-                params_schema: {},
-                default_params: {},
-              },
-            ],
-            isLoading: false,
-          }),
-        },
+vi.mock("@/lib/trpc", () => ({
+  trpc: {
+    datasets: {
+      create: {
+        useMutation: () => ({
+          mutateAsync: uploadMocks.createDatasetMutateAsync,
+          isPending: false,
+        }),
       },
-      datasets: {
-        create: {
-          useMutation: () => ({
-            mutateAsync: _mutateAsync,
-            isPending: false,
-          }),
-        },
-      },
-      useUtils: () => ({
-        datasets: {
-          list: { invalidate: _invalidate },
-          byId: { invalidate: _invalidate },
-          documents: {
-            list: { invalidate: _invalidate },
-          },
-        },
-      }),
     },
-  };
-});
+    useUtils: () => ({
+      datasets: {
+        list: { invalidate: uploadMocks.datasetsListInvalidate },
+        byId: { invalidate: uploadMocks.datasetByIdInvalidate },
+        documents: {
+          list: { invalidate: uploadMocks.documentsListInvalidate },
+        },
+      },
+    }),
+  },
+}));
 
-// Keep unused vars happy — vitest hoisting means local refs aren't usable inside vi.mock factories
-void mockInvalidate;
-void mockMutateAsync;
+class FakeXMLHttpRequest {
+  static instances: FakeXMLHttpRequest[] = [];
+
+  upload = {
+    onprogress: null as ((event: ProgressEvent) => void) | null,
+  };
+  method = "";
+  url = "";
+  body: XMLHttpRequestBodyInit | null = null;
+  status = 0;
+  responseText = "";
+  onload: ((event: ProgressEvent) => void) | null = null;
+  onerror: ((event: ProgressEvent) => void) | null = null;
+  aborted = false;
+
+  constructor() {
+    FakeXMLHttpRequest.instances.push(this);
+  }
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+
+  send(body?: XMLHttpRequestBodyInit | null) {
+    this.body = body ?? null;
+  }
+
+  abort() {
+    this.aborted = true;
+  }
+
+  progress(loaded: number, total: number) {
+    this.upload.onprogress?.({
+      lengthComputable: true,
+      loaded,
+      total,
+    } as ProgressEvent);
+  }
+
+  respond(status = 204, responseText = "") {
+    this.status = status;
+    this.responseText = responseText;
+    this.onload?.({} as ProgressEvent);
+  }
+
+  fail() {
+    this.onerror?.({} as ProgressEvent);
+  }
+}
+
+function renderDialog(props: Partial<Parameters<typeof UploadDocumentDialog>[0]> = {}) {
+  return render(
+    <UploadDocumentDialog open={true} onOpenChange={vi.fn()} {...props} />
+  );
+}
+
+function selectFile(file: File) {
+  const fileInput = document.querySelector("input[type='file']") as HTMLInputElement;
+  Object.defineProperty(fileInput, "files", {
+    value: [file],
+    configurable: true,
+  });
+  fireEvent.change(fileInput);
+}
+
+async function clickUploadAndWaitForXhr() {
+  fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(FakeXMLHttpRequest.instances).toHaveLength(1);
+  return FakeXMLHttpRequest.instances[0];
+}
 
 describe("UploadDocumentDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    FakeXMLHttpRequest.instances = [];
+    uploadMocks.createDatasetMutateAsync.mockResolvedValue({ id: "created-ds" });
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
   });
 
-  it("renders drop zone and chunker selector when open", () => {
-    render(
-      <UploadDocumentDialog open={true} onOpenChange={vi.fn()} />
-    );
-    expect(screen.getByTestId("drop-zone")).toBeTruthy();
-    // combobox = SelectTrigger accessible role
-    expect(screen.getByRole("combobox")).toBeTruthy();
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
-  it("shows dataset name input when no datasetId prop", () => {
-    render(
-      <UploadDocumentDialog open={true} onOpenChange={vi.fn()} />
-    );
+  it("renders dataset name, drop zone, and upload button when open", () => {
+    renderDialog();
+
     expect(screen.getByLabelText("Dataset name")).toBeTruthy();
+    expect(screen.getByTestId("drop-zone")).toHaveTextContent(
+      /drag file here or click to browse/i
+    );
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByRole("button", { name: /^upload$/i })).toBeDisabled();
   });
 
   it("hides dataset name input when datasetId is provided", () => {
-    render(
-      <UploadDocumentDialog open={true} onOpenChange={vi.fn()} datasetId="ds-123" />
-    );
+    renderDialog({ datasetId: "ds-123" });
+
     expect(screen.queryByLabelText("Dataset name")).toBeNull();
   });
 
-  it("navigates to dataset page after successful upload", async () => {
-    const targetId = "ds-abc";
-
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        document_id: "doc-1",
-        chunk_count: 3,
-        embedded: false,
-        chunks_preview: [],
-      }),
-    });
-    vi.stubGlobal("fetch", mockFetch);
-
-    render(
-      <UploadDocumentDialog open={true} onOpenChange={vi.fn()} datasetId={targetId} />
-    );
-
-    // Simulate file selection via the hidden input
-    const fileInput = document.querySelector(
-      "input[type='file']"
-    ) as HTMLInputElement;
+  it("accepts a dropped file and enables upload", () => {
+    renderDialog({ datasetId: "ds-123" });
     const testFile = new File(["hello world"], "test.txt", { type: "text/plain" });
-    Object.defineProperty(fileInput, "files", {
-      value: [testFile],
-      configurable: true,
-    });
-    fireEvent.change(fileInput);
 
-    // Click Upload button
-    const uploadBtn = screen.getByRole("button", { name: /^upload$/i });
-    fireEvent.click(uploadBtn);
-
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining(`/api/datasets/${targetId}/documents`),
-        expect.objectContaining({ method: "POST" })
-      );
+    fireEvent.drop(screen.getByTestId("drop-zone"), {
+      dataTransfer: { files: [testFile] },
     });
 
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(`/datasets/${targetId}`);
-    });
-    expect(mockRefresh).toHaveBeenCalled();
+    expect(screen.getByText("test.txt")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
   });
 
-  it("shows error toast when upload fails", async () => {
-    const targetId = "ds-fail";
+  it("uploads through XHR, shows progress, and navigates after the success delay", async () => {
+    vi.useFakeTimers();
+    const targetId = "ds-abc";
+    renderDialog({ datasetId: targetId });
+    selectFile(new File(["hello world"], "test.txt", { type: "text/plain" }));
 
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-      text: async () => "server exploded",
+    const xhr = await clickUploadAndWaitForXhr();
+
+    expect(xhr.method).toBe("POST");
+    expect(xhr.url).toBe(`/api/datasets/${targetId}/documents`);
+    expect(xhr.body).toBeInstanceOf(FormData);
+
+    await act(async () => {
+      xhr.progress(5, 10);
     });
-    vi.stubGlobal("fetch", mockFetch);
+    expect(screen.getByText("50%")).toBeTruthy();
 
-    render(
-      <UploadDocumentDialog open={true} onOpenChange={vi.fn()} datasetId={targetId} />
+    await act(async () => {
+      xhr.respond(204);
+    });
+    expect(screen.getByText("100%")).toBeTruthy();
+    expect(uploadMocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Document uploaded" })
     );
+    expect(uploadMocks.datasetByIdInvalidate).toHaveBeenCalledWith({ id: targetId });
+    expect(uploadMocks.documentsListInvalidate).toHaveBeenCalledWith({ datasetId: targetId });
+    expect(uploadMocks.push).not.toHaveBeenCalled();
 
-    const fileInput = document.querySelector(
-      "input[type='file']"
-    ) as HTMLInputElement;
-    const testFile = new File(["data"], "doc.md", { type: "text/markdown" });
-    Object.defineProperty(fileInput, "files", {
-      value: [testFile],
-      configurable: true,
-    });
-    fireEvent.change(fileInput);
-
-    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({ variant: "destructive" })
-      );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
     });
 
-    expect(mockPush).not.toHaveBeenCalled();
+    expect(uploadMocks.refresh).toHaveBeenCalled();
+    expect(uploadMocks.push).toHaveBeenCalledWith(`/datasets/${targetId}`);
+  });
+
+  it("creates a dataset before uploading when datasetId is absent", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByLabelText("Dataset name"), {
+      target: { value: "New dataset" },
+    });
+    selectFile(new File(["data"], "doc.md", { type: "text/markdown" }));
+
+    const xhr = await clickUploadAndWaitForXhr();
+
+    expect(uploadMocks.createDatasetMutateAsync).toHaveBeenCalledWith({ name: "New dataset" });
+    expect(uploadMocks.datasetsListInvalidate).toHaveBeenCalled();
+    expect(xhr.url).toBe("/api/datasets/created-ds/documents");
+  });
+
+  it("shows error toast when XHR returns an error response", async () => {
+    renderDialog({ datasetId: "ds-fail" });
+    selectFile(new File(["data"], "doc.md", { type: "text/markdown" }));
+
+    const xhr = await clickUploadAndWaitForXhr();
+
+    await act(async () => {
+      xhr.respond(500, JSON.stringify({ detail: "server exploded" }));
+    });
+
+    expect(uploadMocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Upload error",
+        description: "server exploded",
+        variant: "destructive",
+      })
+    );
+    expect(uploadMocks.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+  });
+
+  it("shows a pricing CTA when upload is blocked by paywall", async () => {
+    renderDialog({ datasetId: "ds-paywall" });
+    selectFile(new File(["data"], "doc.md", { type: "text/markdown" }));
+
+    const xhr = await clickUploadAndWaitForXhr();
+
+    await act(async () => {
+      xhr.respond(402, JSON.stringify({ detail: "Payment Required: active subscription required" }));
+    });
+
+    expect(uploadMocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Plan required",
+        description: expect.stringContaining("/pricing"),
+        variant: "destructive",
+      })
+    );
+    expect(uploadMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("blocks no-plan upload before creating a dataset", () => {
+    renderDialog({ hasActiveSubscription: false });
+    fireEvent.change(screen.getByLabelText("Dataset name"), {
+      target: { value: "New dataset" },
+    });
+    selectFile(new File(["data"], "doc.md", { type: "text/markdown" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /choose a plan/i }));
+
+    expect(uploadMocks.createDatasetMutateAsync).not.toHaveBeenCalled();
+    expect(FakeXMLHttpRequest.instances).toHaveLength(0);
+    expect(uploadMocks.push).toHaveBeenCalledWith("/pricing");
+  });
+
+  it("shows error toast when XHR fails on the network", async () => {
+    renderDialog({ datasetId: "ds-fail" });
+    selectFile(new File(["data"], "doc.md", { type: "text/markdown" }));
+
+    const xhr = await clickUploadAndWaitForXhr();
+
+    await act(async () => {
+      xhr.fail();
+    });
+
+    expect(uploadMocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Upload error",
+        description: "Network error",
+        variant: "destructive",
+      })
+    );
+    expect(uploadMocks.push).not.toHaveBeenCalled();
   });
 });

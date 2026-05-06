@@ -20,12 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { isPaymentRequiredError, PAYWALL_TOAST } from "@/lib/paywall";
 
 type PluginKind = "chunker" | "embedder" | "retriever" | "reranker" | "generator";
 
 const STAGE_KEYS: { kind: PluginKind; gridKey: string; required: boolean; label: string }[] = [
   { kind: "chunker", gridKey: "chunkers", required: true, label: "Chunkers" },
-  { kind: "embedder", gridKey: "embedders", required: false, label: "Embedders" },
+  { kind: "embedder", gridKey: "embedders", required: true, label: "Embedders" },
   { kind: "retriever", gridKey: "retrievers", required: true, label: "Retrievers" },
   { kind: "reranker", gridKey: "rerankers", required: false, label: "Rerankers" },
   { kind: "generator", gridKey: "generators", required: true, label: "Generators" },
@@ -191,7 +192,16 @@ export default function NewExperimentPage() {
         );
       })}
 
-      {createMutation.isError && (
+      {createMutation.isError && isPaymentRequiredError(createMutation.error) && (
+        <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+          <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
+          <a href="/pricing" className="text-primary underline">
+            Choose a plan
+          </a>
+        </div>
+      )}
+
+      {createMutation.isError && !isPaymentRequiredError(createMutation.error) && (
         <p className="text-sm text-destructive">
           {createMutation.error.message}
         </p>

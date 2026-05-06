@@ -2,15 +2,20 @@
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ragp_api.db.models import Chunk, DatasetGoldenItem, Document
+from ragp_api.db.models import Chunk, DatasetGoldenItem, Document, OrgSubscription, Plan, UsageEvent
 from ragp_api.services.golden_qa_generator import GoldenGenerationError, generate_golden_qa
+from ragp_api.services.subscription import QuotaExceededError
+from ragp_api.settings import settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,13 +42,54 @@ def _mock_deepseek_response(
         {
             "choices": [
                 {"message": {"content": json.dumps({"question": question, "answer": answer})}}
-            ]
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2},
         }
     )
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = 200
     resp.json.return_value = json.loads(content)
     return resp
+
+
+async def _grant_test_subscription(
+    db_session: AsyncSession,
+    organization_id: str,
+    *,
+    plan_id: str = "golden-service-test",
+    included_q: int = 100,
+) -> None:
+    now = datetime.now(UTC)
+    db_session.add(
+        Plan(
+            id=plan_id,
+            name="Golden Service Test",
+            price_rub_monthly=Decimal("100"),
+            included_q=included_q,
+            included_storage_bytes=10_000_000,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    db_session.add(
+        OrgSubscription(
+            id=str(uuid.uuid4()),
+            org_id=organization_id,
+            plan_id=plan_id,
+            status="active",
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            q_used=0,
+            storage_bytes_used=0,
+            auto_renew=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +149,74 @@ async def test_generate_golden_qa_creates_items(db_session: AsyncSession, organi
         assert "answer" in pair
         assert pair["question"] == "What is this?"
         assert pair["answer"] == "It is alpha."
+
+
+@pytest.mark.asyncio
+async def test_generate_golden_qa_reserves_quota_before_each_deepseek_call(
+    db_session: AsyncSession,
+    organization_id: str,
+) -> None:
+    from ragp_api.db.models import Dataset
+
+    await _grant_test_subscription(db_session, organization_id, included_q=1)
+    ds_id = str(uuid.uuid4())
+    db_session.add(
+        Dataset(id=ds_id, organization_id=organization_id, name="quota-gs", source="uploaded")
+    )
+    docs = [
+        Document(
+            id=str(uuid.uuid4()),
+            organization_id=organization_id,
+            dataset_id=ds_id,
+            source_uri=f"upload://quota-{index}.txt",
+            status="indexed",
+        )
+        for index in range(2)
+    ]
+    db_session.add_all(docs)
+    await db_session.flush()
+    for doc in docs:
+        db_session.add(
+            Chunk(
+                id=str(uuid.uuid4()),
+                document_id=doc.id,
+                organization_id=organization_id,
+                text="Quota guarded document text. " * 20,
+            )
+        )
+    await db_session.commit()
+
+    old_enforce = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    deepseek_mock = AsyncMock(return_value=_mock_deepseek_response())
+    try:
+        with (
+            patch(_PATCH_DEEPSEEK, new=deepseek_mock),
+            pytest.raises(QuotaExceededError),
+        ):
+            await generate_golden_qa(
+                dataset_id=ds_id,
+                organization_id=organization_id,
+                db=db_session,
+                sample_size=2,
+            )
+    finally:
+        settings.enforce_subscription_quotas = old_enforce
+
+    assert deepseek_mock.await_count == 1
+    db_session.expire_all()
+    subscription = (
+        await db_session.execute(
+            select(OrgSubscription).where(OrgSubscription.org_id == organization_id)
+        )
+    ).scalar_one()
+    assert subscription.q_used == 1
+    usage_events = (
+        (await db_session.execute(select(UsageEvent).where(UsageEvent.org_id == organization_id)))
+        .scalars()
+        .all()
+    )
+    assert len(usage_events) == 1
 
 
 @pytest.mark.asyncio

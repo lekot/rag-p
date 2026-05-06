@@ -75,7 +75,11 @@ module = ["fakeredis", "fakeredis.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# aiosmtplib currently ships without a py.typed marker/stubs in the locked version
+module = "aiosmtplib"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # sentence-transformers is optional (extra reranker-bge); no py.typed marker
 module = ["sentence_transformers", "sentence_transformers.*"]
 ignore_missing_imports = true
-

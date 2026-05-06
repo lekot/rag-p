@@ -33,6 +33,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { UploadDocumentDialog } from "@/components/upload-document-dialog";
 import type { Chunk, GoldenItem, SearchChunk } from "@/server/routers/datasets";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@/lib/auth";
+import { isPaymentRequiredError, PAYWALL_TOAST } from "@/lib/paywall";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   ready: "default",
@@ -169,7 +171,16 @@ function SearchSection({ datasetId }: { datasetId: string }) {
           </Button>
         </div>
 
-        {searchMutation.isError && (
+        {searchMutation.isError && isPaymentRequiredError(searchMutation.error) && (
+          <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
+            <a href="/pricing" className="text-primary underline">
+              Choose a plan
+            </a>
+          </div>
+        )}
+
+        {searchMutation.isError && !isPaymentRequiredError(searchMutation.error) && (
           <p className="text-sm text-destructive">
             {searchMutation.error.message}
           </p>
@@ -263,7 +274,16 @@ function AskSection({ datasetId }: { datasetId: string }) {
           </Button>
         </div>
 
-        {askMutation.isError && (
+        {askMutation.isError && isPaymentRequiredError(askMutation.error) && (
+          <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
+            <a href="/pricing" className="text-primary underline">
+              Choose a plan
+            </a>
+          </div>
+        )}
+
+        {askMutation.isError && !isPaymentRequiredError(askMutation.error) && (
           <p className="text-sm text-destructive">
             {askMutation.error.message}
           </p>
@@ -376,7 +396,15 @@ function GoldenQASection({ datasetId, chunkCount }: { datasetId: string; chunkCo
                 DeepSeek will generate one Q&amp;A pair per sampled chunk.
               </p>
             </div>
-            {generateMutation.isError && (
+            {generateMutation.isError && isPaymentRequiredError(generateMutation.error) && (
+              <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+                <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
+                <a href="/pricing" className="text-primary underline">
+                  Choose a plan
+                </a>
+              </div>
+            )}
+            {generateMutation.isError && !isPaymentRequiredError(generateMutation.error) && (
               <p className="text-sm text-destructive">
                 {generateMutation.error.message}
               </p>
@@ -559,6 +587,7 @@ export default function DatasetDetailPage() {
   if (!params) notFound();
   const router = useRouter();
   const { toast } = useToast();
+  const user = useUser();
   const [uploadOpen, setUploadOpen] = useState(false);
   const utils = trpc.useUtils();
 
@@ -627,7 +656,12 @@ export default function DatasetDetailPage() {
         open={uploadOpen}
         onOpenChange={setUploadOpen}
         datasetId={params.id}
+        hasActiveSubscription={user?.has_active_subscription}
       />
+
+      <Button asChild variant="outline">
+        <a href={`/pipelines/new?dataset_id=${params.id}`}>New pipeline for this dataset</a>
+      </Button>
 
       <SearchSection datasetId={params.id} />
 

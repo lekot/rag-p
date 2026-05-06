@@ -5,7 +5,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
 import { ragPApiRequest } from './GenericFunctions';
 import { queryOperationFields } from './descriptions/QueryDescription';
@@ -24,8 +24,8 @@ export class RagP implements INodeType {
 		defaults: {
 			name: 'RAG-Platform',
 		},
-		inputs: [NodeConnectionTypes.Main],
-		outputs: [NodeConnectionTypes.Main],
+		inputs: ['main'],
+		outputs: ['main'],
 		credentials: [
 			{
 				name: 'ragPApi',

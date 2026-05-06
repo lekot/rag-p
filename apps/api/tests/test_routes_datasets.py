@@ -99,6 +99,23 @@ def _txt_upload(content: str, filename: str = "hello.txt") -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def _stub_document_enqueue(monkeypatch) -> None:
+    class _Pool:
+        async def enqueue_job(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return object()
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _create_pool(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return _Pool()
+
+    import arq
+
+    monkeypatch.setattr(arq, "create_pool", _create_pool)
+
+
 @pytest.mark.asyncio
 async def test_dataset_routes_scope_to_session_org_not_client_supplied_org(
     client: AsyncClient,
@@ -551,6 +568,39 @@ async def test_upload_dataset_not_found_returns_404(client: AsyncClient, organiz
         data={"chunker_name": "recursive-character"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_returns_503_and_no_pending_document_when_enqueue_fails(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+
+    with patch("arq.create_pool", new=AsyncMock(side_effect=RuntimeError("redis down"))):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/documents",
+            headers={"X-Organization-Id": organization_id},
+            files={"file": ("doc.txt", io.BytesIO(b"queued failure " * 100), "text/plain")},
+        )
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "document_enqueue_failed"
+    db_session.expire_all()
+    documents = (
+        (
+            await db_session.execute(
+                select(Document).where(
+                    Document.dataset_id == dataset_id,
+                    Document.organization_id == organization_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert documents == []
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1070,90 @@ async def test_generate_golden_returns_502_when_llm_generation_fails(
 
     assert resp.status_code == 502
     assert resp.json()["detail"]["code"] == "golden_generation_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path_suffix",
+    [
+        "/golden",
+        "/golden/regenerate",
+    ],
+)
+async def test_golden_generation_requires_active_plan_before_llm_call(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+    path_suffix: str,
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    existing_item_id = str(uuid.uuid4())
+    db_session.add(
+        DatasetGoldenItem(
+            id=existing_item_id,
+            dataset_id=dataset_id,
+            question="existing q",
+            answer="existing a",
+        )
+    )
+    await db_session.commit()
+
+    old_enforce = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    generator_mock = AsyncMock(return_value=[])
+    try:
+        with patch("ragp_api.api.v1.routes_datasets.generate_golden_qa", new=generator_mock):
+            resp = await client.post(
+                f"/api/v1/datasets/{dataset_id}{path_suffix}",
+                headers={"X-Organization-Id": organization_id},
+                json={"sample_size": 1},
+            )
+    finally:
+        settings.enforce_subscription_quotas = old_enforce
+
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["detail"]["code"] == "no_active_plan"
+    generator_mock.assert_not_awaited()
+    db_session.expire_all()
+    existing_item = (
+        await db_session.execute(
+            select(DatasetGoldenItem).where(DatasetGoldenItem.id == existing_item_id)
+        )
+    ).scalar_one_or_none()
+    assert existing_item is not None
+
+
+@pytest.mark.asyncio
+async def test_golden_generation_returns_402_when_service_quota_exhausts_mid_batch(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    from ragp_api.services.subscription import QuotaExceededError
+
+    await _grant_test_subscription(db_session, organization_id, included_q=1)
+    dataset_id = await _create_dataset(client, organization_id)
+
+    old_enforce = settings.enforce_subscription_quotas
+    settings.enforce_subscription_quotas = True
+    try:
+        with patch(
+            "ragp_api.api.v1.routes_datasets.generate_golden_qa",
+            new=AsyncMock(side_effect=QuotaExceededError(q_used=1, q_limit=1)),
+        ):
+            resp = await client.post(
+                f"/api/v1/datasets/{dataset_id}/golden",
+                headers={"X-Organization-Id": organization_id},
+                json={"sample_size": 2},
+            )
+    finally:
+        settings.enforce_subscription_quotas = old_enforce
+
+    assert resp.status_code == 402, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "quota_exceeded"
+    assert detail["q_used"] == 1
+    assert detail["q_limit"] == 1
 
 
 @pytest.mark.asyncio
