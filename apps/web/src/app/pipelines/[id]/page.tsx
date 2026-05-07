@@ -45,10 +45,11 @@ export default function PipelineDetailPage() {
   const runMutation = trpc.pipelines.createRun.useMutation({
     onSuccess: (run) => {
       toast({
-        title: "Run started",
-        description: `Run ID: ${run.id} — status: ${run.status}`,
+        title: "Run created",
+        description: `Status: ${run.status}`,
       });
       setQuery("");
+      router.push(`/runs/${run.id}`);
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });

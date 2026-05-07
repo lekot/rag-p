@@ -1,7 +1,9 @@
 import hashlib
 import logging
 import os
+import re
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -58,6 +60,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+_DEFAULT_ASK_MIN_RETRIEVE_TOP_K = 30
+_DEFAULT_ASK_MAX_RETRIEVE_TOP_K = 60
+_DEFAULT_ASK_MAX_TOKENS = 4096
+_ANSWER_ABSENT_PHRASES = (
+    "В предоставленных источниках ответа нет.",
+    "в предоставленных источниках ответа нет",
+)
+_DEFAULT_ASK_RETRY_FALLBACK_TERMS = (
+    "table",
+    "section",
+    "clause",
+    "number",
+    "date",
+    "identifier",
+    "details",
+    "таблица",
+    "раздел",
+    "пункт",
+    "номер",
+    "дата",
+    "идентификатор",
+    "реквизиты",
+)
 _ALLOWED_CONTENT_TYPES = {
     "text/plain",
     "text/markdown",
@@ -1055,6 +1080,7 @@ class AskOut(BaseModel):
     answer: str
     chunks: list[AskChunkOut]
     usage: AskUsage
+    run_id: str | None = None
 
 
 async def _build_default_embedder(ollama_host: str, openai_key: str) -> "Embedder | None":
@@ -1068,6 +1094,71 @@ async def _build_default_embedder(ollama_host: str, openai_key: str) -> "Embedde
         if embedder_cls is not None:
             return cast(Embedder, embedder_cls({"model": "bge-m3"}))
     return None
+
+
+def _default_ask_retrieve_top_k(requested_top_k: int) -> int:
+    return min(
+        max(requested_top_k, _DEFAULT_ASK_MIN_RETRIEVE_TOP_K),
+        _DEFAULT_ASK_MAX_RETRIEVE_TOP_K,
+    )
+
+
+def _is_absent_answer(answer: str) -> bool:
+    normalized = " ".join(answer.strip().casefold().split())
+    if not normalized:
+        return True
+    return any(
+        phrase.casefold().rstrip(".") in normalized.rstrip(".") for phrase in _ANSWER_ABSENT_PHRASES
+    )
+
+
+def _build_default_ask_retry_query(query: str, contexts: list[dict[str, Any]]) -> str:
+    query_terms = {term.casefold() for term in re.findall(r"\w+", query)}
+    retry_terms: list[str] = []
+    seen_retry_terms: set[str] = set()
+
+    for context in contexts[:8]:
+        text = str(context.get("text", ""))
+        candidates = re.findall(r"\b\d+(?:\.\d+)+\b|\b[A-ZА-ЯЁ]{2,}\b|\b[\w-]{5,}\b", text)
+        for candidate in candidates:
+            normalized = candidate.casefold()
+            if normalized in query_terms or normalized in seen_retry_terms:
+                continue
+            seen_retry_terms.add(normalized)
+            retry_terms.append(candidate)
+            if len(retry_terms) >= 24:
+                break
+        if len(retry_terms) >= 24:
+            break
+
+    if not retry_terms:
+        retry_terms = list(_DEFAULT_ASK_RETRY_FALLBACK_TERMS)
+
+    return f"{query}\n\nRelated exact terms: {' '.join(retry_terms)}"
+
+
+def _merge_chunks_by_id(
+    chunks: list[dict[str, Any]],
+    extra_chunks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for chunk in chunks + extra_chunks:
+        key = str(chunk.get("id") or f"{chunk.get('document_id', '')}:{chunk.get('text', '')}")
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(chunk)
+    return merged
+
+
+def _usage_from_generation_result(gen_result: dict[str, Any]) -> dict[str, int]:
+    trace: dict[str, Any] = gen_result.get("trace", {})
+    usage_raw: dict[str, Any] = trace.get("usage", {})
+    return {
+        "prompt_tokens": int(usage_raw.get("prompt_tokens", 0)),
+        "completion_tokens": int(usage_raw.get("completion_tokens", 0)),
+    }
 
 
 @router.post("/{dataset_id}/ask", response_model=AskOut)
@@ -1160,10 +1251,13 @@ async def ask_dataset(
         prompt_tokens = int(usage_dict.get("prompt_tokens", 0))
         completion_tokens = int(usage_dict.get("completion_tokens", 0))
 
+        run_id: str | None = None
+
         # Persist Run record
         if pipeline_version_id_for_run is not None:
+            run_id = str(uuid.uuid4())
             run_record = Run(
-                id=str(uuid.uuid4()),
+                id=run_id,
                 organization_id=organization_id,
                 pipeline_version_id=pipeline_version_id_for_run,
                 dataset_id=dataset_id,
@@ -1193,6 +1287,7 @@ async def ask_dataset(
                 answer="Не нашёл релевантных чанков для ответа.",
                 chunks=[],
                 usage=AskUsage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+                run_id=run_id,
             )
 
         await _record_dataset_query_usage(
@@ -1216,6 +1311,7 @@ async def ask_dataset(
                 for c in raw_chunks
             ],
             usage=AskUsage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+            run_id=run_id,
         )
 
     # --- Default hardcoded path ---
@@ -1235,9 +1331,10 @@ async def ask_dataset(
         raise HTTPException(status_code=500, detail="pgvector-hybrid retriever not available")
 
     retriever = cast(Retriever, retriever_cls({"session": db}))
+    retrieve_top_k = _default_ask_retrieve_top_k(body.top_k)
     raw_chunks = await retriever.retrieve(
         query=body.query,
-        top_k=body.top_k,
+        top_k=retrieve_top_k,
         organization_id=organization_id,
         dataset_id=dataset_id,
         query_vec=query_vec,
@@ -1266,13 +1363,41 @@ async def ask_dataset(
 
     generator = cast(
         Generator,
-        generator_cls({"model": body.model, "temperature": 0.0, "max_tokens": 1024}),
+        generator_cls(
+            {"model": body.model, "temperature": 0.0, "max_tokens": _DEFAULT_ASK_MAX_TOKENS}
+        ),
     )
     try:
         gen_result = await generator.generate(body.query, contexts=raw_chunks)
         answer = gen_result.get("answer", "")
-        trace: dict[str, Any] = gen_result.get("trace", {})
-        usage_raw: dict[str, Any] = trace.get("usage", {})
+        usage_raw = _usage_from_generation_result(gen_result)
+        if _is_absent_answer(answer):
+            retry_query = _build_default_ask_retry_query(body.query, raw_chunks)
+            retry_query_vec = query_vec
+            if embedder is not None:
+                with suppress(Exception):
+                    retry_query_vec = (await embedder.embed([retry_query]))[0]
+            retry_chunks = await retriever.retrieve(
+                query=retry_query,
+                top_k=retrieve_top_k,
+                organization_id=organization_id,
+                dataset_id=dataset_id,
+                query_vec=retry_query_vec,
+            )
+            merged_chunks = _merge_chunks_by_id(raw_chunks, retry_chunks)
+            if merged_chunks:
+                retry_gen_result = await generator.generate(body.query, contexts=merged_chunks)
+                retry_answer = retry_gen_result.get("answer", "")
+                retry_usage = _usage_from_generation_result(retry_gen_result)
+                usage_raw = {
+                    "prompt_tokens": usage_raw["prompt_tokens"] + retry_usage["prompt_tokens"],
+                    "completion_tokens": (
+                        usage_raw["completion_tokens"] + retry_usage["completion_tokens"]
+                    ),
+                }
+                if not _is_absent_answer(retry_answer):
+                    answer = retry_answer
+                    raw_chunks = merged_chunks
     except Exception:
         answer = (
             "Нашёл релевантные чанки, но генерация ответа сейчас недоступна. "

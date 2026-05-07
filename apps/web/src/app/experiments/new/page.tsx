@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,11 +32,16 @@ const STAGE_KEYS: { kind: PluginKind; gridKey: string; required: boolean; label:
   { kind: "generator", gridKey: "generators", required: true, label: "Generators" },
 ];
 
+const DEFAULT_EXPERIMENT_NAME = "Эксперимент для датасета";
+
 export default function NewExperimentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const datasetIdFromUrl = searchParams?.get("dataset_id") ?? "";
   const [name, setName] = useState("");
-  const [datasetId, setDatasetId] = useState("");
+  const [datasetId, setDatasetId] = useState(datasetIdFromUrl);
   const [selectedPlugins, setSelectedPlugins] = useState<Record<string, Set<string>>>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { data: datasets } = trpc.datasets.list.useQuery();
   const { data: plugins } = trpc.plugins.list.useQuery();
@@ -66,12 +71,10 @@ export default function NewExperimentPage() {
       const next: Record<string, Set<string>> = { ...prev };
 
       for (const stage of STAGE_KEYS) {
-        if (!stage.required) continue;
         const stagePlugins = plugins.filter((p) => p.kind === stage.kind);
-        if (stagePlugins.length !== 1) continue;
-        const current = next[stage.gridKey] ?? new Set<string>();
-        if (current.size > 0) continue;
-        next[stage.gridKey] = new Set([stagePlugins[0].name]);
+        if (stagePlugins.length === 0) continue;
+        if (next[stage.gridKey]) continue;
+        next[stage.gridKey] = new Set(stagePlugins.map((plugin) => plugin.name));
         changed = true;
       }
 
@@ -79,8 +82,13 @@ export default function NewExperimentPage() {
     });
   }, [plugins]);
 
+  useEffect(() => {
+    if (datasetId || !datasets || datasets.length !== 1) return;
+    setDatasetId(datasets[0].id);
+  }, [datasetId, datasets]);
+
   const isFormValid = () => {
-    if (!name.trim() || !datasetId) return false;
+    if (!datasetId) return false;
     // All required stages must have at least one plugin selected
     return STAGE_KEYS.filter((s) => s.required).every(
       (s) => (selectedPlugins[s.gridKey]?.size ?? 0) > 0
@@ -98,13 +106,16 @@ export default function NewExperimentPage() {
         pluginGrid[stage.gridKey] = Array.from(selected).map((pluginName) => ({
           plugin_kind: stage.kind,
           plugin_name: pluginName,
-          params: {},
+          params:
+            ((plugins ?? []).find(
+              (plugin) => plugin.kind === stage.kind && plugin.name === pluginName
+            )?.default_params as Record<string, unknown> | undefined) ?? {},
         }));
       }
     }
 
     createMutation.mutate({
-      name: name.trim(),
+      name: name.trim() || DEFAULT_EXPERIMENT_NAME,
       dataset_id: datasetId,
       plugin_grid: pluginGrid as Parameters<typeof createMutation.mutate>[0]["plugin_grid"],
     });
@@ -112,28 +123,31 @@ export default function NewExperimentPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <h1 className="text-3xl font-bold">New Experiment</h1>
+      <h1 className="text-3xl font-bold">Новый эксперимент</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>Experiment settings</CardTitle>
+          <CardTitle>Настройки эксперимента</CardTitle>
+          <CardDescription>
+            Все доступные варианты pipeline включены по умолчанию.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="exp-name">Name</Label>
+            <Label htmlFor="exp-name">Имя эксперимента</Label>
             <Input
               id="exp-name"
-              placeholder="My experiment"
+              placeholder={DEFAULT_EXPERIMENT_NAME}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="dataset-select">Dataset</Label>
+            <Label htmlFor="dataset-select">Датасет</Label>
             <Select value={datasetId} onValueChange={setDatasetId}>
               <SelectTrigger id="dataset-select">
-                <SelectValue placeholder="Select a dataset…" />
+                <SelectValue placeholder="Выберите датасет..." />
               </SelectTrigger>
               <SelectContent>
                 {(datasets ?? []).map((ds) => (
@@ -144,10 +158,17 @@ export default function NewExperimentPage() {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            Advanced
+          </Button>
         </CardContent>
       </Card>
 
-      {STAGE_KEYS.map((stage) => {
+      {advancedOpen && STAGE_KEYS.map((stage) => {
         const stagePlugins = (plugins ?? []).filter((p) => p.kind === stage.kind);
         if (stagePlugins.length === 0) return null;
         const selected = selectedPlugins[stage.gridKey] ?? new Set<string>();
@@ -184,7 +205,7 @@ export default function NewExperimentPage() {
               </div>
               {stage.required && selected.size === 0 && (
                 <p className="text-xs text-destructive mt-2">
-                  Select at least one {stage.kind}
+                  Выберите хотя бы один {stage.kind}
                 </p>
               )}
             </CardContent>
@@ -196,7 +217,7 @@ export default function NewExperimentPage() {
         <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
           <p className="font-medium text-amber-900">{PAYWALL_TOAST.title}</p>
           <a href="/pricing" className="text-primary underline">
-            Choose a plan
+            Выбрать план
           </a>
         </div>
       )}
@@ -209,23 +230,19 @@ export default function NewExperimentPage() {
 
       <Card className="border-muted bg-muted/50">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">How quota is consumed</CardTitle>
+          <CardTitle className="text-sm">Как расходуется quota</CardTitle>
           <CardDescription>
-            Each golden QA item in the experiment triggers 3–4 API calls:
+            Каждый golden QA item запускает 3-4 API вызова.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-1">
-          <p>• <strong>Embedder</strong> — embeds query + expected answer + each chunk
-            (OpenAI text-embedding-3-small, ~3 calls per item)</p>
-          <p>• <strong>Generator</strong> — LLM answer generation
-            (DeepSeek V4 Flash, ~1 call per item if selected)</p>
+          <p>• <strong>Embedder</strong> считает embeddings для вопроса, ожидаемого ответа и чанков.</p>
+          <p>• <strong>Generator</strong> генерирует ответ через DeepSeek, если выбран.</p>
           <p className="mt-2">
-            Total quota = (embedder calls + generator calls) × golden items × combinations.
-            Compute cost is deducted from your subscription plan quota in real time.
+            Итоговая quota зависит от числа golden items и включённых комбинаций.
           </p>
           <p className="text-muted-foreground/60 mt-1">
-            Quota is consumed per API call, not per experiment.
-            If an embedder or generator API fails, the item is skipped and quota is conserved.
+            Если API embedder или generator недоступен, item пропускается и quota сохраняется.
           </p>
         </CardContent>
       </Card>
@@ -236,13 +253,13 @@ export default function NewExperimentPage() {
           onClick={() => router.push("/experiments")}
           disabled={createMutation.isPending}
         >
-          Cancel
+          Отмена
         </Button>
         <Button
           onClick={handleSubmit}
           disabled={!isFormValid() || createMutation.isPending}
         >
-          {createMutation.isPending ? "Running experiment…" : "Run experiment"}
+          {createMutation.isPending ? "Запускаю..." : "Запустить эксперимент"}
         </Button>
       </div>
     </div>

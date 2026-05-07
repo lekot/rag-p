@@ -20,18 +20,41 @@ vi.mock("@/lib/trpc", () => ({
           data: [
             {
               kind: "chunker",
-              name: "fixed-size",
+              name: "recursive-character",
               version: "1.0",
               params_schema: {
                 type: "object",
                 properties: { chunk_size: { type: "number", title: "Chunk size" } },
               },
-              default_params: { chunk_size: 512 },
+              default_params: { chunk_size: 512, chunk_overlap: 64 },
             },
-            { kind: "embedder", name: "openai-ada", version: "2.0", params_schema: {}, default_params: {} },
-            { kind: "retriever", name: "faiss", version: "1.0", params_schema: {}, default_params: {} },
+            {
+              kind: "embedder",
+              name: "litellm-embedder",
+              version: "2.0",
+              params_schema: {},
+              default_params: { model: "openai/text-embedding-3-small" },
+            },
+            {
+              kind: "retriever",
+              name: "pgvector-hybrid",
+              version: "1.0",
+              params_schema: {},
+              default_params: {
+                weight_dense: 0.7,
+                weight_bm25: 0.3,
+                top_k: 10,
+                embedding_model: "openai/text-embedding-3-small",
+              },
+            },
             { kind: "reranker", name: "cross-encoder", version: "1.0", params_schema: {}, default_params: {} },
-            { kind: "generator", name: "gpt-4o", version: "1.0", params_schema: {}, default_params: {} },
+            {
+              kind: "generator",
+              name: "litellm-generator",
+              version: "1.0",
+              params_schema: {},
+              default_params: { model: "deepseek/deepseek-v4-flash" },
+            },
           ],
           isLoading: false,
         }),
@@ -56,7 +79,18 @@ describe("PipelineEditor", () => {
   });
 
   it("renders selectors for all 5 plugin kinds", () => {
-    render(<PipelineEditor />);
+    render(
+      <PipelineEditor
+        initialNodes={[
+          {
+            plugin_kind: "chunker",
+            plugin_name: "recursive-character",
+            params: { chunk_size: 512 },
+          },
+        ]}
+        onChange={vi.fn()}
+      />
+    );
 
     expect(screen.getByTestId("chunker-select")).toBeTruthy();
     expect(screen.getByTestId("embedder-select")).toBeTruthy();
@@ -66,7 +100,18 @@ describe("PipelineEditor", () => {
   });
 
   it("renders stage labels", () => {
-    render(<PipelineEditor />);
+    render(
+      <PipelineEditor
+        initialNodes={[
+          {
+            plugin_kind: "chunker",
+            plugin_name: "recursive-character",
+            params: { chunk_size: 512 },
+          },
+        ]}
+        onChange={vi.fn()}
+      />
+    );
 
     expect(screen.getByText("Chunker")).toBeTruthy();
     expect(screen.getByText("Embedder")).toBeTruthy();
@@ -80,6 +125,48 @@ describe("PipelineEditor", () => {
     expect(screen.getByTestId("pipeline-name-input")).toBeTruthy();
   });
 
+  it("creates a dataset pipeline with sensible defaults from the simple mode", () => {
+    render(<PipelineEditor datasetId="ds-123" />);
+
+    expect(screen.getByText("Новый pipeline")).toBeTruthy();
+    expect(screen.getByText("Advanced")).toBeTruthy();
+    expect(screen.queryByTestId("chunker-select")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Проверить всё и создать pipeline/i }));
+
+    expect(pipelineMocks.createPipelineMutate).toHaveBeenCalledWith({
+      name: "Pipeline для датасета",
+      dataset_id: "ds-123",
+      nodes: [
+        {
+          plugin_kind: "chunker",
+          plugin_name: "recursive-character",
+          params: { chunk_size: 512, chunk_overlap: 64 },
+        },
+        {
+          plugin_kind: "embedder",
+          plugin_name: "litellm-embedder",
+          params: { model: "openai/text-embedding-3-small" },
+        },
+        {
+          plugin_kind: "retriever",
+          plugin_name: "pgvector-hybrid",
+          params: {
+            weight_dense: 0.7,
+            weight_bm25: 0.3,
+            top_k: 30,
+            embedding_model: "openai/text-embedding-3-small",
+          },
+        },
+        {
+          plugin_kind: "generator",
+          plugin_name: "litellm-generator",
+          params: { model: "deepseek/deepseek-v4-flash", max_tokens: 4096 },
+        },
+      ],
+    });
+  });
+
   it("emits edit-mode parameter changes to the parent without requiring internal submit", async () => {
     const onChange = vi.fn();
     render(
@@ -87,7 +174,7 @@ describe("PipelineEditor", () => {
         initialNodes={[
           {
             plugin_kind: "chunker",
-            plugin_name: "fixed-size",
+            plugin_name: "recursive-character",
             params: { chunk_size: 512 },
           },
         ]}
@@ -103,7 +190,7 @@ describe("PipelineEditor", () => {
       expect(onChange).toHaveBeenCalledWith([
         {
           plugin_kind: "chunker",
-          plugin_name: "fixed-size",
+          plugin_name: "recursive-character",
           params: { chunk_size: 256 },
         },
       ]);
@@ -113,6 +200,6 @@ describe("PipelineEditor", () => {
   it("passes dataset_id when creating from dataset context", () => {
     render(<PipelineEditor datasetId="ds-123" />);
 
-    expect(screen.getByText("Dataset-bound pipeline")).toBeTruthy();
+    expect(screen.getByText("Pipeline будет привязан к текущему датасету.")).toBeTruthy();
   });
 });

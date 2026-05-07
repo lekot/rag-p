@@ -838,7 +838,11 @@ def _make_mock_get_plugin(fake_chunks: list[dict]):
     return _side_effect
 
 
-def _make_ask_get_plugin(fake_chunks: list[dict], generator_mock: MagicMock):
+def _make_ask_get_plugin(
+    fake_chunks: list[dict],
+    generator_mock: MagicMock,
+    retriever_mock: AsyncMock | None = None,
+):
     """Return a get_plugin side_effect that stubs embedder, retriever, and generator plugins."""
 
     fake_vec = [0.0] * 1024
@@ -855,6 +859,8 @@ def _make_ask_get_plugin(fake_chunks: list[dict], generator_mock: MagicMock):
             pass
 
         async def retrieve(self, **kwargs) -> list[dict]:  # noqa: ANN003
+            if retriever_mock is not None:
+                return await retriever_mock(**kwargs)
             return fake_chunks
 
     def _side_effect(plugin_type: str, name: str):  # noqa: ANN001
@@ -940,6 +946,114 @@ async def test_ask_returns_answer_with_chunks(client: AsyncClient, organization_
     assert body["usage"]["completion_tokens"] == 10
     # Ensure generator was called
     gen_instance.generate.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ask_default_path_expands_generation_contexts_and_tokens(
+    client: AsyncClient, organization_id: str
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    doc_id = str(uuid.uuid4())
+    fake_chunks = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": f"Context {idx}",
+            "score": 0.9 - (idx * 0.01),
+            "metadata": {"chunk_index": idx},
+            "document_id": doc_id,
+            "document_name": "upload://expanded.pdf",
+        }
+        for idx in range(30)
+    ]
+    retriever_mock = AsyncMock(return_value=fake_chunks)
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock(
+        return_value={
+            "answer": "Expanded answer",
+            "trace": {"usage": {"prompt_tokens": 100, "completion_tokens": 20}},
+        }
+    )
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_ask_get_plugin(fake_chunks, generator_cls, retriever_mock),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "Show the guarantor table", "top_k": 5},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["answer"] == "Expanded answer"
+    assert len(body["chunks"]) == 30
+    assert retriever_mock.await_args.kwargs["top_k"] == 30
+    gen_instance.generate.assert_awaited_once()
+    assert len(gen_instance.generate.await_args.kwargs["contexts"]) == 30
+    assert generator_cls.call_args.args[0]["max_tokens"] >= 4096
+
+
+@pytest.mark.asyncio
+async def test_ask_default_path_retries_once_when_generator_reports_absent_answer(
+    client: AsyncClient, organization_id: str
+) -> None:
+    dataset_id = await _create_dataset(client, organization_id)
+    doc_id = str(uuid.uuid4())
+    first_chunk = {
+        "id": str(uuid.uuid4()),
+        "text": "Initial context",
+        "score": 0.4,
+        "metadata": {"chunk_index": 1},
+        "document_id": doc_id,
+        "document_name": "upload://contract.pdf",
+    }
+    second_chunk = {
+        "id": str(uuid.uuid4()),
+        "text": "Guarantor table with INN values",
+        "score": 0.8,
+        "metadata": {"chunk_index": 65},
+        "document_id": doc_id,
+        "document_name": "upload://contract.pdf",
+    }
+    retriever_mock = AsyncMock(side_effect=[[first_chunk], [first_chunk, second_chunk]])
+    gen_instance = MagicMock()
+    gen_instance.generate = AsyncMock(
+        side_effect=[
+            {
+                "answer": "В предоставленных источниках ответа нет.",
+                "trace": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},
+            },
+            {
+                "answer": "The guarantor table includes INN values. [2]",
+                "trace": {"usage": {"prompt_tokens": 30, "completion_tokens": 12}},
+            },
+        ]
+    )
+    generator_cls = MagicMock(return_value=gen_instance)
+
+    with patch(
+        "ragp_api.api.v1.routes_datasets.get_plugin",
+        side_effect=_make_ask_get_plugin([], generator_cls, retriever_mock),
+    ):
+        resp = await client.post(
+            f"/api/v1/datasets/{dataset_id}/ask",
+            headers={"X-Organization-Id": organization_id},
+            json={"query": "Who are the guarantors?", "top_k": 5},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["answer"] == "The guarantor table includes INN values. [2]"
+    assert len(body["chunks"]) == 2
+    assert retriever_mock.await_count == 2
+    assert gen_instance.generate.await_count == 2
+    first_query = retriever_mock.await_args_list[0].kwargs["query"]
+    retry_query = retriever_mock.await_args_list[1].kwargs["query"]
+    assert retry_query != first_query
+    assert "Who are the guarantors?" in retry_query
+    assert len(gen_instance.generate.await_args_list[1].kwargs["contexts"]) == 2
 
 
 @pytest.mark.asyncio
@@ -1251,9 +1365,15 @@ async def test_ask_pipeline_path_returns_usage(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["answer"] == "Pipeline answer"
+    assert body["run_id"]
     assert body["usage"]["prompt_tokens"] > 0
     assert body["usage"]["prompt_tokens"] == 55
     assert body["usage"]["completion_tokens"] == 15
+    persisted_run = (
+        await db_session.execute(select(Run).where(Run.id == body["run_id"]))
+    ).scalar_one()
+    assert persisted_run.pipeline_version_id == version_id
+    assert persisted_run.dataset_id == dataset_id
 
 
 @pytest.mark.asyncio

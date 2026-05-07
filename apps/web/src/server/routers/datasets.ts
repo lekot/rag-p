@@ -61,6 +61,7 @@ const AskResultSchema = z.object({
   answer: z.string(),
   chunks: z.array(SearchChunkSchema),
   usage: AskUsageSchema,
+  run_id: z.string().nullable().optional(),
 });
 
 export type AskResult = z.infer<typeof AskResultSchema>;

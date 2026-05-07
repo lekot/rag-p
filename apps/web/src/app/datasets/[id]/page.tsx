@@ -213,12 +213,19 @@ function SearchSection({ datasetId }: { datasetId: string }) {
 // ---------------------------------------------------------------------------
 
 function AskSection({ datasetId }: { datasetId: string }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>("__default__");
 
   const { data: pipelines } = trpc.pipelines.list.useQuery({ datasetId });
-  const askMutation = trpc.datasets.ask.useMutation();
+  const askMutation = trpc.datasets.ask.useMutation({
+    onSuccess: (data) => {
+      if (data.run_id) {
+        router.push(`/runs/${data.run_id}`);
+      }
+    },
+  });
 
   const handleAsk = () => {
     if (!query.trim()) return;
@@ -659,9 +666,14 @@ export default function DatasetDetailPage() {
         hasActiveSubscription={user?.has_active_subscription}
       />
 
-      <Button asChild variant="outline">
-        <a href={`/pipelines/new?dataset_id=${params.id}`}>New pipeline for this dataset</a>
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <a href={`/pipelines/new?dataset_id=${params.id}`}>Создать pipeline</a>
+        </Button>
+        <Button asChild variant="outline">
+          <a href={`/experiments/new?dataset_id=${params.id}`}>Запустить эксперимент</a>
+        </Button>
+      </div>
 
       <SearchSection datasetId={params.id} />
 

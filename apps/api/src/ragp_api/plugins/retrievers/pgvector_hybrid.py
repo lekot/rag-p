@@ -1,6 +1,7 @@
 """PgvectorHybridRetriever — tsvector + pgvector + RRF fusion."""
 
 import logging
+import re
 from typing import Any, ClassVar
 
 from ragp_api.plugins.base import CostEstimate, HealthStatus, Retriever
@@ -9,6 +10,10 @@ from ragp_api.plugins.registry import register
 _RRF_K = 60
 
 logger = logging.getLogger(__name__)
+
+
+def _has_positive_score(rows: list[Any]) -> bool:
+    return any(float(getattr(row, "score", 0.0) or 0.0) > 0 for row in rows)
 
 
 @register
@@ -62,6 +67,50 @@ class PgvectorHybridRetriever(Retriever):
         # Optional dataset filter clause
         dataset_filter = "AND d.dataset_id = :dataset_id" if dataset_id is not None else ""
 
+        async def _simple_token_fallback(reason: str) -> list[Any]:
+            logger.info(
+                "%s for org=%s dataset=%s query=%r; trying simple token fallback",
+                reason,
+                organization_id,
+                dataset_id,
+                query[:80],
+            )
+            tokens = re.findall(r"\w+(?::\w+)*", query.lower())
+            if not tokens:
+                return []
+            simple_query = " | ".join(tokens[:20])
+            fallback_sql = text(
+                f"""
+                SELECT c.id, c.text, c.metadata_json, c.document_id,
+                       d.source_uri AS document_name,
+                       ts_rank_cd(
+                           to_tsvector('simple', c.text),
+                           to_tsquery('simple', :simple_query)
+                       ) AS score
+                FROM chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE d.organization_id = :org_id
+                  AND c.text != ''
+                  {dataset_filter}
+                  AND to_tsvector('simple', c.text) @@ to_tsquery('simple', :simple_query)
+                ORDER BY score DESC
+                LIMIT :top_k
+                """
+            )
+            fb_params: dict[str, Any] = {
+                "simple_query": simple_query,
+                "org_id": organization_id,
+                "top_k": top_k,
+            }
+            if dataset_id is not None:
+                fb_params["dataset_id"] = dataset_id
+            try:
+                fb_result = await session.execute(fallback_sql, fb_params)
+                return list(fb_result.fetchall())
+            except Exception as fb_exc:
+                logger.warning("Simple fallback query failed: %s", fb_exc)
+                return []
+
         if query_vec is None:
             sql = text(
                 f"""
@@ -76,6 +125,7 @@ class PgvectorHybridRetriever(Retriever):
                 WHERE d.organization_id = :org_id
                   AND c.text != ''
                   {dataset_filter}
+                  AND to_tsvector('english', c.text) @@ plainto_tsquery('english', :query)
                 ORDER BY score DESC
                 LIMIT :top_k
                 """
@@ -91,56 +141,8 @@ class PgvectorHybridRetriever(Retriever):
             result = await session.execute(sql, bm25_params)
             rows = result.fetchall()
 
-            if not rows:
-                # Fallback: try simple token matching (works better for non-English)
-                logger.info(
-                    "BM25 returned 0 rows for org=%s dataset=%s query=%r — trying simple fallback",
-                    organization_id,
-                    dataset_id,
-                    query[:80],
-                )
-                # Extract alphanumeric tokens from query for basic matching
-                import re
-
-                tokens = re.findall(r"[\wа-яёА-ЯЁ]+(?::\w+)*", query.lower())
-                if tokens:
-                    simple_query = " | ".join(tokens[:20])  # OR-based fallback
-                    fallback_sql = text(
-                        f"""
-                        SELECT c.id, c.text, c.metadata_json, c.document_id,
-                               d.source_uri AS document_name,
-                               ts_rank_cd(
-                                   to_tsvector('simple', c.text),
-                                   to_tsquery('simple', :simple_query)
-                               ) AS score
-                        FROM chunks c
-                        JOIN documents d ON d.id = c.document_id
-                        WHERE d.organization_id = :org_id
-                          AND c.text != ''
-                          {dataset_filter}
-                          AND to_tsvector('simple', c.text) @@ to_tsquery('simple', :simple_query)
-                        ORDER BY score DESC
-                        LIMIT :top_k
-                        """
-                    )
-                    fb_params: dict[str, Any] = {
-                        "simple_query": simple_query,
-                        "org_id": organization_id,
-                        "top_k": top_k,
-                    }
-                    if dataset_id is not None:
-                        fb_params["dataset_id"] = dataset_id
-                    try:
-                        fb_result = await session.execute(fallback_sql, fb_params)
-                        rows = fb_result.fetchall()
-                        if rows:
-                            logger.info(
-                                "Simple fallback found %d rows for org=%s",
-                                len(rows),
-                                organization_id,
-                            )
-                    except Exception as fb_exc:
-                        logger.warning("Simple fallback query failed: %s", fb_exc)
+            if not _has_positive_score(rows):
+                rows = await _simple_token_fallback("English BM25 returned no positive rows")
 
                 if not rows:
                     logger.warning(
@@ -192,6 +194,7 @@ class PgvectorHybridRetriever(Retriever):
                 WHERE d.organization_id = :org_id
                   AND c.text != ''
                   {dataset_filter}
+                  AND to_tsvector('english', c.text) @@ plainto_tsquery('english', :query)
                 ORDER BY ts_rank_cd(
                     to_tsvector('english', c.text),
                     plainto_tsquery('english', :query)
@@ -250,6 +253,7 @@ class PgvectorHybridRetriever(Retriever):
                     WHERE d.organization_id = :org_id
                       AND c.text != ''
                       {dataset_filter}
+                      AND to_tsvector('english', c.text) @@ plainto_tsquery('english', :query)
                     ORDER BY score DESC
                     LIMIT :top_k
                     """
@@ -260,13 +264,18 @@ class PgvectorHybridRetriever(Retriever):
                     | ({"dataset_id": dataset_id} if dataset_id is not None else {}),
                 )
                 rows = fb_result.fetchall()
-                if rows:
+                if _has_positive_score(rows):
                     logger.info(
                         "Hybrid returned 0 rows — BM25 fallback found %d rows",
                         len(rows),
                     )
+                else:
+                    rows = await _simple_token_fallback(
+                        "Hybrid BM25 fallback returned no positive rows"
+                    )
             except Exception as fb_exc:
                 logger.warning("BM25 fallback failed: %s", fb_exc)
+                rows = await _simple_token_fallback("Hybrid BM25 fallback failed")
 
         if not rows:
             # Diagnostic: check if chunks exist for this org/dataset

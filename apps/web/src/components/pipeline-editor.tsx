@@ -38,6 +38,36 @@ interface NodeState {
   params: Record<string, unknown>;
 }
 
+const DEFAULT_PIPELINE_NAME = "Pipeline для датасета";
+
+const DEFAULT_PIPELINE_NODES = [
+  {
+    plugin_kind: "chunker",
+    plugin_name: "recursive-character",
+    params: { chunk_size: 512, chunk_overlap: 64 },
+  },
+  {
+    plugin_kind: "embedder",
+    plugin_name: "litellm-embedder",
+    params: { model: "openai/text-embedding-3-small" },
+  },
+  {
+    plugin_kind: "retriever",
+    plugin_name: "pgvector-hybrid",
+    params: {
+      weight_dense: 0.7,
+      weight_bm25: 0.3,
+      top_k: 30,
+      embedding_model: "openai/text-embedding-3-small",
+    },
+  },
+  {
+    plugin_kind: "generator",
+    plugin_name: "litellm-generator",
+    params: { model: "deepseek/deepseek-v4-flash", max_tokens: 4096 },
+  },
+];
+
 interface PipelineEditorProps {
   /** Pre-populate nodes for edit mode */
   initialNodes?: Array<{
@@ -69,6 +99,7 @@ export function PipelineEditor({ initialNodes, datasetId, onChange }: PipelineEd
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [nodes, setNodes] = useState<Partial<Record<PluginKind, NodeState>>>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Sync state when initialNodes changes (edit mode / pipeline switch)
   useEffect(() => {
@@ -149,7 +180,37 @@ export function PipelineEditor({ initialNodes, datasetId, onChange }: PipelineEd
       return;
     }
 
-    createMutation.mutate({ name, nodes: orderedNodes, dataset_id: datasetId ?? null });
+    createMutation.mutate({
+      name: name.trim() || DEFAULT_PIPELINE_NAME,
+      nodes: orderedNodes,
+      dataset_id: datasetId ?? null,
+    });
+  };
+
+  const handleSimpleSubmit = () => {
+    const missingDefaults = DEFAULT_PIPELINE_NODES.filter(
+      (node) =>
+        !(plugins ?? []).some(
+          (plugin) =>
+            plugin.kind === node.plugin_kind && plugin.name === node.plugin_name
+        )
+    );
+    if (missingDefaults.length > 0) {
+      toast({
+        title: "Не хватает plugin",
+        description: missingDefaults
+          .map((node) => `${node.plugin_kind}/${node.plugin_name}`)
+          .join(", "),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    createMutation.mutate({
+      name: name.trim() || DEFAULT_PIPELINE_NAME,
+      nodes: DEFAULT_PIPELINE_NODES,
+      dataset_id: datasetId ?? null,
+    });
   };
 
   if (isLoading) {
@@ -157,28 +218,59 @@ export function PipelineEditor({ initialNodes, datasetId, onChange }: PipelineEd
   }
 
   const isEditMode = !!onChange;
+  const showManualEditor = isEditMode || advancedOpen;
 
   return (
     <div className="max-w-2xl space-y-6">
       {!isEditMode && (
-        <div className="space-y-2">
-          <Label htmlFor="pipeline-name">Pipeline name</Label>
-          <Input
-            id="pipeline-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My RAG pipeline"
-            data-testid="pipeline-name-input"
-          />
-          {datasetId && (
-            <p className="text-xs text-muted-foreground">Dataset-bound pipeline</p>
-          )}
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold">Новый pipeline</h2>
+            <p className="text-sm text-muted-foreground">
+              Проверим доступные plugin и создадим рабочий RAG pipeline с настройками по умолчанию.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pipeline-name">Имя pipeline</Label>
+            <Input
+              id="pipeline-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={DEFAULT_PIPELINE_NAME}
+              data-testid="pipeline-name-input"
+            />
+            {datasetId && (
+              <p className="text-xs text-muted-foreground">
+                Pipeline будет привязан к текущему датасету.
+              </p>
+            )}
+          </div>
+          <Button
+            onClick={handleSimpleSubmit}
+            disabled={createMutation.isPending}
+          >
+            {createMutation.isPending
+              ? "Создаю..."
+              : "Проверить всё и создать pipeline"}
+          </Button>
         </div>
       )}
 
-      <Separator />
+      {!isEditMode && (
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            Advanced
+          </Button>
+        </div>
+      )}
 
-      {PIPELINE_STAGES.map((kind) => {
+      {showManualEditor && <Separator />}
+
+      {showManualEditor && PIPELINE_STAGES.map((kind) => {
         const options = pluginsByKind(kind);
         const selectedName = nodes[kind]?.plugin_name ?? "";
         const selectedPlugin = options.find((p) => p.name === selectedName);
@@ -232,12 +324,12 @@ export function PipelineEditor({ initialNodes, datasetId, onChange }: PipelineEd
         );
       })}
 
-      {!isEditMode && (
+      {!isEditMode && showManualEditor && (
         <Button
           onClick={handleSubmit}
-          disabled={!name.trim() || createMutation.isPending}
+          disabled={createMutation.isPending}
         >
-          {createMutation.isPending ? "Creating..." : "Create Pipeline"}
+          {createMutation.isPending ? "Создаю..." : "Создать pipeline вручную"}
         </Button>
       )}
     </div>
