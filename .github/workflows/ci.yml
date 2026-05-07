@@ -13,6 +13,7 @@ jobs:
   lint-py:
     name: Python lint + typecheck + pytest
     runs-on: [self-hosted, ci]
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -32,10 +33,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Use cached uv
+        id: cached-uv
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv_version="0.11.11"
+          uv_dir="${RUNNER_TOOL_CACHE}/uv/${uv_version}/x86_64"
+          echo "UV_CACHE_DIR=/var/cache/uv" >> "$GITHUB_ENV"
+          if [ -x "${uv_dir}/uv" ]; then
+            echo "${uv_dir}" >> "$GITHUB_PATH"
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            "${uv_dir}/uv" --version
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install uv
+        if: steps.cached-uv.outputs.hit != 'true'
+        timeout-minutes: 5
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: "0.11.11"
           # Two self-hosted runners share the host filesystem; share the uv
           # download cache too so torch/scipy don't get stashed twice and
           # the disk fills up.  setup-uv writes UV_CACHE_DIR for downstream
@@ -79,7 +98,7 @@ jobs:
         # between runs and fills the disk (PyTorch skipped via --dev, no --extra reranker-bge).
         if: always()
         run: |
-          rm -rf .venv apps/api/.venv apps/api/.mypy_cache .mypy_cache
+          rm -rf .venv apps/api/.venv apps/api/.mypy_cache .mypy_cache || true
 
   lint-typecheck-web:
     name: Web lint + typecheck
