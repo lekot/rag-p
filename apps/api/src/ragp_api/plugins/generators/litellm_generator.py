@@ -1,10 +1,13 @@
 """LiteLLMGenerator — LLM answer generation via LiteLLM."""
 
+import logging
 from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
 from ragp_api.plugins.registry import register
 from ragp_api.settings import settings
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 
@@ -108,30 +111,61 @@ class LiteLLMGenerator(Generator):
         context_text = "\n\n".join(f"[{i + 1}] {c.get('text', '')}" for i, c in enumerate(contexts))
         user_message = _PROMPT_TEMPLATE.format(query=query, contexts=context_text)
 
-        try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-        except Exception:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+        candidate_models = [model]
+        failover_model = settings.default_llm_model
+        if (
+            failover_model
+            and failover_model != model
+            and settings.deepseek_api_key
+            and failover_model not in candidate_models
+        ):
+            candidate_models.append(failover_model)
+
+        last_error: Exception | None = None
+        fallback_from: str | None = None
+        response = None
+        used_model = model
+        for candidate_model in candidate_models:
+            try:
+                response = await litellm.acompletion(
+                    model=candidate_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                used_model = candidate_model
+                break
+            except Exception as exc:
+                last_error = exc
+                if candidate_model == model:
+                    fallback_from = model
+                logger.warning(
+                    "LiteLLMGenerator model %s unavailable: %s",
+                    candidate_model,
+                    str(exc)[:300],
+                )
+        if response is None:
             if settings.llm_fallback_mode == "extractive":
                 return _extractive_answer(query, contexts)
-            raise
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("LLM completion failed without an exception")
 
         # response is untyped in litellm; cast to str to satisfy strict mode
         answer = cast(str, response.choices[0].message.content) or ""
         trace: dict[str, Any] = {
-            "model": model,
+            "model": used_model,
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "completion_tokens": response.usage.completion_tokens if response.usage else 0,
             },
         }
+        if fallback_from and used_model != fallback_from:
+            trace["fallback_from_model"] = fallback_from
         return {"answer": answer, "trace": trace}
 
     async def cost_estimate(self, sample_input: Any) -> CostEstimate:

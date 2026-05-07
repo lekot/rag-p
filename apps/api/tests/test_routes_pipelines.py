@@ -7,7 +7,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from ragp_api.db.models import Dataset, OrgSubscription, Plan, UsageEvent
+from ragp_api.db.models import Dataset, OrgSubscription, PipelineVersion, Plan, Run, UsageEvent
 from ragp_api.settings import settings
 
 
@@ -222,6 +222,50 @@ async def test_list_pipelines(client: AsyncClient, organization_id: str):
     data = response.json()
     assert len(data) >= 1
     assert all(p["organization_id"] == organization_id for p in data)
+
+
+@pytest.mark.asyncio
+async def test_delete_pipeline_removes_versions_and_runs(
+    client: AsyncClient,
+    db_session,  # type: ignore[no-untyped-def]
+    organization_id: str,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/pipelines",
+        headers={"X-Organization-Id": organization_id},
+        json={
+            "name": "Pipeline To Delete",
+            "nodes": [
+                {"plugin_kind": "chunker", "plugin_name": "recursive-character", "params": {}}
+            ],
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    pipeline = create_resp.json()
+    version_id = pipeline["current_version_id"]
+    db_session.add(
+        Run(
+            id=str(uuid.uuid4()),
+            organization_id=organization_id,
+            pipeline_version_id=version_id,
+            query="old run",
+            status="completed",
+        )
+    )
+    await db_session.commit()
+
+    delete_resp = await client.delete(
+        f"/api/v1/pipelines/{pipeline['id']}",
+        headers={"X-Organization-Id": organization_id},
+    )
+
+    assert delete_resp.status_code == 204, delete_resp.text
+    assert (
+        await db_session.execute(select(PipelineVersion).where(PipelineVersion.id == version_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(Run).where(Run.pipeline_version_id == version_id))
+    ).scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio

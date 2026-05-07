@@ -3,11 +3,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragp_api.api.errors import PluginNotFoundError
-from ragp_api.db.models import Dataset, Organization, Pipeline, PipelineVersion
+from ragp_api.db.models import Dataset, Organization, Pipeline, PipelineVersion, Run
 from ragp_api.deps import get_db
 from ragp_api.deps_auth import require_organization, require_scope
 from ragp_api.plugins.registry import get_plugin
@@ -158,7 +158,15 @@ async def delete_pipeline(
     pipeline = result.scalar_one_or_none()
     if pipeline is None or pipeline.organization_id != org.id:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found")
-    await db.delete(pipeline)
+    version_ids = (
+        (
+            await db.execute(
+                select(PipelineVersion.id).where(PipelineVersion.pipeline_id == pipeline_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     await log_audit_event(
         db,
         org_id=org.id,
@@ -169,6 +177,10 @@ async def delete_pipeline(
         metadata={"name": pipeline.name},
         request=request,
     )
+    if version_ids:
+        await db.execute(delete(Run).where(Run.pipeline_version_id.in_(version_ids)))
+    await db.execute(delete(PipelineVersion).where(PipelineVersion.pipeline_id == pipeline_id))
+    await db.delete(pipeline)
     await db.commit()
 
 
