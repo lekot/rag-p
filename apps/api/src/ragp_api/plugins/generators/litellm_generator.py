@@ -1,6 +1,9 @@
 """LiteLLMGenerator — LLM answer generation via LiteLLM."""
 
 import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, ClassVar, cast
 
 from ragp_api.plugins.base import CostEstimate, Generator, HealthStatus
@@ -30,6 +33,30 @@ _PROMPT_TEMPLATE = (
     "Now answer the question using ONLY the context above. "
     'If absent, reply: "В предоставленных источниках ответа нет."'
 )
+
+
+def _uses_proxy_egress(model: str) -> bool:
+    return model.startswith(("openai/", "cohere/")) or model.startswith(("gpt-", "o1", "o3", "o4"))
+
+
+@contextmanager
+def _temporary_completion_proxy(model: str) -> Iterator[None]:
+    old_https_proxy = os.environ.get("HTTPS_PROXY")
+    old_http_proxy = os.environ.get("HTTP_PROXY")
+    if settings.cohere_http_proxy and _uses_proxy_egress(model):
+        os.environ["HTTPS_PROXY"] = settings.cohere_http_proxy
+        os.environ["HTTP_PROXY"] = settings.cohere_http_proxy
+    try:
+        yield
+    finally:
+        if old_https_proxy is not None:
+            os.environ["HTTPS_PROXY"] = old_https_proxy
+        else:
+            os.environ.pop("HTTPS_PROXY", None)
+        if old_http_proxy is not None:
+            os.environ["HTTP_PROXY"] = old_http_proxy
+        else:
+            os.environ.pop("HTTP_PROXY", None)
 
 
 def _extractive_answer(query: str, contexts: list[dict[str, Any]]) -> dict[str, Any]:
@@ -131,12 +158,13 @@ class LiteLLMGenerator(Generator):
         used_model = model
         for candidate_model in candidate_models:
             try:
-                response = await litellm.acompletion(
-                    model=candidate_model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
+                with _temporary_completion_proxy(candidate_model):
+                    response = await litellm.acompletion(
+                        model=candidate_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
                 used_model = candidate_model
                 break
             except Exception as exc:

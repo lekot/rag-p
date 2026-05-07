@@ -1,3 +1,4 @@
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,15 +29,21 @@ class _CompletionResponse:
 async def test_litellm_generator_fails_over_from_openai_to_default_model() -> None:
     old_default_model = settings.default_llm_model
     old_deepseek_api_key = settings.deepseek_api_key
+    old_proxy = settings.cohere_http_proxy
     settings.default_llm_model = "deepseek/deepseek-v4-flash"
     settings.deepseek_api_key = "test-deepseek-key"
+    settings.cohere_http_proxy = "http://cohere-egress:8888"
+    seen_proxy_by_model: dict[str, str | None] = {}
+
+    async def _complete(**kwargs):  # noqa: ANN003
+        model = kwargs["model"]
+        seen_proxy_by_model[model] = os.environ.get("HTTPS_PROXY")
+        if model == "openai/gpt-4o-mini":
+            raise RuntimeError("OpenAIException - Country, region, or territory not supported")
+        return _CompletionResponse()
+
     try:
-        completion = AsyncMock(
-            side_effect=[
-                RuntimeError("OpenAIException - Country, region, or territory not supported"),
-                _CompletionResponse(),
-            ]
-        )
+        completion = AsyncMock(side_effect=_complete)
         generator = LiteLLMGenerator({"model": "openai/gpt-4o-mini"})
         with patch("litellm.acompletion", new=completion):
             result = await generator.generate(
@@ -46,6 +53,7 @@ async def test_litellm_generator_fails_over_from_openai_to_default_model() -> No
     finally:
         settings.default_llm_model = old_default_model
         settings.deepseek_api_key = old_deepseek_api_key
+        settings.cohere_http_proxy = old_proxy
 
     assert result["answer"] == "DeepSeek answer [1]"
     assert result["trace"]["model"] == "deepseek/deepseek-v4-flash"
@@ -55,6 +63,8 @@ async def test_litellm_generator_fails_over_from_openai_to_default_model() -> No
         "openai/gpt-4o-mini",
         "deepseek/deepseek-v4-flash",
     ]
+    assert seen_proxy_by_model["openai/gpt-4o-mini"] == "http://cohere-egress:8888"
+    assert seen_proxy_by_model["deepseek/deepseek-v4-flash"] is None
 
 
 @pytest.mark.asyncio
