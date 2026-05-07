@@ -1177,6 +1177,80 @@ def _merge_chunks_by_id(
     return merged
 
 
+def _neighbor_seed_score(chunk: dict[str, Any]) -> int:
+    text = str(chunk.get("text", "")).casefold()
+    score = 0
+    if "7.2.1" in text:
+        score += 10
+    if "поручитель" in text or "поручительств" in text:
+        score += 5
+    return score
+
+
+async def _load_neighbor_chunks(
+    session: Any,
+    chunks: list[dict[str, Any]],
+    *,
+    window: int = 8,
+    limit: int = 80,
+) -> list[dict[str, Any]]:
+    from sqlalchemy import text
+
+    seeds = sorted(chunks, key=_neighbor_seed_score, reverse=True)
+    neighbor_chunks: list[dict[str, Any]] = []
+    seen_ids: set[str] = {str(chunk.get("id", "")) for chunk in chunks}
+
+    for chunk in seeds:
+        if len(neighbor_chunks) >= limit:
+            break
+        metadata = chunk.get("metadata") or {}
+        chunk_index = metadata.get("chunk_index")
+        document_id = chunk.get("document_id")
+        if not isinstance(chunk_index, int) or not document_id:
+            continue
+        try:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT c.id, c.text, c.metadata_json, c.document_id,
+                           d.source_uri AS document_name
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE c.document_id = :document_id
+                      AND c.text != ''
+                      AND (c.metadata_json->>'chunk_index')::int BETWEEN :lo AND :hi
+                    ORDER BY (c.metadata_json->>'chunk_index')::int
+                    """
+                ),
+                {
+                    "document_id": document_id,
+                    "lo": max(chunk_index - window, 0),
+                    "hi": chunk_index + window,
+                },
+            )
+        except Exception:
+            continue
+        for row in result.fetchall():
+            row_id = str(row.id)
+            if row_id in seen_ids:
+                continue
+            seen_ids.add(row_id)
+            neighbor_chunks.append(
+                {
+                    "id": row.id,
+                    "text": row.text,
+                    "metadata": row.metadata_json or {},
+                    "score": float(chunk.get("score", 0.0)),
+                    "document_id": row.document_id,
+                    "document_name": row.document_name,
+                }
+            )
+            if len(neighbor_chunks) >= limit:
+                break
+
+    return neighbor_chunks
+
+
 def _usage_from_generation_result(gen_result: dict[str, Any]) -> dict[str, int]:
     trace: dict[str, Any] = gen_result.get("trace", {})
     usage_raw: dict[str, Any] = trace.get("usage", {})
@@ -1409,7 +1483,9 @@ async def ask_dataset(
                 dataset_id=dataset_id,
                 query_vec=retry_query_vec,
             )
+            neighbor_chunks = await _load_neighbor_chunks(db, retry_chunks)
             merged_chunks = _merge_chunks_by_id(raw_chunks, retry_chunks)
+            merged_chunks = _merge_chunks_by_id(merged_chunks, neighbor_chunks)
             if merged_chunks:
                 retry_gen_result = await generator.generate(body.query, contexts=merged_chunks)
                 retry_answer = retry_gen_result.get("answer", "")

@@ -118,6 +118,80 @@ def _merge_contexts_by_id(
     return merged
 
 
+def _neighbor_seed_score(context: dict[str, Any]) -> int:
+    text = str(context.get("text", "")).casefold()
+    score = 0
+    if "7.2.1" in text:
+        score += 10
+    if "поручитель" in text or "поручительств" in text:
+        score += 5
+    return score
+
+
+async def _load_neighbor_contexts(
+    session: Any,
+    contexts: list[dict[str, Any]],
+    *,
+    window: int = 8,
+    limit: int = 80,
+) -> list[dict[str, Any]]:
+    from sqlalchemy import text
+
+    seeds = sorted(contexts, key=_neighbor_seed_score, reverse=True)
+    neighbor_contexts: list[dict[str, Any]] = []
+    seen_ids: set[str] = {str(context.get("id", "")) for context in contexts}
+
+    for context in seeds:
+        if len(neighbor_contexts) >= limit:
+            break
+        metadata = context.get("metadata") or {}
+        chunk_index = metadata.get("chunk_index")
+        document_id = context.get("document_id")
+        if not isinstance(chunk_index, int) or not document_id:
+            continue
+        try:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT c.id, c.text, c.metadata_json, c.document_id,
+                           d.source_uri AS document_name
+                    FROM chunks c
+                    JOIN documents d ON d.id = c.document_id
+                    WHERE c.document_id = :document_id
+                      AND c.text != ''
+                      AND (c.metadata_json->>'chunk_index')::int BETWEEN :lo AND :hi
+                    ORDER BY (c.metadata_json->>'chunk_index')::int
+                    """
+                ),
+                {
+                    "document_id": document_id,
+                    "lo": max(chunk_index - window, 0),
+                    "hi": chunk_index + window,
+                },
+            )
+        except Exception:
+            continue
+        for row in result.fetchall():
+            row_id = str(row.id)
+            if row_id in seen_ids:
+                continue
+            seen_ids.add(row_id)
+            neighbor_contexts.append(
+                {
+                    "id": row.id,
+                    "text": row.text,
+                    "metadata": row.metadata_json or {},
+                    "score": float(context.get("score", 0.0)),
+                    "document_id": row.document_id,
+                    "document_name": row.document_name,
+                }
+            )
+            if len(neighbor_contexts) >= limit:
+                break
+
+    return neighbor_contexts
+
+
 def _usage_from_generation_result(result: dict[str, Any]) -> dict[str, int]:
     trace: dict[str, Any] = result.get("trace", {})
     usage_raw: dict[str, Any] = trace.get("usage", {})
@@ -261,7 +335,9 @@ async def run_pipeline(nodes: list[dict[str, Any]], query: str, session: Any) ->
                     with suppress(Exception):
                         retry_query_vec = (await embedder.embed([retry_query]))[0]
                 retry_contexts = await rerun_context_nodes(retry_query, retry_query_vec)
+                neighbor_contexts = await _load_neighbor_contexts(session, retry_contexts)
                 merged_contexts = _merge_contexts_by_id(contexts, retry_contexts)
+                merged_contexts = _merge_contexts_by_id(merged_contexts, neighbor_contexts)
                 if merged_contexts:
                     retry_result = await generator.generate(query=query, contexts=merged_contexts)
                     retry_answer = retry_result.get("answer", "")
