@@ -22,6 +22,7 @@ from ragp_api.db.models import (
     OrgBalance,
     OrgMember,
     Plan,
+    SubscriptionEvent,
     User,
 )
 from ragp_api.services.billing import (
@@ -486,3 +487,66 @@ async def test_subscription_activation_flips_me_flag(
     me_after = await client.get("/api/v1/auth/me")
     assert me_after.status_code == 200
     assert me_after.json()["has_active_subscription"] is True
+
+
+@pytest.mark.asyncio
+async def test_subscription_reconcile_activates_paid_yookassa_payment(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """If YooKassa webhook is delayed/missing, the return-page reconcile endpoint
+    verifies the payment server-side and activates the subscription."""
+    signup_data = await _signup(client, "journey-reconcile@example.com", org_name="ReconcileOrg")
+    org_id = signup_data["organization"]["id"]
+
+    db_session.add(
+        Plan(
+            id="personal",
+            name="Personal",
+            price_rub_monthly=Decimal("100"),
+            included_q=1000,
+            included_storage_bytes=10 * 1024 * 1024,
+            max_users=1,
+            rpm_per_key=60,
+            allow_overage=False,
+            is_active=True,
+            sort_order=1,
+        )
+    )
+    await db_session.commit()
+
+    payment_id = "pay_reconcile_success"
+    authoritative_payment = {
+        "id": payment_id,
+        "status": "succeeded",
+        "paid": True,
+        "amount": {"value": "100.00", "currency": "RUB"},
+        "metadata": {
+            "org_id": org_id,
+            "plan_id": "personal",
+            "type": "subscription",
+        },
+    }
+
+    with patch(
+        "ragp_api.api.v1.routes_billing.fetch_payment_status",
+        new=AsyncMock(return_value=authoritative_payment),
+    ):
+        resp = await client.post(
+            f"/api/v1/orgs/{org_id}/subscription/reconcile",
+            json={"payment_id": payment_id},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "ok"
+    assert resp.json()["plan_id"] == "personal"
+
+    me_after = await client.get("/api/v1/auth/me")
+    assert me_after.status_code == 200
+    assert me_after.json()["has_active_subscription"] is True
+
+    event = await db_session.scalar(
+        select(SubscriptionEvent).where(SubscriptionEvent.yookassa_payment_id == payment_id)
+    )
+    assert event is not None
+    assert event.plan_id == "personal"

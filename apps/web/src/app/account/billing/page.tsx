@@ -200,12 +200,71 @@ export default function BillingPage() {
     { enabled: Boolean(orgId) }
   );
 
-  // Invalidate billing data when returning from payment gateway
+  // Invalidate billing data when returning from payment gateway.
   useEffect(() => {
     if (paidParam === "1" && orgId) {
       void utils.billing.get.invalidate({ orgId });
     }
   }, [paidParam, orgId, utils.billing.get]);
+
+  // YooKassa webhooks are the primary activation path, but the browser may
+  // return before a webhook arrives or the merchant may not have configured
+  // HTTP notifications yet. Reconcile the pending checkout against YooKassa
+  // from the backend, then refresh auth/subscription state.
+  useEffect(() => {
+    if (!orgId) return;
+
+    const raw = window.localStorage.getItem("ragp_pending_subscription_payment");
+    if (!raw) return;
+
+    type PendingSubscriptionPayment = {
+      payment_id?: string;
+      org_id?: string;
+      created_at?: number;
+    };
+    let pending: PendingSubscriptionPayment;
+    try {
+      pending = JSON.parse(raw) as PendingSubscriptionPayment;
+    } catch {
+      window.localStorage.removeItem("ragp_pending_subscription_payment");
+      return;
+    }
+
+    const isFresh =
+      typeof pending.created_at === "number" &&
+      Date.now() - pending.created_at < 24 * 60 * 60 * 1000;
+    if (!pending.payment_id || pending.org_id !== orgId || !isFresh) {
+      window.localStorage.removeItem("ragp_pending_subscription_payment");
+      return;
+    }
+
+    let cancelled = false;
+    async function reconcile() {
+      const resp = await fetch(`/api/proxy/v1/orgs/${orgId}/subscription/reconcile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ payment_id: pending.payment_id }),
+      });
+      if (cancelled) return;
+      if (resp.ok) {
+        window.localStorage.removeItem("ragp_pending_subscription_payment");
+        await Promise.all([
+          utils.auth.me.invalidate(),
+          utils.billing.subscription.invalidate({ orgId }),
+          utils.billing.get.invalidate({ orgId }),
+        ]);
+      }
+    }
+
+    void reconcile().catch(() => {
+      // Keep the pending marker so refresh can retry while YooKassa settles.
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, utils.auth.me, utils.billing.get, utils.billing.subscription]);
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 

@@ -98,6 +98,7 @@ function PricingPageInner() {
       });
       const data = (await resp.json().catch(() => ({}))) as {
         confirmation_url?: string;
+        payment_id?: string;
         detail?: string | { message?: string };
       };
       if (!resp.ok || !data.confirmation_url) {
@@ -106,6 +107,17 @@ function PricingPageInner() {
             ? data.detail
             : data.detail?.message ?? "Не удалось создать платёж";
         throw new Error(detail);
+      }
+      if (data.payment_id) {
+        window.localStorage.setItem(
+          "ragp_pending_subscription_payment",
+          JSON.stringify({
+            payment_id: data.payment_id,
+            org_id: orgId,
+            plan_id: planId,
+            created_at: Date.now(),
+          })
+        );
       }
       window.location.href = data.confirmation_url;
     } catch (err) {

@@ -134,77 +134,82 @@ export default function DocsPage() {
 
       <Tabs defaultValue="workflow" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="workflow">User workflow</TabsTrigger>
+          <TabsTrigger value="workflow">Путь пользователя</TabsTrigger>
           <TabsTrigger value="rest">REST API</TabsTrigger>
           <TabsTrigger value="n8n">n8n integration</TabsTrigger>
         </TabsList>
 
-        {/* === User workflow tab === */}
+        {/* === Product workflow tab === */}
         <TabsContent value="workflow" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>From documents to a production pipeline</CardTitle>
+              <CardTitle>От документов к рабочему pipeline</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm text-muted-foreground">
               <p>
-                RAG-Platform is built around one practical loop: create a dataset, generate a
-                golden Q&amp;A benchmark, run an experiment, promote the best result to a pipeline,
-                then ask questions through that pipeline and inspect the answers in Runs.
+                RAG-Platform построен вокруг одного рабочего цикла: создать dataset,
+                сгенерировать эталонный Golden Q&amp;A, запустить experiment,
+                промотировать лучший результат в pipeline, затем задавать вопросы через этот
+                pipeline и смотреть ответы в Runs.
               </p>
               <p>
-                You need an active plan before creating datasets, generating golden Q&amp;A, running
-                experiments, or executing pipeline runs. If the product shows
+                Для создания dataset, генерации Golden Q&amp;A, запуска experiments и выполнения
+                pipeline runs нужен активный тариф. Если продукт показывает
                 <code className="mx-1 bg-muted px-1 py-0.5 rounded text-xs">402 Payment Required</code>,
-                open <a href="/pricing" className="underline text-foreground hover:text-primary">Pricing</a>{" "}
-                or <a href="/account/billing" className="underline text-foreground hover:text-primary">Billing</a>{" "}
-                and activate a plan or quota.
+                откройте <a href="/pricing" className="underline text-foreground hover:text-primary">Тарифы</a>{" "}
+                или <a href="/account/billing" className="underline text-foreground hover:text-primary">Billing</a>{" "}
+                и активируйте план или квоту.
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Step-by-step</CardTitle>
+              <CardTitle>Пошаговый сценарий</CardTitle>
             </CardHeader>
             <CardContent className="text-sm">
               <ol className="list-decimal list-inside space-y-3 text-muted-foreground">
                 <li>
-                  Open <a href="/datasets" className="underline text-foreground hover:text-primary">Datasets</a>{" "}
-                  and click <strong>Upload / Create</strong>. Enter a dataset name and upload a
-                  source file. Supported files include txt, md, json, csv, yaml, xml, html, pdf,
-                  docx, and similar text formats up to 10 MB.
+                  Откройте <a href="/datasets" className="underline text-foreground hover:text-primary">Datasets</a>{" "}
+                  и нажмите <strong>Upload / Create</strong>. Введите имя dataset и загрузите
+                  исходный файл. Поддерживаются txt, md, json, csv, yaml, xml, html, pdf, docx
+                  и похожие текстовые форматы до 10 MB.
                 </li>
                 <li>
-                  Open the dataset page and wait until the uploaded document is chunked and
-                  indexed. Use <strong>Upload more</strong> when the dataset needs additional
-                  documents.
+                  Откройте страницу dataset и дождитесь, пока загруженный документ будет
+                  разбит на chunks и проиндексирован. Используйте <strong>Upload more</strong>,
+                  если в dataset нужно добавить документы.
                 </li>
                 <li>
-                  In the dataset page, open <strong>Golden Q&amp;A</strong> and click
-                  <strong> Generate Golden Q&amp;A</strong>. Pick a sample size from 5 to 50 chunks.
-                  The app creates one benchmark question and expected answer per sampled chunk.
+                  На странице dataset откройте <strong>Golden Q&amp;A</strong> и нажмите
+                  <strong> Generate Golden Q&amp;A</strong>. Выберите sample size от 5 до 50
+                  chunks. Приложение создаст один эталонный вопрос и ожидаемый ответ на каждый
+                  выбранный chunk.
                 </li>
                 <li>
-                  Open <a href="/experiments" className="underline text-foreground hover:text-primary">Experiments</a>{" "}
-                  and click <strong>New Experiment</strong>. Select the dataset, choose one or more
-                  plugin variants for the required stages, and click <strong>Run experiment</strong>.
+                  Откройте <a href="/experiments" className="underline text-foreground hover:text-primary">Experiments</a>{" "}
+                  и нажмите <strong>New Experiment</strong>. Выберите dataset, отметьте один или
+                  несколько вариантов плагинов для обязательных стадий и нажмите
+                  <strong> Run experiment</strong>.
                 </li>
                 <li>
-                  Open the experiment result and compare the leaderboard. When a combination is
-                  good enough, click <strong>Promote</strong>, enter a <strong>Pipeline name</strong>,
-                  and confirm with <strong>Create pipeline</strong>.
+                  Откройте результат experiment и сравните leaderboard. Когда комбинация выглядит
+                  достаточно хорошей, нажмите <strong>Promote</strong>, введите
+                  <strong> Pipeline name</strong> и подтвердите через
+                  <strong> Create pipeline</strong>.
                 </li>
                 <li>
-                  Open the promoted pipeline in{" "}
+                  Откройте промотированный pipeline в{" "}
                   <a href="/pipelines" className="underline text-foreground hover:text-primary">Pipelines</a>.
-                  Use <strong>Run a query</strong> to ask a question through the selected production
-                  configuration. You can also ask from the dataset page by selecting the pipeline in
-                  the Ask block, or call the REST API with <code>pipeline_id</code>.
+                  Используйте <strong>Run a query</strong>, чтобы задать вопрос через выбранную
+                  рабочую конфигурацию. Также можно спрашивать со страницы dataset, выбрав pipeline
+                  в блоке Ask, или вызвать REST API с <code>pipeline_id</code>.
                 </li>
                 <li>
-                  Open <a href="/runs" className="underline text-foreground hover:text-primary">Runs</a>{" "}
-                  to inspect created runs. Each run keeps the query, status, answer, retrieved and
-                  reranked chunks, token usage, duration, and RAGAS metrics when available.
+                  Откройте <a href="/runs" className="underline text-foreground hover:text-primary">Runs</a>{" "}
+                  и проверьте созданные runs. Каждый run хранит query, status, answer, найденные и
+                  переранжированные chunks, расход токенов, длительность и RAGAS metrics, если они
+                  доступны.
                 </li>
               </ol>
             </CardContent>
@@ -212,49 +217,49 @@ export default function DocsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Acceptance checklist</CardTitle>
+              <CardTitle>Чеклист приёмки</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               <ul className="list-disc list-inside space-y-2">
-                <li>The dataset contains at least one uploaded document and non-zero chunks.</li>
-                <li>Golden Q&amp;A shows generated items linked to source chunks.</li>
-                <li>The experiment reaches a completed state and the leaderboard has scored rows.</li>
-                <li>The best experiment combination is promoted to a named pipeline.</li>
-                <li>A pipeline query creates a completed run.</li>
-                <li>The run detail page shows the final answer and the supporting chunks used by retrieval.</li>
+                <li>Dataset содержит хотя бы один загруженный документ и ненулевое число chunks.</li>
+                <li>Golden Q&amp;A показывает сгенерированные пары, связанные с source chunks.</li>
+                <li>Experiment дошёл до completed, а leaderboard содержит строки со score.</li>
+                <li>Лучшая комбинация experiment промотирована в именованный pipeline.</li>
+                <li>Вопрос через pipeline создаёт completed run.</li>
+                <li>Страница run detail показывает итоговый answer и supporting chunks.</li>
               </ul>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Troubleshooting</CardTitle>
+              <CardTitle>Что проверить при сбоях</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border rounded">
                   <thead className="bg-muted">
                     <tr>
-                      <th className="text-left px-3 py-2">Symptom</th>
-                      <th className="text-left px-3 py-2">What to check</th>
+                      <th className="text-left px-3 py-2">Симптом</th>
+                      <th className="text-left px-3 py-2">Что проверить</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-t">
-                      <td className="px-3 py-2">Dataset creation, upload, golden generation, or run returns 402</td>
-                      <td className="px-3 py-2">Open Billing and activate a plan or add quota.</td>
+                      <td className="px-3 py-2">Создание dataset, upload, golden generation или run возвращают 402</td>
+                      <td className="px-3 py-2">Откройте Billing и активируйте тариф или добавьте квоту.</td>
                     </tr>
                     <tr className="border-t">
-                      <td className="px-3 py-2">Golden Q&amp;A button is disabled or creates no items</td>
-                      <td className="px-3 py-2">Upload a document first and wait until chunking/indexing finishes.</td>
+                      <td className="px-3 py-2">Кнопка Golden Q&amp;A отключена или создаёт 0 items</td>
+                      <td className="px-3 py-2">Сначала загрузите документ и дождитесь chunking/indexing.</td>
                     </tr>
                     <tr className="border-t">
-                      <td className="px-3 py-2">Experiment has an empty or failed leaderboard</td>
-                      <td className="px-3 py-2">Check that the dataset has golden Q&amp;A and that selected providers are available.</td>
+                      <td className="px-3 py-2">У experiment пустой или failed leaderboard</td>
+                      <td className="px-3 py-2">Проверьте, что у dataset есть Golden Q&amp;A и выбранные провайдеры доступны.</td>
                     </tr>
                     <tr className="border-t">
-                      <td className="px-3 py-2">Pipeline run fails or does not answer</td>
-                      <td className="px-3 py-2">Open the run detail page and inspect status, chunks, metrics, and error text.</td>
+                      <td className="px-3 py-2">Pipeline run падает или не даёт answer</td>
+                      <td className="px-3 py-2">Откройте run detail и проверьте status, chunks, metrics и текст ошибки.</td>
                     </tr>
                   </tbody>
                 </table>

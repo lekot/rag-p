@@ -260,6 +260,16 @@ class SubscriptionCheckoutOut(BaseModel):
     plan_id: str
 
 
+class SubscriptionReconcileIn(BaseModel):
+    payment_id: str
+
+
+class SubscriptionReconcileOut(BaseModel):
+    status: str
+    plan_id: str
+    period_end: str | None = None
+
+
 @router.post(
     "/api/v1/orgs/{org_id}/subscription/checkout",
     response_model=SubscriptionCheckoutOut,
@@ -340,6 +350,105 @@ async def subscription_checkout(
 # ---------------------------------------------------------------------------
 # GET /api/v1/orgs/{org_id}/subscription  — current subscription info
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/api/v1/orgs/{org_id}/subscription/reconcile",
+    response_model=SubscriptionReconcileOut,
+    status_code=200,
+)
+async def reconcile_subscription_payment(
+    org_id: str,
+    body: SubscriptionReconcileIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_session_user),
+) -> SubscriptionReconcileOut:
+    """Activate a paid subscription when the YooKassa webhook is delayed.
+
+    The browser calls this after returning from YooKassa. The backend never
+    trusts the browser's payment claim: it fetches the authoritative payment
+    from YooKassa and validates metadata before changing the subscription.
+    """
+    await require_role(db, current_user.id, org_id, OrgRole.owner)
+
+    existing = await db.scalar(
+        select(SubscriptionEvent).where(SubscriptionEvent.yookassa_payment_id == body.payment_id)
+    )
+    if existing is not None:
+        sub = await get_active_subscription(db, org_id)
+        return SubscriptionReconcileOut(
+            status="already_processed",
+            plan_id=existing.plan_id,
+            period_end=sub.current_period_end.isoformat() if sub is not None else None,
+        )
+
+    try:
+        payment = await fetch_payment_status(body.payment_id)
+    except PaymentRevalidationError as exc:
+        logger.warning("YooKassa reconcile: re-validation failed for %s: %s", body.payment_id, exc)
+        raise HTTPException(status_code=502, detail="payment_revalidation_failed") from exc
+
+    metadata = payment.get("metadata") or {}
+    if metadata.get("org_id") != org_id or metadata.get("type") != "subscription":
+        raise HTTPException(status_code=403, detail="payment_metadata_mismatch")
+
+    plan_id = metadata.get("plan_id")
+    if not plan_id:
+        raise HTTPException(status_code=400, detail="missing metadata.plan_id")
+
+    if payment.get("status") != "succeeded" or payment.get("paid") is not True:
+        raise HTTPException(status_code=409, detail="payment_not_succeeded")
+
+    amount_rub_str = payment.get("amount", {}).get("value", "0")
+    try:
+        amount_rub = Decimal(str(amount_rub_str))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid payment amount") from exc
+
+    try:
+        sub = await start_subscription(
+            db,
+            org_id=org_id,
+            plan_id=plan_id,
+            payment_id=body.payment_id,
+            amount_rub=amount_rub,
+        )
+        await log_audit_event(
+            db,
+            org_id=org_id,
+            user_id=current_user.id,
+            event_type="billing.subscription_started",
+            resource_type="org_subscription",
+            resource_id=org_id,
+            metadata={
+                "plan_id": plan_id,
+                "amount_rub": float(amount_rub),
+                "payment_id": body.payment_id,
+                "source": "return_reconcile",
+            },
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        sub = await get_active_subscription(db, org_id)
+        return SubscriptionReconcileOut(
+            status="already_processed",
+            plan_id=plan_id,
+            period_end=sub.current_period_end.isoformat() if sub is not None else None,
+        )
+
+    logger.info(
+        "YooKassa subscription payment %s reconciled for org %s: plan=%s, period_end=%s",
+        body.payment_id,
+        org_id,
+        plan_id,
+        sub.current_period_end.isoformat(),
+    )
+    return SubscriptionReconcileOut(
+        status="ok",
+        plan_id=plan_id,
+        period_end=sub.current_period_end.isoformat(),
+    )
 
 
 class PlanOut(BaseModel):
