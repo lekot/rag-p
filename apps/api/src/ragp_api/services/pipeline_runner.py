@@ -24,6 +24,20 @@ _RAG_RETRY_FALLBACK_TERMS = (
     "definition",
     "requirement",
 )
+_RAG_QUERY_EXPANSIONS = (
+    (
+        ("поручител", "поручен"),
+        (
+            "поручительство",
+            "поручительства",
+            "поручитель",
+            "поручители",
+            "договор поручительства",
+            "обеспечение обязательств",
+            "7.2.1",
+        ),
+    ),
+)
 
 
 def _effective_context_top_k(requested_top_k: Any) -> int:
@@ -55,6 +69,17 @@ def _build_retry_query(query: str, contexts: list[dict[str, Any]]) -> str:
     query_terms = {term.casefold() for term in re.findall(r"\w+", query)}
     retry_terms: list[str] = []
     seen_retry_terms: set[str] = set()
+
+    query_normalized = query.casefold()
+    for triggers, expansions in _RAG_QUERY_EXPANSIONS:
+        if not any(trigger in query_normalized for trigger in triggers):
+            continue
+        for expansion in expansions:
+            normalized = expansion.casefold()
+            if normalized in seen_retry_terms:
+                continue
+            seen_retry_terms.add(normalized)
+            retry_terms.append(expansion)
 
     for context in contexts[:8]:
         text = str(context.get("text", ""))

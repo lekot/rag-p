@@ -1056,6 +1056,19 @@ async def test_ask_default_path_retries_once_when_generator_reports_absent_answe
     assert len(gen_instance.generate.await_args_list[1].kwargs["contexts"]) == 2
 
 
+def test_default_ask_retry_query_expands_guarantor_terms() -> None:
+    from ragp_api.api.v1.routes_datasets import _build_default_ask_retry_query
+
+    retry_query = _build_default_ask_retry_query(
+        "Выпиши всех поручителей и договоры поручения",
+        [{"text": "unrelated context"}],
+    )
+
+    assert "поручительство" in retry_query
+    assert "договор поручительства" in retry_query
+    assert "7.2.1" in retry_query
+
+
 @pytest.mark.asyncio
 async def test_ask_consumes_query_quota_when_enforced(
     client: AsyncClient,

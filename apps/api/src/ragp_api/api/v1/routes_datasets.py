@@ -83,6 +83,20 @@ _DEFAULT_ASK_RETRY_FALLBACK_TERMS = (
     "идентификатор",
     "реквизиты",
 )
+_DEFAULT_ASK_QUERY_EXPANSIONS = (
+    (
+        ("поручител", "поручен"),
+        (
+            "поручительство",
+            "поручительства",
+            "поручитель",
+            "поручители",
+            "договор поручительства",
+            "обеспечение обязательств",
+            "7.2.1",
+        ),
+    ),
+)
 _ALLOWED_CONTENT_TYPES = {
     "text/plain",
     "text/markdown",
@@ -1116,6 +1130,17 @@ def _build_default_ask_retry_query(query: str, contexts: list[dict[str, Any]]) -
     query_terms = {term.casefold() for term in re.findall(r"\w+", query)}
     retry_terms: list[str] = []
     seen_retry_terms: set[str] = set()
+
+    query_normalized = query.casefold()
+    for triggers, expansions in _DEFAULT_ASK_QUERY_EXPANSIONS:
+        if not any(trigger in query_normalized for trigger in triggers):
+            continue
+        for expansion in expansions:
+            normalized = expansion.casefold()
+            if normalized in seen_retry_terms:
+                continue
+            seen_retry_terms.add(normalized)
+            retry_terms.append(expansion)
 
     for context in contexts[:8]:
         text = str(context.get("text", ""))

@@ -220,3 +220,14 @@ async def test_run_pipeline_retries_retrieval_and_generation_on_absent_answer(
         for trace in result["traces"]
         if trace["kind"] == "generator"
     )
+
+
+def test_pipeline_retry_query_expands_guarantor_terms() -> None:
+    retry_query = pipeline_runner._build_retry_query(
+        "Выпиши всех поручителей и договоры поручения",
+        [{"text": "unrelated context"}],
+    )
+
+    assert "поручительство" in retry_query
+    assert "договор поручительства" in retry_query
+    assert "7.2.1" in retry_query
