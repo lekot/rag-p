@@ -4,7 +4,7 @@ RAG-Platform is an open-core, self-hostable Pipeline-as-a-Service for documents.
 
 The system ships as a single Helm chart that works identically in local development (kind + Tilt), staging, and production. Multi-tenancy, fine-grained RBAC, eval-loop, and observability are built in from day one — not added later. See [opportunity.md](opportunity.md) for the full product thesis and competitive landscape analysis.
 
-Plugin interfaces (`Chunker / Embedder / Retriever / Reranker / Generator`) each expose a `params_schema` (JSON Schema), which drives the form-based pipeline editor in the UI automatically. Every experiment is the Cartesian product of valid plugin configurations run against a user dataset; results land in a leaderboard with per-combination scores. See [docs/architecture.md](docs/architecture.md) for a component overview and [docs/adr/](docs/adr/) for architectural decisions.
+Plugin interfaces (`Chunker / Embedder / Retriever / Reranker / Generator`) each expose a `params_schema` (JSON Schema), which drives the form-based pipeline editor in the UI automatically. Every experiment is the Cartesian product of valid plugin configurations run against a user dataset; results land in a leaderboard with per-combination scores. See [docs/architecture.md](docs/architecture.md) for a component overview, [docs/user-workflow.md](docs/user-workflow.md) for the no-code product workflow, and [docs/adr/](docs/adr/) for architectural decisions.
 
 ## Quick start
 
@@ -44,6 +44,7 @@ rag-p/
   docs/
     adr/          # Architectural Decision Records (MADR format)
     architecture.md
+    user-workflow.md
   Makefile        # Dev shortcuts: make dev, make lint, make test
 ```
 

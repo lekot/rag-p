@@ -132,11 +132,136 @@ export default function DocsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="rest" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+      <Tabs defaultValue="workflow" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="workflow">User workflow</TabsTrigger>
           <TabsTrigger value="rest">REST API</TabsTrigger>
           <TabsTrigger value="n8n">n8n integration</TabsTrigger>
         </TabsList>
+
+        {/* === User workflow tab === */}
+        <TabsContent value="workflow" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>From documents to a production pipeline</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm text-muted-foreground">
+              <p>
+                RAG-Platform is built around one practical loop: create a dataset, generate a
+                golden Q&amp;A benchmark, run an experiment, promote the best result to a pipeline,
+                then ask questions through that pipeline and inspect the answers in Runs.
+              </p>
+              <p>
+                You need an active plan before creating datasets, generating golden Q&amp;A, running
+                experiments, or executing pipeline runs. If the product shows
+                <code className="mx-1 bg-muted px-1 py-0.5 rounded text-xs">402 Payment Required</code>,
+                open <a href="/pricing" className="underline text-foreground hover:text-primary">Pricing</a>{" "}
+                or <a href="/account/billing" className="underline text-foreground hover:text-primary">Billing</a>{" "}
+                and activate a plan or quota.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Step-by-step</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm">
+              <ol className="list-decimal list-inside space-y-3 text-muted-foreground">
+                <li>
+                  Open <a href="/datasets" className="underline text-foreground hover:text-primary">Datasets</a>{" "}
+                  and click <strong>Upload / Create</strong>. Enter a dataset name and upload a
+                  source file. Supported files include txt, md, json, csv, yaml, xml, html, pdf,
+                  docx, and similar text formats up to 10 MB.
+                </li>
+                <li>
+                  Open the dataset page and wait until the uploaded document is chunked and
+                  indexed. Use <strong>Upload more</strong> when the dataset needs additional
+                  documents.
+                </li>
+                <li>
+                  In the dataset page, open <strong>Golden Q&amp;A</strong> and click
+                  <strong> Generate Golden Q&amp;A</strong>. Pick a sample size from 5 to 50 chunks.
+                  The app creates one benchmark question and expected answer per sampled chunk.
+                </li>
+                <li>
+                  Open <a href="/experiments" className="underline text-foreground hover:text-primary">Experiments</a>{" "}
+                  and click <strong>New Experiment</strong>. Select the dataset, choose one or more
+                  plugin variants for the required stages, and click <strong>Run experiment</strong>.
+                </li>
+                <li>
+                  Open the experiment result and compare the leaderboard. When a combination is
+                  good enough, click <strong>Promote</strong>, enter a <strong>Pipeline name</strong>,
+                  and confirm with <strong>Create pipeline</strong>.
+                </li>
+                <li>
+                  Open the promoted pipeline in{" "}
+                  <a href="/pipelines" className="underline text-foreground hover:text-primary">Pipelines</a>.
+                  Use <strong>Run a query</strong> to ask a question through the selected production
+                  configuration. You can also ask from the dataset page by selecting the pipeline in
+                  the Ask block, or call the REST API with <code>pipeline_id</code>.
+                </li>
+                <li>
+                  Open <a href="/runs" className="underline text-foreground hover:text-primary">Runs</a>{" "}
+                  to inspect created runs. Each run keeps the query, status, answer, retrieved and
+                  reranked chunks, token usage, duration, and RAGAS metrics when available.
+                </li>
+              </ol>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Acceptance checklist</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              <ul className="list-disc list-inside space-y-2">
+                <li>The dataset contains at least one uploaded document and non-zero chunks.</li>
+                <li>Golden Q&amp;A shows generated items linked to source chunks.</li>
+                <li>The experiment reaches a completed state and the leaderboard has scored rows.</li>
+                <li>The best experiment combination is promoted to a named pipeline.</li>
+                <li>A pipeline query creates a completed run.</li>
+                <li>The run detail page shows the final answer and the supporting chunks used by retrieval.</li>
+              </ul>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Troubleshooting</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border rounded">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="text-left px-3 py-2">Symptom</th>
+                      <th className="text-left px-3 py-2">What to check</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t">
+                      <td className="px-3 py-2">Dataset creation, upload, golden generation, or run returns 402</td>
+                      <td className="px-3 py-2">Open Billing and activate a plan or add quota.</td>
+                    </tr>
+                    <tr className="border-t">
+                      <td className="px-3 py-2">Golden Q&amp;A button is disabled or creates no items</td>
+                      <td className="px-3 py-2">Upload a document first and wait until chunking/indexing finishes.</td>
+                    </tr>
+                    <tr className="border-t">
+                      <td className="px-3 py-2">Experiment has an empty or failed leaderboard</td>
+                      <td className="px-3 py-2">Check that the dataset has golden Q&amp;A and that selected providers are available.</td>
+                    </tr>
+                    <tr className="border-t">
+                      <td className="px-3 py-2">Pipeline run fails or does not answer</td>
+                      <td className="px-3 py-2">Open the run detail page and inspect status, chunks, metrics, and error text.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* === REST API tab === */}
         <TabsContent value="rest" className="space-y-8">
